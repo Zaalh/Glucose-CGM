@@ -23,16 +23,20 @@
   }
 
   function trendClass(rateMgdlPerMin) {
+    if (rateMgdlPerMin <= -3) return 'very-fast-down';
     if (rateMgdlPerMin <= -2) return 'fast-down';
     if (rateMgdlPerMin < -1) return 'down';
+    if (rateMgdlPerMin >= 3) return 'very-fast-up';
     if (rateMgdlPerMin >= 2) return 'fast-up';
     if (rateMgdlPerMin > 1) return 'up';
     return 'flat';
   }
 
   function trendLabel(rateMgdlPerMin) {
+    if (rateMgdlPerMin <= -3) return 'daalt zeer snel';
     if (rateMgdlPerMin <= -2) return 'daalt snel';
     if (rateMgdlPerMin < -1) return 'daalt';
+    if (rateMgdlPerMin >= 3) return 'stijgt zeer snel';
     if (rateMgdlPerMin >= 2) return 'stijgt snel';
     if (rateMgdlPerMin > 1) return 'stijgt';
     return 'stabiel';
@@ -113,11 +117,13 @@
       '#cgm-rate-overlay .rate-main{display:block;font-family:monospace;font-size:14px;font-weight:800;line-height:1.12;letter-spacing:0;margin-top:2px}',
       '#cgm-rate-overlay .rate-card.primary .rate-main{font-size:14px}',
       '#cgm-rate-overlay .rate-sub{display:block;font-size:8px;line-height:1.1;opacity:.86;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-      '#cgm-rate-overlay .fast-down{color:#ff3b30;border-color:#ff3b30;background:rgba(90,0,0,.72)}',
-      '#cgm-rate-overlay .down{color:#ff766f;border-color:#d9413a;background:rgba(65,0,0,.55)}',
+      '#cgm-rate-overlay .very-fast-down{color:#e0f2fe;border-color:#0ea5e9;background:rgba(7,89,133,.96)}',
+      '#cgm-rate-overlay .fast-down{color:#7dd3fc;border-color:#38bdf8;background:rgba(8,47,73,.86)}',
+      '#cgm-rate-overlay .down{color:#bae6fd;border-color:#0284c7;background:rgba(12,74,110,.68)}',
       '#cgm-rate-overlay .flat{color:#d9d9d9;border-color:rgba(255,255,255,.25)}',
-      '#cgm-rate-overlay .up{color:#67d96f;border-color:#3fb950;background:rgba(0,55,20,.45)}',
-      '#cgm-rate-overlay .fast-up{color:#38ff45;border-color:#38ff45;background:rgba(0,75,25,.6)}',
+      '#cgm-rate-overlay .up{color:#fed7aa;border-color:#fb923c;background:rgba(124,45,18,.66)}',
+      '#cgm-rate-overlay .fast-up{color:#fdba74;border-color:#f97316;background:rgba(154,52,18,.86)}',
+      '#cgm-rate-overlay .very-fast-up{color:#ffedd5;border-color:#ea580c;background:rgba(194,65,12,.96)}',
       '#cgm-rate-overlay .missing{color:#8a8a8a;border-color:rgba(255,255,255,.14);background:rgba(0,0,0,.28)}',
       '@media(max-width:700px){#cgm-rate-overlay{grid-template-columns:repeat(4,minmax(66px,1fr));gap:3px;width:98vw}#cgm-rate-overlay .rate-card{padding:4px 5px 3px;min-height:39px}#cgm-rate-overlay .rate-main,#cgm-rate-overlay .rate-card.primary .rate-main{font-size:13px}#cgm-rate-overlay .rate-sub{font-size:8px}}'
     ].join('');
