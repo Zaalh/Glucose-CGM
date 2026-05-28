@@ -342,7 +342,7 @@ export default function Nightscout() {
         ) : readings.length === 0 ? (
           <div className={styles.chartEmpty}>Geen metingen in dit tijdvenster</div>
         ) : (
-          <NightscoutChart readings={readings} unit={unit} />
+          <NightscoutChart readings={readings} unit={unit} predictedIn20={predictedIn20} />
         )}
       </div>
 
