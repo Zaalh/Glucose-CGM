@@ -6,14 +6,41 @@ import GlucoseChart from '../components/GlucoseChart'
 import CurrentReading from '../components/CurrentReading'
 import styles from './Dashboard.module.css'
 
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+
 export default function Dashboard() {
   const [readings, setReadings] = useState<GlucoseReading[]>([])
   const [loading, setLoading] = useState(true)
   const [range, setRange] = useState<3 | 6 | 12 | 24>(6)
+  const [syncing, setSyncing] = useState(false)
+  const [syncMsg, setSyncMsg] = useState<string | null>(null)
 
   useEffect(() => {
     fetchReadings()
   }, [range])
+
+  async function syncLibreView() {
+    setSyncing(true)
+    setSyncMsg(null)
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/libreview-sync`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+      })
+      const json = await res.json()
+      setSyncMsg(json.message ?? (json.success ? 'Gesynchroniseerd.' : 'Synchronisatie mislukt.'))
+      if (json.success) await fetchReadings()
+    } catch {
+      setSyncMsg('Verbindingsfout bij synchronisatie.')
+    } finally {
+      setSyncing(false)
+      setTimeout(() => setSyncMsg(null), 5000)
+    }
+  }
 
   async function fetchReadings() {
     setLoading(true)
@@ -57,7 +84,18 @@ export default function Dashboard() {
       <div className={styles.chartCard}>
         <div className={styles.chartHeader}>
           <span className={styles.chartTitle}>Glucosehistorie</span>
-          <div className={styles.rangeButtons}>
+          <div className={styles.chartActions}>
+            {syncMsg && <span className={styles.syncMsg}>{syncMsg}</span>}
+            <button
+              className={styles.syncBtn}
+              onClick={syncLibreView}
+              disabled={syncing}
+              title="Synchroniseer met FreeStyle Libre 3"
+            >
+              <span className={syncing ? styles.spinning : ''}>⟳</span>
+              {syncing ? 'Syncing...' : 'Sync Libre'}
+            </button>
+            <div className={styles.rangeButtons}>
             {([3, 6, 12, 24] as const).map(r => (
               <button
                 key={r}
@@ -67,6 +105,7 @@ export default function Dashboard() {
                 {r}u
               </button>
             ))}
+            </div>
           </div>
         </div>
         {loading ? (
