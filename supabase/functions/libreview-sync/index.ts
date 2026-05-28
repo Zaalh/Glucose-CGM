@@ -11,18 +11,20 @@ const corsHeaders = {
 
 const LIBRE_API = "https://api-eu.libreview.io";
 
-async function getCredentials(supabase: ReturnType<typeof createClient>): Promise<{ email: string; password: string }> {
+async function getCredentials(supabase: ReturnType<typeof createClient>): Promise<{ email: string; password: string; tzOffsetMinutes: number }> {
   const { data } = await supabase
     .from("app_settings")
     .select("key, value")
-    .in("key", ["libreview_email", "libreview_password"]);
+    .in("key", ["libreview_email", "libreview_password", "libreview_tz_offset"]);
 
   const map = Object.fromEntries((data ?? []).map((r: { key: string; value: string }) => [r.key, r.value]));
   const email = map.libreview_email || Deno.env.get("LIBREVIEW_EMAIL") || "";
   const password = map.libreview_password || Deno.env.get("LIBREVIEW_PASSWORD") || "";
+  // Offset in minuten tov UTC, bijv. 120 voor UTC+2 (Amsterdam zomertijd)
+  const tzOffsetMinutes = map.libreview_tz_offset != null ? parseInt(map.libreview_tz_offset) : 120;
 
   if (!email || !password) throw new Error("Geen LibreView credentials. Ga naar Instellingen om ze in te voeren.");
-  return { email, password };
+  return { email, password, tzOffsetMinutes };
 }
 
 // Headers voor de LLU API (/llu/...)
@@ -47,39 +49,53 @@ const LSL_BASE_HEADERS = {
 
 type RawReading = { Timestamp: string; Value: number; TrendArrow: number };
 
-function parseLibreTimestamp(ts: string): string {
+function parseLibreTimestamp(ts: string, tzOffsetMinutes: number): string {
   if (!ts) throw new Error(`Lege timestamp`);
 
-  // Unix epoch getal (als string of number)
+  // Unix epoch getal — altijd al UTC
   const asNum = Number(ts);
   if (!isNaN(asNum) && asNum > 1_000_000_000) {
     return new Date(asNum * (asNum < 1e12 ? 1000 : 1)).toISOString();
   }
 
-  // ISO-formaat: "2025-01-12T14:35:00" of "2025-01-12 14:35:00"
+  // Heeft al een timezone aanduiding (Z / +HH:MM) — gebruik direct
+  if (/[Zz]$/.test(ts) || /[+-]\d{2}:\d{2}$/.test(ts)) {
+    const d = new Date(ts.replace(" ", "T"));
+    if (!isNaN(d.getTime())) return d.toISOString();
+  }
+
+  // Lokale tijd zonder timezone — parseer als lokale string en trek offset af
+  let localMs: number | null = null;
+
+  // ISO/spatie: "2025-01-12 14:35:00" of "2025-01-12T14:35:00"
   const isoNorm = ts.replace(" ", "T");
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(isoNorm)) {
     const d = new Date(isoNorm);
-    if (!isNaN(d.getTime())) return d.toISOString();
+    if (!isNaN(d.getTime())) localMs = d.getTime();
   }
 
-  // US-formaat: "1/12/2025 14:35:00" → M/D/YYYY H:MM:SS
-  const usMatch = ts.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})/);
-  if (usMatch) {
-    const [, month, day, year, hour, min, sec] = usMatch;
-    const d = new Date(`${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T${hour.padStart(2, "0")}:${min}:${sec}`);
-    if (!isNaN(d.getTime())) return d.toISOString();
+  // US: "1/12/2025 14:35:00"
+  if (localMs === null) {
+    const m = ts.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})/);
+    if (m) {
+      const d = new Date(`${m[3]}-${m[1].padStart(2,"0")}-${m[2].padStart(2,"0")}T${m[4].padStart(2,"0")}:${m[5]}:${m[6]}`);
+      if (!isNaN(d.getTime())) localMs = d.getTime();
+    }
   }
 
-  // EU-formaat: "12-01-2025 14:35:00" → D-M-YYYY
-  const euMatch = ts.match(/^(\d{1,2})-(\d{1,2})-(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})/);
-  if (euMatch) {
-    const [, day, month, year, hour, min, sec] = euMatch;
-    const d = new Date(`${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T${hour.padStart(2, "0")}:${min}:${sec}`);
-    if (!isNaN(d.getTime())) return d.toISOString();
+  // EU: "12-01-2025 14:35:00"
+  if (localMs === null) {
+    const m = ts.match(/^(\d{1,2})-(\d{1,2})-(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})/);
+    if (m) {
+      const d = new Date(`${m[3]}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}T${m[4].padStart(2,"0")}:${m[5]}:${m[6]}`);
+      if (!isNaN(d.getTime())) localMs = d.getTime();
+    }
   }
 
-  throw new Error(`Onbekend timestamp formaat: ${ts}`);
+  if (localMs === null) throw new Error(`Onbekend timestamp formaat: ${ts}`);
+
+  // Trek de lokale UTC-offset af zodat we echte UTC krijgen
+  return new Date(localMs - tzOffsetMinutes * 60_000).toISOString();
 }
 
 function mapTrend(trend: number): string {
@@ -275,7 +291,7 @@ Deno.serve(async (req: Request) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    const { email, password } = await getCredentials(supabase);
+    const { email, password, tzOffsetMinutes } = await getCredentials(supabase);
     const { lluToken, lslToken, baseUrl, accountId, userId } = await libreLogin(email, password);
     const { readings: graphData, debugInfo } = await collectReadings(
       lluToken, lslToken, accountId, baseUrl, userId
@@ -284,7 +300,7 @@ Deno.serve(async (req: Request) => {
     const rows = graphData
       .filter(pt => pt.Timestamp && pt.Value)
       .map((pt) => ({
-        timestamp: parseLibreTimestamp(pt.Timestamp),
+        timestamp: parseLibreTimestamp(pt.Timestamp, tzOffsetMinutes),
         value_mmol: parseFloat(pt.Value.toFixed(2)),
         raw_value: pt.Value,
         unit: "mg/dL",
