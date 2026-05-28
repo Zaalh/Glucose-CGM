@@ -9,9 +9,21 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-const LIBRE_EMAIL = Deno.env.get("LIBREVIEW_EMAIL")!;
-const LIBRE_PASSWORD = Deno.env.get("LIBREVIEW_PASSWORD")!;
 const LIBRE_API = "https://api-eu.libreview.io";
+
+async function getCredentials(supabase: ReturnType<typeof createClient>): Promise<{ email: string; password: string }> {
+  const { data } = await supabase
+    .from("app_settings")
+    .select("key, value")
+    .in("key", ["libreview_email", "libreview_password"]);
+
+  const map = Object.fromEntries((data ?? []).map((r: { key: string; value: string }) => [r.key, r.value]));
+  const email = map.libreview_email || Deno.env.get("LIBREVIEW_EMAIL") || "";
+  const password = map.libreview_password || Deno.env.get("LIBREVIEW_PASSWORD") || "";
+
+  if (!email || !password) throw new Error("Geen LibreView credentials. Ga naar Instellingen om ze in te voeren.");
+  return { email, password };
+}
 
 // Headers voor de LLU API (/llu/...)
 const LLU_BASE_HEADERS = {
@@ -35,6 +47,41 @@ const LSL_BASE_HEADERS = {
 
 type RawReading = { Timestamp: string; Value: number; TrendArrow: number };
 
+function parseLibreTimestamp(ts: string): string {
+  if (!ts) throw new Error(`Lege timestamp`);
+
+  // Unix epoch getal (als string of number)
+  const asNum = Number(ts);
+  if (!isNaN(asNum) && asNum > 1_000_000_000) {
+    return new Date(asNum * (asNum < 1e12 ? 1000 : 1)).toISOString();
+  }
+
+  // ISO-formaat: "2025-01-12T14:35:00" of "2025-01-12 14:35:00"
+  const isoNorm = ts.replace(" ", "T");
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(isoNorm)) {
+    const d = new Date(isoNorm);
+    if (!isNaN(d.getTime())) return d.toISOString();
+  }
+
+  // US-formaat: "1/12/2025 14:35:00" → M/D/YYYY H:MM:SS
+  const usMatch = ts.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})/);
+  if (usMatch) {
+    const [, month, day, year, hour, min, sec] = usMatch;
+    const d = new Date(`${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T${hour.padStart(2, "0")}:${min}:${sec}`);
+    if (!isNaN(d.getTime())) return d.toISOString();
+  }
+
+  // EU-formaat: "12-01-2025 14:35:00" → D-M-YYYY
+  const euMatch = ts.match(/^(\d{1,2})-(\d{1,2})-(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})/);
+  if (euMatch) {
+    const [, day, month, year, hour, min, sec] = euMatch;
+    const d = new Date(`${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T${hour.padStart(2, "0")}:${min}:${sec}`);
+    if (!isNaN(d.getTime())) return d.toISOString();
+  }
+
+  throw new Error(`Onbekend timestamp formaat: ${ts}`);
+}
+
 function mapTrend(trend: number): string {
   const map: Record<number, string> = {
     1: "falling_quickly", 2: "falling", 3: "falling_slowly",
@@ -57,12 +104,12 @@ interface LoginResult {
   userId: string;
 }
 
-async function libreLogin(): Promise<LoginResult> {
+async function libreLogin(email: string, password: string): Promise<LoginResult> {
   const doLluLogin = async (baseUrl: string) => {
     const res = await fetch(`${baseUrl}/llu/auth/login`, {
       method: "POST",
       headers: LLU_BASE_HEADERS,
-      body: JSON.stringify({ email: LIBRE_EMAIL, password: LIBRE_PASSWORD }),
+      body: JSON.stringify({ email, password }),
     });
     const text = await res.text();
     let json: Record<string, unknown>;
@@ -90,7 +137,7 @@ async function libreLogin(): Promise<LoginResult> {
   const lslRes = await fetch(`${baseUrl}/lsl/api/nisperson/getauthenticateduser`, {
     method: "POST",
     headers: { ...LSL_BASE_HEADERS, "Authorization": `Bearer ${lluToken}` },
-    body: JSON.stringify({ email: LIBRE_EMAIL, password: LIBRE_PASSWORD }),
+    body: JSON.stringify({ email, password }),
   });
   const lslText = await lslRes.text();
   let lslJson: Record<string, unknown> = {};
@@ -228,7 +275,8 @@ Deno.serve(async (req: Request) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    const { lluToken, lslToken, baseUrl, accountId, userId } = await libreLogin();
+    const { email, password } = await getCredentials(supabase);
+    const { lluToken, lslToken, baseUrl, accountId, userId } = await libreLogin(email, password);
     const { readings: graphData, debugInfo } = await collectReadings(
       lluToken, lslToken, accountId, baseUrl, userId
     );
@@ -236,7 +284,7 @@ Deno.serve(async (req: Request) => {
     const rows = graphData
       .filter(pt => pt.Timestamp && pt.Value)
       .map((pt) => ({
-        timestamp: new Date(pt.Timestamp.replace(" ", "T")).toISOString(),
+        timestamp: parseLibreTimestamp(pt.Timestamp),
         value_mmol: parseFloat((pt.Value / 18.018).toFixed(2)),
         raw_value: pt.Value,
         unit: "mg/dL",
