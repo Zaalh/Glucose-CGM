@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import type { GlucoseReading } from '../types'
 import { getGlucoseStatus, trendArrow } from '../types'
@@ -8,20 +8,41 @@ import styles from './Nightscout.module.css'
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string
 
-const RANGE_OPTIONS = [1, 2, 3, 6, 12, 24] as const
+const RANGE_OPTIONS = [1, 2, 3, 6, 12, 24, 48] as const
 type Range = typeof RANGE_OPTIONS[number]
+
+type Unit = 'mmol' | 'mgdl'
+
+function mmolToMgdl(v: number) { return Math.round(v * 18.0182) }
+function fmtVal(v: number, unit: Unit) {
+  return unit === 'mgdl' ? `${mmolToMgdl(v)}` : v.toFixed(1)
+}
+
+// Estimated HbA1c from average glucose (mmol/L): IFCC formula
+function estimateHba1c(avgMmol: number) {
+  return ((avgMmol + 2.59) / 1.59).toFixed(1)
+}
+
+function stdDev(readings: GlucoseReading[]) {
+  if (readings.length < 2) return null
+  const mean = readings.reduce((s, r) => s + r.value_mmol, 0) / readings.length
+  const variance = readings.reduce((s, r) => s + (r.value_mmol - mean) ** 2, 0) / readings.length
+  return Math.sqrt(variance)
+}
 
 export default function Nightscout() {
   const [readings, setReadings] = useState<GlucoseReading[]>([])
   const [loading, setLoading] = useState(true)
   const [range, setRange] = useState<Range>(3)
+  const [unit, setUnit] = useState<Unit>('mmol')
   const [syncing, setSyncing] = useState(false)
   const [syncMsg, setSyncMsg] = useState<{ text: string; ok: boolean } | null>(null)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const [countdown, setCountdown] = useState(60)
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const fetchReadings = useCallback(async () => {
     setLoading(true)
-    // Gebruik de nieuwste DB-timestamp als ankerpunt zodat tijdzone-afwijkingen geen rol spelen
     const { data: latestRow } = await supabase
       .from('glucose_readings')
       .select('timestamp')
@@ -43,12 +64,21 @@ export default function Nightscout() {
     setReadings(readings)
     setLastUpdated(new Date())
     setLoading(false)
+    setCountdown(60)
   }, [range])
 
   useEffect(() => {
     fetchReadings()
-    const interval = setInterval(fetchReadings, 60_000)
-    return () => clearInterval(interval)
+    const dataInterval = setInterval(fetchReadings, 60_000)
+
+    countdownRef.current = setInterval(() => {
+      setCountdown(c => (c <= 1 ? 60 : c - 1))
+    }, 1000)
+
+    return () => {
+      clearInterval(dataInterval)
+      if (countdownRef.current) clearInterval(countdownRef.current)
+    }
   }, [fetchReadings])
 
   async function syncLibreView() {
@@ -74,16 +104,32 @@ export default function Nightscout() {
   }
 
   const latest = readings.at(-1) ?? null
+  const prev = readings.length >= 2 ? readings[readings.length - 2] : null
   const status = latest ? getGlucoseStatus(latest.value_mmol) : null
   const minutesAgo = latest
     ? Math.round((Date.now() - new Date(latest.timestamp).getTime()) / 60000)
     : null
 
-  const inRange = readings.filter(r => r.value_mmol >= 3.9 && r.value_mmol <= 10.0).length
-  const tir = readings.length > 0 ? Math.round((inRange / readings.length) * 100) : null
-  const avgVal = readings.length > 0
-    ? (readings.reduce((s, r) => s + r.value_mmol, 0) / readings.length).toFixed(1)
+  const delta = latest && prev
+    ? latest.value_mmol - prev.value_mmol
     : null
+
+  const avgMmol = readings.length > 0
+    ? readings.reduce((s, r) => s + r.value_mmol, 0) / readings.length
+    : null
+
+  const sd = stdDev(readings)
+  const cv = avgMmol && sd ? Math.round((sd / avgMmol) * 100) : null
+
+  // TIR breakdown (mmol)
+  const veryLow = readings.filter(r => r.value_mmol < 3.0).length
+  const low = readings.filter(r => r.value_mmol >= 3.0 && r.value_mmol < 3.9).length
+  const inRange = readings.filter(r => r.value_mmol >= 3.9 && r.value_mmol <= 10.0).length
+  const high = readings.filter(r => r.value_mmol > 10.0 && r.value_mmol <= 13.9).length
+  const veryHigh = readings.filter(r => r.value_mmol > 13.9).length
+  const total = readings.length
+
+  const tirPct = (n: number) => total > 0 ? Math.round((n / total) * 100) : 0
 
   return (
     <div className={styles.page}>
@@ -101,6 +147,12 @@ export default function Nightscout() {
           ))}
         </div>
         <div className={styles.topRight}>
+          <button
+            className={`${styles.unitBtn} ${unit === 'mgdl' ? styles.unitActive : ''}`}
+            onClick={() => setUnit(u => u === 'mmol' ? 'mgdl' : 'mmol')}
+          >
+            {unit === 'mmol' ? 'mmol/L' : 'mg/dL'}
+          </button>
           {syncMsg && (
             <span className={`${styles.syncMsg} ${syncMsg.ok ? styles.syncOk : styles.syncErr}`}>
               {syncMsg.text}
@@ -120,18 +172,23 @@ export default function Nightscout() {
         ) : latest ? (
           <>
             <div className={styles.heroValue}>
-              {latest.value_mmol.toFixed(1)}
-              <span className={styles.heroUnit}>mmol/L</span>
+              {fmtVal(latest.value_mmol, unit)}
+              <span className={styles.heroUnit}>{unit === 'mgdl' ? 'mg/dL' : 'mmol/L'}</span>
             </div>
-            <div className={styles.heroTrend}>{trendArrow(latest.trend)}</div>
+            <div className={styles.heroRow}>
+              <span className={styles.heroTrend}>{trendArrow(latest.trend)}</span>
+              {delta !== null && (
+                <span className={styles.heroDelta}>
+                  {delta >= 0 ? '+' : ''}{unit === 'mgdl' ? Math.round(delta * 18.0182) : delta.toFixed(1)}
+                </span>
+              )}
+            </div>
             <div className={styles.heroMeta}>
-              {minutesAgo !== null && minutesAgo <= 1 ? 'Nu' : `${minutesAgo} min geleden`}
-              {lastUpdated && (
-                <span className={styles.heroDot}>·</span>
-              )}
-              {lastUpdated && (
-                <span>bijgewerkt {formatClock(lastUpdated)}</span>
-              )}
+              <span>{minutesAgo !== null && minutesAgo <= 1 ? 'Nu' : `${minutesAgo} min geleden`}</span>
+              {lastUpdated && <span className={styles.heroDot}>·</span>}
+              {lastUpdated && <span>bijgewerkt {formatClock(lastUpdated)}</span>}
+              <span className={styles.heroDot}>·</span>
+              <span className={styles.heroCountdown}>ververs in {countdown}s</span>
             </div>
           </>
         ) : (
@@ -146,34 +203,66 @@ export default function Nightscout() {
         ) : readings.length === 0 ? (
           <div className={styles.chartEmpty}>Geen metingen in dit tijdvenster</div>
         ) : (
-          <NightscoutChart readings={readings} />
+          <NightscoutChart readings={readings} unit={unit} />
         )}
       </div>
 
+      {/* TIR bar */}
+      {total > 0 && (
+        <div className={styles.tirSection}>
+          <div className={styles.tirLabel}>Tijd in bereik</div>
+          <div className={styles.tirBar}>
+            {veryLow > 0 && <div className={styles.tirVeryLow} style={{ width: `${tirPct(veryLow)}%` }} title={`Zeer laag: ${tirPct(veryLow)}%`} />}
+            {low > 0 && <div className={styles.tirLow} style={{ width: `${tirPct(low)}%` }} title={`Laag: ${tirPct(low)}%`} />}
+            <div className={styles.tirNormal} style={{ width: `${tirPct(inRange)}%` }} title={`In bereik: ${tirPct(inRange)}%`} />
+            {high > 0 && <div className={styles.tirHigh} style={{ width: `${tirPct(high)}%` }} title={`Hoog: ${tirPct(high)}%`} />}
+            {veryHigh > 0 && <div className={styles.tirVeryHigh} style={{ width: `${tirPct(veryHigh)}%` }} title={`Zeer hoog: ${tirPct(veryHigh)}%`} />}
+          </div>
+          <div className={styles.tirLegend}>
+            {veryLow > 0 && <span className={styles.tirLegVeryLow}>Zeer laag {tirPct(veryLow)}%</span>}
+            {low > 0 && <span className={styles.tirLegLow}>Laag {tirPct(low)}%</span>}
+            <span className={styles.tirLegNormal}>In bereik {tirPct(inRange)}%</span>
+            {high > 0 && <span className={styles.tirLegHigh}>Hoog {tirPct(high)}%</span>}
+            {veryHigh > 0 && <span className={styles.tirLegVeryHigh}>Zeer hoog {tirPct(veryHigh)}%</span>}
+          </div>
+        </div>
+      )}
+
       {/* Stats row */}
       <div className={styles.statsRow}>
-        <StatTile label="Gem." value={avgVal ?? '–'} unit="mmol/L" />
+        <StatTile
+          label="Gemiddelde"
+          value={avgMmol !== null ? fmtVal(avgMmol, unit) : '–'}
+          unit={unit === 'mgdl' ? 'mg/dL' : 'mmol/L'}
+        />
         <StatTile
           label="Min"
-          value={readings.length ? Math.min(...readings.map(r => r.value_mmol)).toFixed(1) : '–'}
-          unit="mmol/L"
+          value={total ? fmtVal(Math.min(...readings.map(r => r.value_mmol)), unit) : '–'}
+          unit={unit === 'mgdl' ? 'mg/dL' : 'mmol/L'}
           color="low"
         />
         <StatTile
           label="Max"
-          value={readings.length ? Math.max(...readings.map(r => r.value_mmol)).toFixed(1) : '–'}
-          unit="mmol/L"
+          value={total ? fmtVal(Math.max(...readings.map(r => r.value_mmol)), unit) : '–'}
+          unit={unit === 'mgdl' ? 'mg/dL' : 'mmol/L'}
           color="high"
         />
-        <StatTile label="Tijd in range" value={tir !== null ? `${tir}%` : '–'} />
-        <StatTile label="Metingen" value={readings.length > 0 ? String(readings.length) : '–'} />
+        <StatTile
+          label="Std. afwijking"
+          value={sd !== null ? (unit === 'mgdl' ? Math.round(sd * 18.0182).toString() : sd.toFixed(1)) : '–'}
+          unit={unit === 'mgdl' ? 'mg/dL' : 'mmol/L'}
+        />
+        <StatTile label="CV" value={cv !== null ? `${cv}%` : '–'} hint={cv !== null ? (cv <= 36 ? 'stabiel' : 'variabel') : undefined} />
+        <StatTile label="Gesch. HbA1c" value={avgMmol !== null ? `${estimateHba1c(avgMmol)}%` : '–'} />
+        <StatTile label="In bereik" value={total ? `${tirPct(inRange)}%` : '–'} />
+        <StatTile label="Metingen" value={total > 0 ? String(total) : '–'} />
       </div>
     </div>
   )
 }
 
-function StatTile({ label, value, unit, color }: {
-  label: string; value: string; unit?: string; color?: 'low' | 'high'
+function StatTile({ label, value, unit, color, hint }: {
+  label: string; value: string; unit?: string; color?: 'low' | 'high'; hint?: string
 }) {
   return (
     <div className={styles.statTile}>
@@ -182,6 +271,7 @@ function StatTile({ label, value, unit, color }: {
         {value}
         {unit && <span className={styles.statUnit}> {unit}</span>}
       </span>
+      {hint && <span className={styles.statHint}>{hint}</span>}
     </div>
   )
 }
