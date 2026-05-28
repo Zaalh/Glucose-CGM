@@ -105,21 +105,21 @@
     var style = document.createElement('style');
     style.id = 'cgm-rate-overlay-style';
     style.textContent = [
-      '#cgm-rate-overlay{position:absolute;z-index:50;top:174px;left:50%;transform:translateX(-50%);display:grid;grid-template-columns:repeat(8,minmax(64px,1fr));gap:5px;width:min(98vw,1040px);font-family:Arial,Helvetica,sans-serif;pointer-events:none}',
+      '#cgm-rate-overlay{position:absolute;z-index:50;top:174px;left:50%;transform:translateX(-50%);display:grid;grid-template-columns:repeat(8,minmax(64px,1fr));gap:4px;width:min(98vw,1040px);font-family:Arial,Helvetica,sans-serif;pointer-events:none;align-items:end}',
       '.primary,.bgStatus.current{overflow:visible!important}',
-      '#cgm-rate-overlay .rate-card{border:1px solid rgba(255,255,255,.22);border-radius:5px;background:rgba(0,0,0,.5);color:#ddd;padding:4px 5px;text-align:left;box-shadow:0 1px 2px rgba(0,0,0,.25);min-width:0}',
-      '#cgm-rate-overlay .rate-card.primary{border-width:2px}',
-      '#cgm-rate-overlay .rate-window{display:block;font-size:9px;line-height:1;text-transform:uppercase;opacity:.75;letter-spacing:0}',
-      '#cgm-rate-overlay .rate-main{display:block;font-family:monospace;font-size:14px;font-weight:800;line-height:1.15;letter-spacing:0}',
-      '#cgm-rate-overlay .rate-card.primary .rate-main{font-size:16px}',
-      '#cgm-rate-overlay .rate-sub{display:block;font-size:9px;line-height:1.1;opacity:.86;white-space:nowrap}',
+      '#cgm-rate-overlay .rate-card{border:1px solid rgba(255,255,255,.22);border-bottom-width:2px;border-radius:6px 6px 0 0;background:rgba(9,9,9,.82);color:#ddd;padding:5px 6px 4px;text-align:left;box-shadow:0 -1px 4px rgba(0,0,0,.22);min-width:0;min-height:43px;box-sizing:border-box}',
+      '#cgm-rate-overlay .rate-card.primary{border-width:1px;border-bottom-width:2px}',
+      '#cgm-rate-overlay .rate-window{display:block;font-size:9px;line-height:1;text-transform:uppercase;opacity:.78;letter-spacing:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '#cgm-rate-overlay .rate-main{display:block;font-family:monospace;font-size:14px;font-weight:800;line-height:1.12;letter-spacing:0;margin-top:2px}',
+      '#cgm-rate-overlay .rate-card.primary .rate-main{font-size:14px}',
+      '#cgm-rate-overlay .rate-sub{display:block;font-size:8px;line-height:1.1;opacity:.86;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
       '#cgm-rate-overlay .fast-down{color:#ff3b30;border-color:#ff3b30;background:rgba(90,0,0,.72)}',
       '#cgm-rate-overlay .down{color:#ff766f;border-color:#d9413a;background:rgba(65,0,0,.55)}',
       '#cgm-rate-overlay .flat{color:#d9d9d9;border-color:rgba(255,255,255,.25)}',
       '#cgm-rate-overlay .up{color:#67d96f;border-color:#3fb950;background:rgba(0,55,20,.45)}',
       '#cgm-rate-overlay .fast-up{color:#38ff45;border-color:#38ff45;background:rgba(0,75,25,.6)}',
       '#cgm-rate-overlay .missing{color:#8a8a8a;border-color:rgba(255,255,255,.14);background:rgba(0,0,0,.28)}',
-      '@media(max-width:700px){#cgm-rate-overlay{top:158px;grid-template-columns:repeat(4,minmax(66px,1fr));gap:4px;width:98vw}#cgm-rate-overlay .rate-card{padding:4px 5px}#cgm-rate-overlay .rate-main,#cgm-rate-overlay .rate-card.primary .rate-main{font-size:13px}#cgm-rate-overlay .rate-sub{font-size:8px}}'
+      '@media(max-width:700px){#cgm-rate-overlay{grid-template-columns:repeat(4,minmax(66px,1fr));gap:3px;width:98vw}#cgm-rate-overlay .rate-card{padding:4px 5px 3px;min-height:39px}#cgm-rate-overlay .rate-main,#cgm-rate-overlay .rate-card.primary .rate-main{font-size:13px}#cgm-rate-overlay .rate-sub{font-size:8px}}'
     ].join('');
     document.head.appendChild(style);
   }
@@ -138,10 +138,20 @@
     return container;
   }
 
+  function positionContainer() {
+    var container = ensureContainer();
+    var chart = document.querySelector('#chartContainer');
+    if (!container || !chart) return;
+
+    var chartTop = chart.getBoundingClientRect().top + window.scrollY;
+    container.style.top = Math.max(0, Math.round(chartTop)) + 'px';
+  }
+
   function render(rows) {
     ensureStyles();
     var container = ensureContainer();
     if (!container) return;
+    positionContainer();
 
     if (!rows.length) {
       container.innerHTML = '<div class="rate-card flat primary"><span class="rate-window">snelheid</span><span class="rate-main">geen data</span><span class="rate-sub">wacht op meerdere metingen</span></div>';
@@ -167,6 +177,7 @@
         '</div>'
       ].join('');
     }).join('');
+    window.requestAnimationFrame(positionContainer);
   }
 
   function renderCurrentGlucose(entry) {
@@ -209,6 +220,9 @@
     observeCurrentGlucose();
     refresh();
     window.setInterval(refresh, POLL_MS);
+    window.addEventListener('resize', positionContainer);
+    window.setTimeout(positionContainer, 1000);
+    window.setTimeout(positionContainer, 3000);
   }
 
   if (document.readyState === 'loading') {
