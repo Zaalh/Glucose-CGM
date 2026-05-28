@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { supabase } from '../lib/supabase'
 import type { GlucoseReading } from '../types'
 import { getGlucoseStatus, trendArrow } from '../types'
 import NightscoutChart from '../components/NightscoutChart'
+import { fetchNightscoutReadings } from '../lib/nightscout'
+import { triggerLibreViewSync } from '../lib/libreviewSync'
 import {
   loadThresholds,
   checkAlarms,
@@ -16,9 +17,6 @@ import {
 } from '../lib/alarms'
 import { predictGlucose, computeAndSavePersonalRates, getPredictionConfidence } from '../lib/prediction'
 import styles from './Nightscout.module.css'
-
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string
 
 const RANGE_OPTIONS = [1, 2, 3, 6, 12, 24, 48] as const
 type Range = typeof RANGE_OPTIONS[number]
@@ -60,24 +58,18 @@ export default function Nightscout() {
 
   const fetchReadings = useCallback(async () => {
     setLoading(true)
-    const { data: latestRow } = await supabase
-      .from('glucose_readings')
-      .select('timestamp')
-      .order('timestamp', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    let readings: GlucoseReading[] = []
-    if (latestRow?.timestamp) {
-      const anchor = new Date(latestRow.timestamp).getTime()
-      const since = new Date(anchor - range * 60 * 60 * 1000).toISOString()
-      const { data } = await supabase
-        .from('glucose_readings')
-        .select('id, timestamp, value_mmol, trend, source, created_at')
-        .gte('timestamp', since)
-        .order('timestamp', { ascending: true })
-      readings = (data as GlucoseReading[]) ?? []
+    let readings: GlucoseReading[]
+    try {
+      readings = await fetchNightscoutReadings(range)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Nightscout/MongoDB kon niet gelezen worden.'
+      setSyncMsg({ text: message, ok: false })
+      setReadings([])
+      setLoading(false)
+      setTimeout(() => setSyncMsg(null), 12000)
+      return
     }
+
     setReadings(readings)
     setLastUpdated(new Date())
     setLoading(false)
@@ -145,18 +137,12 @@ export default function Nightscout() {
     setSyncing(true)
     setSyncMsg(null)
     try {
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/libreview-sync`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json',
-        },
-      })
-      const json = await res.json()
-      setSyncMsg({ text: json.message ?? (json.success ? 'Gesynchroniseerd.' : 'Mislukt.'), ok: !!json.success })
-      if (json.success) await fetchReadings()
-    } catch {
-      setSyncMsg({ text: 'Verbindingsfout.', ok: false })
+      const result = await triggerLibreViewSync()
+      setSyncMsg({ text: result.message ?? (result.success ? 'Gesynchroniseerd.' : 'Mislukt.'), ok: !!result.success })
+      await fetchReadings()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Verbindingsfout.'
+      setSyncMsg({ text: message, ok: false })
     } finally {
       setSyncing(false)
       setTimeout(() => setSyncMsg(null), 12000)

@@ -6,7 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "nightscout:up": "docker compose -f docker-compose.nightscout.yml up -d",
+    "nightscout:libre": "docker compose -f docker-compose.nightscout.yml --profile libre up -d",
+    "nightscout:down": "docker compose -f docker-compose.nightscout.yml down",
+    "nightscout:logs": "docker compose -f docker-compose.nightscout.yml logs -f nightscout",
+    "libre:logs": "docker compose -f docker-compose.nightscout.yml logs -f libreview-sync"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.4",
