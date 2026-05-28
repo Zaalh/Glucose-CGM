@@ -285,6 +285,9 @@ Deno.serve(async (req: Request) => {
     return new Response(null, { status: 200, headers: corsHeaders });
   }
 
+  const url = new URL(req.url);
+  const debugMode = url.searchParams.get("debug") === "1";
+
   try {
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
@@ -304,6 +307,7 @@ Deno.serve(async (req: Request) => {
         timestamp: parseLibreTimestamp(pt.Timestamp, tzOffsetMinutes),
         value_mmol: parseFloat(pt.Value.toFixed(2)),
         raw_value: pt.Value,
+        raw_timestamp: pt.Timestamp,
         unit: "mg/dL",
         trend: mapTrend(pt.TrendArrow ?? 4),
         source: "freestyle_libre_3",

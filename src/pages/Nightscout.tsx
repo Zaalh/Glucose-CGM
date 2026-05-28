@@ -21,13 +21,26 @@ export default function Nightscout() {
 
   const fetchReadings = useCallback(async () => {
     setLoading(true)
-    const since = new Date(Date.now() - range * 60 * 60 * 1000).toISOString()
-    const { data } = await supabase
+    // Gebruik de nieuwste DB-timestamp als ankerpunt zodat tijdzone-afwijkingen geen rol spelen
+    const { data: latestRow } = await supabase
       .from('glucose_readings')
-      .select('id, timestamp, value_mmol, trend, source, created_at')
-      .gte('timestamp', since)
-      .order('timestamp', { ascending: true })
-    setReadings((data as GlucoseReading[]) ?? [])
+      .select('timestamp')
+      .order('timestamp', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    let readings: GlucoseReading[] = []
+    if (latestRow?.timestamp) {
+      const anchor = new Date(latestRow.timestamp).getTime()
+      const since = new Date(anchor - range * 60 * 60 * 1000).toISOString()
+      const { data } = await supabase
+        .from('glucose_readings')
+        .select('id, timestamp, value_mmol, trend, source, created_at')
+        .gte('timestamp', since)
+        .order('timestamp', { ascending: true })
+      readings = (data as GlucoseReading[]) ?? []
+    }
+    setReadings(readings)
     setLastUpdated(new Date())
     setLoading(false)
   }, [range])
