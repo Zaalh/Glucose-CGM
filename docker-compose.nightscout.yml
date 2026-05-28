@@ -58,7 +58,7 @@ services:
       - .env.libreview
     environment:
       NIGHTSCOUT_URL: http://nightscout:1337
-      LIBREVIEW_INTERVAL_SECONDS: ${LIBREVIEW_INTERVAL_SECONDS:-60}
+      LIBREVIEW_INTERVAL_SECONDS: ${LIBREVIEW_INTERVAL_SECONDS:-30}
       LIBREVIEW_TZ_OFFSET: ${LIBREVIEW_TZ_OFFSET:-120}
       LIBREVIEW_SYNC_PORT: 8787
     working_dir: /app

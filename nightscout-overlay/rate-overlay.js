@@ -2,11 +2,14 @@
   'use strict';
 
   var MGDL_PER_MMOL = 18.0182;
-  var WINDOWS_MINUTES = [1, 2, 3, 4, 5, 10, 15, 30];
+  var WINDOWS_MINUTES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 20, 30, 45, 60, 90, 120];
   var MAX_BASELINE_DIFF_MS = 45000;
   var POLL_MS = 30000;
+  var COMPACT_WINDOWS_MINUTES = [1, 2, 3, 4, 5, 10, 15, 30];
+  var RATE_MODE_KEY = 'cgm-rate-overlay-mode';
   var latestReading = null;
   var updatingCurrentGlucose = false;
+  var currentRows = [];
 
   function mmol(valueMgdl) {
     return valueMgdl / MGDL_PER_MMOL;
@@ -109,23 +112,26 @@
     var style = document.createElement('style');
     style.id = 'cgm-rate-overlay-style';
     style.textContent = [
-      '#cgm-rate-overlay{position:absolute;z-index:50;top:174px;left:50%;transform:translateX(-50%);display:grid;grid-template-columns:repeat(8,minmax(64px,1fr));gap:4px;width:min(98vw,1040px);font-family:Arial,Helvetica,sans-serif;pointer-events:none;align-items:end}',
+      '#cgm-rate-overlay{position:absolute!important;z-index:9999!important;top:174px;left:50%;transform:translateX(-50%);display:grid;grid-template-columns:repeat(4,minmax(96px,1fr));gap:4px;width:min(98vw,620px);font-family:Arial,Helvetica,sans-serif;pointer-events:none;align-items:start}',
+      '#cgm-rate-overlay.all{grid-template-columns:repeat(7,minmax(72px,1fr));width:min(98vw,1040px)}',
+      '#cgm-rate-toggle{position:absolute!important;z-index:10000!important;left:50%;transform:translateX(-50%);top:174px;border:1px solid rgba(255,255,255,.25);border-radius:5px;background:rgba(0,0,0,.72);color:#ddd;font:700 11px Arial,Helvetica,sans-serif;padding:5px 8px;cursor:pointer}',
+      '#cgm-rate-toggle:hover{background:rgba(30,30,30,.9);color:#fff}',
       '.primary,.bgStatus.current{overflow:visible!important}',
-      '#cgm-rate-overlay .rate-card{border:1px solid rgba(255,255,255,.22);border-bottom-width:2px;border-radius:6px 6px 0 0;background:rgba(9,9,9,.82);color:#ddd;padding:5px 6px 4px;text-align:left;box-shadow:0 -1px 4px rgba(0,0,0,.22);min-width:0;min-height:43px;box-sizing:border-box}',
+      '#cgm-rate-overlay .rate-card{border:1px solid rgba(255,255,255,.22);border-radius:5px;background:rgba(9,9,9,.82);color:#ddd;padding:4px 5px;text-align:left;box-shadow:0 -1px 6px rgba(0,0,0,.45);min-width:0;min-height:38px;box-sizing:border-box}',
       '#cgm-rate-overlay .rate-card.primary{border-width:1px;border-bottom-width:2px}',
-      '#cgm-rate-overlay .rate-window{display:block;font-size:9px;line-height:1;text-transform:uppercase;opacity:.78;letter-spacing:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-      '#cgm-rate-overlay .rate-main{display:block;font-family:monospace;font-size:14px;font-weight:800;line-height:1.12;letter-spacing:0;margin-top:2px}',
-      '#cgm-rate-overlay .rate-card.primary .rate-main{font-size:14px}',
-      '#cgm-rate-overlay .rate-sub{display:block;font-size:8px;line-height:1.1;opacity:.86;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-      '#cgm-rate-overlay .very-fast-down{color:#e0f2fe;border-color:#0ea5e9;background:rgba(7,89,133,.96)}',
-      '#cgm-rate-overlay .fast-down{color:#7dd3fc;border-color:#38bdf8;background:rgba(8,47,73,.86)}',
-      '#cgm-rate-overlay .down{color:#bae6fd;border-color:#0284c7;background:rgba(12,74,110,.68)}',
-      '#cgm-rate-overlay .flat{color:#d9d9d9;border-color:rgba(255,255,255,.25)}',
-      '#cgm-rate-overlay .up{color:#fed7aa;border-color:#fb923c;background:rgba(124,45,18,.66)}',
-      '#cgm-rate-overlay .fast-up{color:#fdba74;border-color:#f97316;background:rgba(154,52,18,.86)}',
-      '#cgm-rate-overlay .very-fast-up{color:#ffedd5;border-color:#ea580c;background:rgba(194,65,12,.96)}',
+      '#cgm-rate-overlay .rate-window{display:block;font-size:8px;line-height:1;text-transform:uppercase;opacity:.9;letter-spacing:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '#cgm-rate-overlay .rate-main{display:block;font-family:monospace;font-size:12px;font-weight:900;line-height:1.12;letter-spacing:0;margin-top:2px}',
+      '#cgm-rate-overlay .rate-card.primary .rate-main{font-size:12px}',
+      '#cgm-rate-overlay .rate-sub{display:block;font-size:7px;line-height:1.1;opacity:.9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+      '#cgm-rate-overlay .very-fast-down{color:#fff7ed;border-color:#fb7185;background:linear-gradient(135deg,#f59e0b 0%,#e11d48 100%);text-shadow:0 1px 2px rgba(0,0,0,.45)}',
+      '#cgm-rate-overlay .fast-down{color:#2f1600;border-color:#f59e0b;background:linear-gradient(135deg,#ffe08a 0%,#fb923c 100%)}',
+      '#cgm-rate-overlay .down{color:#2f1600;border-color:#facc15;background:linear-gradient(135deg,#fff3a3 0%,#fbbf24 100%)}',
+      '#cgm-rate-overlay .flat{color:#063b1d;border-color:#4ade80;background:linear-gradient(135deg,#bbf7d0 0%,#4ade80 100%)}',
+      '#cgm-rate-overlay .up{color:#3b0764;border-color:#c084fc;background:linear-gradient(135deg,#ead6ff 0%,#c084fc 100%)}',
+      '#cgm-rate-overlay .fast-up{color:#faf5ff;border-color:#a855f7;background:linear-gradient(135deg,#c084fc 0%,#9333ea 100%);text-shadow:0 1px 2px rgba(0,0,0,.42)}',
+      '#cgm-rate-overlay .very-fast-up{color:#faf5ff;border-color:#7e22ce;background:linear-gradient(135deg,#9333ea 0%,#581c87 100%);text-shadow:0 1px 2px rgba(0,0,0,.52)}',
       '#cgm-rate-overlay .missing{color:#8a8a8a;border-color:rgba(255,255,255,.14);background:rgba(0,0,0,.28)}',
-      '@media(max-width:700px){#cgm-rate-overlay{grid-template-columns:repeat(4,minmax(66px,1fr));gap:3px;width:98vw}#cgm-rate-overlay .rate-card{padding:4px 5px 3px;min-height:39px}#cgm-rate-overlay .rate-main,#cgm-rate-overlay .rate-card.primary .rate-main{font-size:13px}#cgm-rate-overlay .rate-sub{font-size:8px}}'
+      '@media(max-width:700px){#cgm-rate-overlay,#cgm-rate-overlay.all{grid-template-columns:repeat(4,minmax(72px,1fr));gap:3px;width:98vw}#cgm-rate-overlay .rate-card{padding:4px 5px 3px;min-height:38px}#cgm-rate-overlay .rate-main,#cgm-rate-overlay .rate-card.primary .rate-main{font-size:12px}#cgm-rate-overlay .rate-sub{font-size:7px}}'
     ].join('');
     document.head.appendChild(style);
   }
@@ -134,30 +140,78 @@
     var existing = document.getElementById('cgm-rate-overlay');
     if (existing) return existing;
 
-    var anchor = document.querySelector('.bgStatus.current');
-    if (!anchor) return null;
-
     var container = document.createElement('div');
     container.id = 'cgm-rate-overlay';
     container.setAttribute('aria-label', 'Glucose snelheid per minuut');
-    anchor.appendChild(container);
+    document.body.appendChild(container);
     return container;
+  }
+
+  function ensureToggle() {
+    var existing = document.getElementById('cgm-rate-toggle');
+    if (existing) return existing;
+
+    var button = document.createElement('button');
+    button.id = 'cgm-rate-toggle';
+    button.type = 'button';
+    button.addEventListener('click', function () {
+      var nextMode = getMode() === 'compact' ? 'all' : getMode() === 'all' ? 'off' : 'compact';
+      localStorage.setItem(RATE_MODE_KEY, nextMode);
+      render(currentRows);
+    });
+    document.body.appendChild(button);
+    return button;
+  }
+
+  function getMode() {
+    var mode = localStorage.getItem(RATE_MODE_KEY);
+    return mode === 'all' || mode === 'off' ? mode : 'compact';
+  }
+
+  function visibleRows(rows) {
+    if (getMode() === 'all') return rows;
+    return rows.filter(function (row) {
+      var minutes = Number.parseInt(row.label, 10);
+      return COMPACT_WINDOWS_MINUTES.indexOf(minutes) !== -1;
+    });
+  }
+
+  function updateToggleLabel() {
+    var button = ensureToggle();
+    var mode = getMode();
+    button.textContent = mode === 'compact' ? 'compact' : mode === 'all' ? 'alles' : 'uit';
   }
 
   function positionContainer() {
     var container = ensureContainer();
+    var button = ensureToggle();
     var chart = document.querySelector('#chartContainer');
     if (!container || !chart) return;
 
     var chartTop = chart.getBoundingClientRect().top + window.scrollY;
-    container.style.top = Math.max(0, Math.round(chartTop)) + 'px';
+    var buttonHeight = button.getBoundingClientRect().height || 24;
+    var buttonTop = chartTop - buttonHeight - 6;
+    var containerTop = chartTop + 4;
+    button.style.top = Math.max(0, Math.round(buttonTop)) + 'px';
+    container.style.top = Math.max(0, Math.round(containerTop)) + 'px';
   }
 
   function render(rows) {
     ensureStyles();
     var container = ensureContainer();
     if (!container) return;
+    currentRows = rows;
+    updateToggleLabel();
     positionContainer();
+
+    if (getMode() === 'off') {
+      container.style.display = 'none';
+      return;
+    }
+
+    container.style.display = 'grid';
+    container.classList.toggle('all', getMode() === 'all');
+    rows = visibleRows(rows);
 
     if (!rows.length) {
       container.innerHTML = '<div class="rate-card flat primary"><span class="rate-window">snelheid</span><span class="rate-main">geen data</span><span class="rate-sub">wacht op meerdere metingen</span></div>';
@@ -211,7 +265,7 @@
   }
 
   function refresh() {
-    fetch('/api/v1/entries/sgv.json?count=60', { cache: 'no-store' })
+    fetch('/api/v1/entries/sgv.json?count=240', { cache: 'no-store' })
       .then(function (response) { return response.json(); })
       .then(function (entries) {
         var readings = sortedReadings(entries);
