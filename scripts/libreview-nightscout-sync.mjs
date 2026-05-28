@@ -143,6 +143,9 @@ async function libreLogin(email, password) {
     const text = await res.text()
     const json = parseJson(text, `Login parse fout: ${text.slice(0, 200)}`)
     if (!res.ok) throw new Error(`Login mislukt (${res.status}): ${JSON.stringify(json).slice(0, 300)}`)
+    if (!json.data?.user?.id || !json.data?.authTicket?.token) {
+      throw new Error(`Login mislukt: ${libreErrorMessage(json)}`)
+    }
     return json
   }
 
@@ -364,6 +367,17 @@ function parseJson(text, errorMessage) {
   } catch {
     throw new Error(errorMessage)
   }
+}
+
+function libreErrorMessage(json) {
+  const message =
+    json?.error?.message ??
+    json?.message ??
+    json?.error ??
+    json?.statusMessage
+
+  if (typeof message === 'string' && message.trim()) return message
+  return `onverwachte LibreView response (${JSON.stringify(json).slice(0, 300)})`
 }
 
 function sha256hex(value) {
