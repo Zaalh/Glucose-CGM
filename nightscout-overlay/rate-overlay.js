@@ -10,6 +10,7 @@
   var latestReading = null;
   var updatingCurrentGlucose = false;
   var currentRows = [];
+  var currentHypoRisk = null;
 
   function mmol(valueMgdl) {
     return valueMgdl / MGDL_PER_MMOL;
@@ -107,6 +108,61 @@
     });
   }
 
+  function getPrimaryRate(rows) {
+    return rows.filter(function (row) {
+      return row && !row.missing && Number.isFinite(row.rateMmol) && row.actualMinutes <= 5;
+    }).sort(function (a, b) {
+      return a.actualMinutes - b.actualMinutes;
+    })[0] || null;
+  }
+
+  function calculateHypoRisk(readings, rows) {
+    var latest = readings[0];
+    if (!latest || !Number.isFinite(Number(latest.sgv))) return null;
+
+    var valueMmol = mmol(Number(latest.sgv));
+    var primaryRate = getPrimaryRate(rows);
+    var rateMmol = primaryRate ? primaryRate.rateMmol : 0;
+    var minutesToHypo = rateMmol < -0.01 ? (valueMmol - 3.9) / Math.abs(rateMmol) : null;
+    var minutesToUrgent = rateMmol < -0.01 ? (valueMmol - 3.0) / Math.abs(rateMmol) : null;
+    var predictedHypoSoon = minutesToHypo !== null && minutesToHypo >= 0 && minutesToHypo <= 20;
+    var predictedUrgentSoon = minutesToUrgent !== null && minutesToUrgent >= 0 && minutesToUrgent <= 20;
+
+    if (valueMmol < 3.0 || predictedUrgentSoon) {
+      return {
+        css: 'urgent',
+        title: valueMmol < 3.0 ? 'HYPO URGENT' : 'URGENT RISICO',
+        detail: valueMmol < 3.0 ? valueMmol.toFixed(2) + ' mmol/L' : 'richting 3.0 in ±' + Math.ceil(minutesToUrgent) + ' min',
+        rate: rateMmol
+      };
+    }
+
+    if (valueMmol < 3.9) {
+      return {
+        css: 'hypo',
+        title: 'HYPO NU',
+        detail: valueMmol.toFixed(2) + ' mmol/L',
+        rate: rateMmol
+      };
+    }
+
+    if (valueMmol < 4.5 || predictedHypoSoon) {
+      return {
+        css: predictedHypoSoon && minutesToHypo <= 10 ? 'warning' : 'watch',
+        title: predictedHypoSoon ? 'HYPO RISICO' : 'LET OP LAAG',
+        detail: predictedHypoSoon ? 'richting 3.9 in ±' + Math.ceil(minutesToHypo) + ' min' : valueMmol.toFixed(2) + ' mmol/L',
+        rate: rateMmol
+      };
+    }
+
+    return {
+      css: 'ok',
+      title: 'HYPO OK',
+      detail: valueMmol.toFixed(2) + ' mmol/L',
+      rate: rateMmol
+    };
+  }
+
   function ensureStyles() {
     if (document.getElementById('cgm-rate-overlay-style')) return;
     var style = document.createElement('style');
@@ -114,6 +170,14 @@
     style.textContent = [
       '#cgm-rate-overlay{position:absolute!important;z-index:9999!important;top:174px;left:50%;transform:translateX(-50%);display:grid;grid-template-columns:repeat(4,minmax(96px,1fr));gap:4px;width:min(98vw,620px);font-family:Arial,Helvetica,sans-serif;pointer-events:none;align-items:start}',
       '#cgm-rate-overlay.all{grid-template-columns:repeat(7,minmax(72px,1fr));width:min(98vw,1040px)}',
+      '#cgm-hypo-alert{position:absolute!important;z-index:10000!important;left:50%;transform:translateX(-50%);top:174px;display:flex;align-items:center;justify-content:center;gap:8px;width:max-content;max-width:min(560px,86vw);min-width:210px;border:1px solid rgba(255,255,255,.24);border-radius:5px;padding:5px 10px;font-family:Arial,Helvetica,sans-serif;box-sizing:border-box;box-shadow:0 1px 8px rgba(0,0,0,.5)}',
+      '#cgm-hypo-alert .hypo-title{font-size:11px;font-weight:900;line-height:1;text-transform:uppercase;white-space:nowrap}',
+      '#cgm-hypo-alert .hypo-detail{font-size:11px;font-weight:700;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+      '#cgm-hypo-alert .hypo-rate{font-family:monospace;font-size:10px;font-weight:900;line-height:1;white-space:nowrap;opacity:.9}',
+      '#cgm-hypo-alert.ok{color:#063b1d;border-color:#4ade80;background:linear-gradient(135deg,#bbf7d0 0%,#4ade80 100%)}',
+      '#cgm-hypo-alert.watch{color:#2f1600;border-color:#facc15;background:linear-gradient(135deg,#fff3a3 0%,#fbbf24 100%)}',
+      '#cgm-hypo-alert.warning{color:#2f1600;border-color:#f59e0b;background:linear-gradient(135deg,#ffe08a 0%,#fb923c 100%)}',
+      '#cgm-hypo-alert.hypo,#cgm-hypo-alert.urgent{color:#fff7ed;border-color:#fb7185;background:linear-gradient(135deg,#f59e0b 0%,#e11d48 100%);text-shadow:0 1px 2px rgba(0,0,0,.45)}',
       '#cgm-rate-toggle{position:absolute!important;z-index:10000!important;left:50%;transform:translateX(-50%);top:174px;border:1px solid rgba(255,255,255,.25);border-radius:5px;background:rgba(0,0,0,.72);color:#ddd;font:700 11px Arial,Helvetica,sans-serif;padding:5px 8px;cursor:pointer}',
       '#cgm-rate-toggle:hover{background:rgba(30,30,30,.9);color:#fff}',
       '.primary,.bgStatus.current{overflow:visible!important}',
@@ -131,7 +195,7 @@
       '#cgm-rate-overlay .fast-up{color:#faf5ff;border-color:#a855f7;background:linear-gradient(135deg,#c084fc 0%,#9333ea 100%);text-shadow:0 1px 2px rgba(0,0,0,.42)}',
       '#cgm-rate-overlay .very-fast-up{color:#faf5ff;border-color:#7e22ce;background:linear-gradient(135deg,#9333ea 0%,#581c87 100%);text-shadow:0 1px 2px rgba(0,0,0,.52)}',
       '#cgm-rate-overlay .missing{color:#8a8a8a;border-color:rgba(255,255,255,.14);background:rgba(0,0,0,.28)}',
-      '@media(max-width:700px){#cgm-rate-overlay,#cgm-rate-overlay.all{grid-template-columns:repeat(4,minmax(72px,1fr));gap:3px;width:98vw}#cgm-rate-overlay .rate-card{padding:4px 5px 3px;min-height:38px}#cgm-rate-overlay .rate-main,#cgm-rate-overlay .rate-card.primary .rate-main{font-size:12px}#cgm-rate-overlay .rate-sub{font-size:7px}}'
+      '@media(max-width:700px){#cgm-rate-overlay,#cgm-rate-overlay.all{grid-template-columns:repeat(4,minmax(72px,1fr));gap:3px;width:98vw}#cgm-hypo-alert{left:50%;right:auto;transform:translateX(-50%);max-width:86vw;min-width:0;gap:5px;padding:5px 7px}#cgm-hypo-alert .hypo-title,#cgm-hypo-alert .hypo-detail{font-size:10px}#cgm-hypo-alert .hypo-rate{font-size:9px}#cgm-rate-overlay .rate-card{padding:4px 5px 3px;min-height:38px}#cgm-rate-overlay .rate-main,#cgm-rate-overlay .rate-card.primary .rate-main{font-size:12px}#cgm-rate-overlay .rate-sub{font-size:7px}}'
     ].join('');
     document.head.appendChild(style);
   }
@@ -163,6 +227,17 @@
     return button;
   }
 
+  function ensureHypoAlert() {
+    var existing = document.getElementById('cgm-hypo-alert');
+    if (existing) return existing;
+
+    var alert = document.createElement('div');
+    alert.id = 'cgm-hypo-alert';
+    alert.setAttribute('aria-label', 'Hypoglykemie waarschuwing');
+    document.body.appendChild(alert);
+    return alert;
+  }
+
   function getMode() {
     var mode = localStorage.getItem(RATE_MODE_KEY);
     return mode === 'all' || mode === 'off' ? mode : 'compact';
@@ -182,9 +257,27 @@
     button.textContent = mode === 'compact' ? 'compact' : mode === 'all' ? 'alles' : 'uit';
   }
 
+  function renderHypoAlert(risk) {
+    var alert = ensureHypoAlert();
+    currentHypoRisk = risk;
+    if (!risk) {
+      alert.style.display = 'none';
+      return;
+    }
+
+    alert.style.display = 'flex';
+    alert.className = risk.css;
+    alert.innerHTML = [
+      '<span class="hypo-title">', risk.title, '</span>',
+      '<span class="hypo-detail">', risk.detail, '</span>',
+      '<span class="hypo-rate">', signed(risk.rate, 2), '/min</span>'
+    ].join('');
+  }
+
   function positionContainer() {
     var container = ensureContainer();
     var button = ensureToggle();
+    var alert = ensureHypoAlert();
     var chart = document.querySelector('#chartContainer');
     if (!container || !chart) return;
 
@@ -193,6 +286,7 @@
     var buttonTop = chartTop - buttonHeight - 6;
     var containerTop = chartTop + 4;
     button.style.top = Math.max(0, Math.round(buttonTop)) + 'px';
+    alert.style.top = '8px';
     container.style.top = Math.max(0, Math.round(containerTop)) + 'px';
   }
 
@@ -202,6 +296,7 @@
     if (!container) return;
     currentRows = rows;
     updateToggleLabel();
+    renderHypoAlert(currentHypoRisk);
     positionContainer();
 
     if (getMode() === 'off') {
@@ -269,9 +364,11 @@
       .then(function (response) { return response.json(); })
       .then(function (entries) {
         var readings = sortedReadings(entries);
+        var rows = calculateRows(readings);
         latestReading = readings[0] || null;
         renderCurrentGlucose(readings[0]);
-        render(calculateRows(readings));
+        currentHypoRisk = calculateHypoRisk(readings, rows);
+        render(rows);
       })
       .catch(function () { render([]); });
   }
