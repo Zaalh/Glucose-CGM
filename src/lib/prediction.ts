@@ -1,9 +1,8 @@
 import type { GlucoseReading, TrendDirection } from '../types'
 
 const PERSONAL_RATES_KEY = 'cgm_personal_trend_rates'
-const MIN_READINGS_PER_TREND = 3
+const MIN_READINGS_PER_TREND = 5
 
-// Fixed fallback rates (mmol/L per minute)
 const DEFAULT_RATES: Record<TrendDirection, number> = {
   rising_quickly: 0.15,
   rising: 0.08,
@@ -28,16 +27,9 @@ function savePersonalRates(rates: PersonalRates) {
   localStorage.setItem(PERSONAL_RATES_KEY, JSON.stringify(rates))
 }
 
-/**
- * Compute personalized per-trend-direction rates from historical readings.
- * Groups consecutive pairs by the trend of the earlier reading,
- * computes mmol/min rate, averages per direction.
- * Needs at least MIN_READINGS_PER_TREND samples per direction to override default.
- */
 export function computeAndSavePersonalRates(readings: GlucoseReading[]) {
-  if (readings.length < 10) return
+  if (readings.length < 20) return
 
-  // Sort ascending
   const sorted = [...readings].sort(
     (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
   )
@@ -50,7 +42,7 @@ export function computeAndSavePersonalRates(readings: GlucoseReading[]) {
     if (!a.trend) continue
 
     const dtMin = (new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()) / 60_000
-    if (dtMin < 2 || dtMin > 10) continue // skip gaps or duplicates
+    if (dtMin < 0.5 || dtMin > 3) continue
 
     const ratePerMin = (b.value_mmol - a.value_mmol) / dtMin
 
@@ -61,7 +53,12 @@ export function computeAndSavePersonalRates(readings: GlucoseReading[]) {
   const rates: PersonalRates = {}
   for (const [trend, values] of Object.entries(buckets) as [TrendDirection, number[]][]) {
     if (values.length >= MIN_READINGS_PER_TREND) {
-      rates[trend] = values.reduce((s, v) => s + v, 0) / values.length
+      // Use median for robustness against outliers
+      const sorted = [...values].sort((a, b) => a - b)
+      const mid = Math.floor(sorted.length / 2)
+      rates[trend] = sorted.length % 2 === 0
+        ? (sorted[mid - 1] + sorted[mid]) / 2
+        : sorted[mid]
     }
   }
 
@@ -69,74 +66,91 @@ export function computeAndSavePersonalRates(readings: GlucoseReading[]) {
 }
 
 /**
- * Linear regression over last N readings (sorted ascending).
- * Returns slope in mmol/L per minute and the predicted value at +minutesAhead.
+ * Quadratic (polynomial degree-2) regression over N readings.
+ * Much better than linear for curved glucose trends (post-meal, corrections).
+ * Returns predicted value minutesAhead from the last reading.
  */
-function linearRegression(readings: GlucoseReading[], minutesAhead: number): number | null {
-  if (readings.length < 3) return null
+function quadraticRegression(readings: GlucoseReading[], minutesAhead: number): number | null {
+  if (readings.length < 5) return null
 
   const sorted = [...readings].sort(
     (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
   )
 
   const t0 = new Date(sorted[0].timestamp).getTime()
-  const points = sorted.map(r => ({
-    x: (new Date(r.timestamp).getTime() - t0) / 60_000, // minutes since first
+  // x in minutes since first point
+  const pts = sorted.map(r => ({
+    x: (new Date(r.timestamp).getTime() - t0) / 60_000,
     y: r.value_mmol,
   }))
 
-  const n = points.length
-  const sumX = points.reduce((s, p) => s + p.x, 0)
-  const sumY = points.reduce((s, p) => s + p.y, 0)
-  const sumXY = points.reduce((s, p) => s + p.x * p.y, 0)
-  const sumX2 = points.reduce((s, p) => s + p.x * p.x, 0)
+  const n = pts.length
+  // Build normal equations for [a, b, c] in y = a*x^2 + b*x + c
+  let s0 = n, s1 = 0, s2 = 0, s3 = 0, s4 = 0
+  let t0v = 0, t1 = 0, t2 = 0
+  for (const { x, y } of pts) {
+    s1 += x; s2 += x * x; s3 += x * x * x; s4 += x * x * x * x
+    t0v += y; t1 += x * y; t2 += x * x * y
+  }
 
-  const denom = n * sumX2 - sumX * sumX
-  if (Math.abs(denom) < 1e-9) return null
+  // 3x3 matrix solve (Cramer's rule)
+  const A = [
+    [s0, s1, s2],
+    [s1, s2, s3],
+    [s2, s3, s4],
+  ]
+  const b = [t0v, t1, t2]
 
-  const slope = (n * sumXY - sumX * sumY) / denom
-  const intercept = (sumY - slope * sumX) / n
+  const det = (m: number[][]): number =>
+    m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) -
+    m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+    m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
 
-  const lastX = points[points.length - 1].x
-  return intercept + slope * (lastX + minutesAhead)
+  const D = det(A)
+  if (Math.abs(D) < 1e-9) return null
+
+  const replaceCol = (m: number[][], col: number, v: number[]) =>
+    m.map((row, i) => row.map((val, j) => (j === col ? v[i] : val)))
+
+  const c = det(replaceCol(A, 0, b)) / D
+  const bCoef = det(replaceCol(A, 1, b)) / D
+  const a = det(replaceCol(A, 2, b)) / D
+
+  const lastX = pts[n - 1].x + minutesAhead
+  return a * lastX * lastX + bCoef * lastX + c
 }
 
 /**
- * Predict glucose value N minutes in the future.
- * Strategy:
- *   1. Linear regression on last 5 readings (primary, most accurate)
- *   2. Personalized trend rate fallback
- *   3. Fixed default rate fallback
+ * Predict glucose N minutes in the future.
+ *
+ * Uses quadratic regression on the last 20 readings (~20 min of 1-min data).
+ * Falls back to personalized or default trend rates when insufficient data.
  */
 export function predictGlucose(
   recentReadings: GlucoseReading[],
   currentReading: GlucoseReading,
   minutesAhead = 20,
 ): number {
-  // Take last 5 readings (including current) for regression
-  const window = recentReadings
-    .slice(-5)
+  // Use last 20 readings for quadratic fit (~20 min window at 1-min intervals)
+  const window = recentReadings.slice(-20)
 
-  const regression = linearRegression(window, minutesAhead)
-  if (regression !== null) {
-    // Clamp to physiologically plausible range
-    return Math.max(1.5, Math.min(33, regression))
+  const quad = quadraticRegression(window, minutesAhead)
+  if (quad !== null) {
+    return Math.max(1.5, Math.min(33, quad))
   }
 
   // Fallback: personalized or default trend rate
   const personal = loadPersonalRates()
   const trend = currentReading.trend
-  const rate = trend
-    ? (personal[trend] ?? DEFAULT_RATES[trend] ?? 0)
-    : 0
+  const rate = trend ? (personal[trend] ?? DEFAULT_RATES[trend] ?? 0) : 0
 
   return Math.max(1.5, Math.min(33, currentReading.value_mmol + rate * minutesAhead))
 }
 
 export function getPredictionConfidence(recentReadings: GlucoseReading[]): 'high' | 'medium' | 'low' {
   const n = recentReadings.length
-  if (n >= 5) return 'high'
-  if (n >= 3) return 'medium'
+  if (n >= 20) return 'high'
+  if (n >= 5)  return 'medium'
   return 'low'
 }
 

@@ -55,8 +55,7 @@ export default function NightscoutChart({ readings, unit = 'mmol', predictedIn20
   const yMax = unit === 'mgdl' ? 320 : 18
 
   // Build prediction line: bridge from last real reading → 20-min forecast
-  // We insert intermediate points at 5/10/15/20 min with linear interpolation
-  // so the line flows smoothly from the last dot
+  // One point per minute for a smooth curve
   const predLineData: { time: number; pred: number; predMmol: number }[] = []
   if (predictedIn20 !== null && data.length > 0) {
     const lastReal = data[data.length - 1]
@@ -65,11 +64,11 @@ export default function NightscoutChart({ readings, unit = 'mmol', predictedIn20
     const lastMmol = lastReal.mmol
     const predVal  = toDisplay(predictedIn20, unit)
 
-    for (let step = 1; step <= 4; step++) {
-      const frac = step / 4
-      const t = lastTime + step * 5 * 60_000
-      const v = lastVal  + (predVal         - lastVal)  * frac
-      const m = lastMmol + (predictedIn20   - lastMmol) * frac
+    for (let min = 1; min <= 20; min++) {
+      const frac = min / 20
+      const t = lastTime + min * 60_000
+      const v = lastVal  + (predVal       - lastVal)  * frac
+      const m = lastMmol + (predictedIn20 - lastMmol) * frac
       predLineData.push({
         time: t,
         pred: parseFloat(v.toFixed(unit === 'mgdl' ? 0 : 1)),
@@ -88,12 +87,14 @@ export default function NightscoutChart({ readings, unit = 'mmol', predictedIn20
     ? predColor(predictedIn20, 3.9, 10.0)
     : '#8b949e'
 
-  // Blend dots: same color logic per point
-  const predDotData = predLineData.map(p => ({
-    time: p.time,
-    value: p.pred,
-    predMmol: p.predMmol,
-  }))
+  // Only show dots at 5/10/15/20 min marks
+  const lastTime = data[data.length - 1]?.time ?? 0
+  const predDotData = predLineData
+    .filter(p => {
+      const minAhead = Math.round((p.time - lastTime) / 60_000)
+      return minAhead % 5 === 0
+    })
+    .map(p => ({ time: p.time, value: p.pred, predMmol: p.predMmol }))
 
   // Bridge: a two-point dataset connecting last real → first pred, for the dashed line
   const bridgeData = data.length > 0 && predLineData.length > 0
