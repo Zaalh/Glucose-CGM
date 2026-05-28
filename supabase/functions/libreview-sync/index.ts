@@ -74,11 +74,15 @@ function parseLibreTimestamp(ts: string, tzOffsetMinutes: number): string {
     if (!isNaN(d.getTime())) localMs = d.getTime();
   }
 
-  // US: "1/12/2025 14:35:00"
+  // US: "1/12/2025 14:35:00" of "1/12/2025 2:35:00 PM"
   if (localMs === null) {
-    const m = ts.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})/);
+    const m = ts.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})(?:\s*(AM|PM))?/i);
     if (m) {
-      const d = new Date(`${m[3]}-${m[1].padStart(2,"0")}-${m[2].padStart(2,"0")}T${m[4].padStart(2,"0")}:${m[5]}:${m[6]}`);
+      let hour = parseInt(m[4], 10);
+      const ampm = (m[7] ?? "").toUpperCase();
+      if (ampm === "AM" && hour === 12) hour = 0;
+      else if (ampm === "PM" && hour !== 12) hour += 12;
+      const d = new Date(`${m[3]}-${m[1].padStart(2,"0")}-${m[2].padStart(2,"0")}T${String(hour).padStart(2,"0")}:${m[5]}:${m[6]}`);
       if (!isNaN(d.getTime())) localMs = d.getTime();
     }
   }
