@@ -17,7 +17,7 @@ const LIBRE_API = "https://api-eu.libreview.io";
 const LLU_BASE_HEADERS = {
   "Content-Type": "application/json",
   "product": "llu.android",
-  "version": "4.12.0",
+  "version": "4.16.0",
   "Accept-Encoding": "gzip",
   "cache-control": "no-cache",
   "connection": "Keep-Alive",
