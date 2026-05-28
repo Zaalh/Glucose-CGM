@@ -12,7 +12,7 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string
 export default function Dashboard() {
   const [readings, setReadings] = useState<GlucoseReading[]>([])
   const [loading, setLoading] = useState(true)
-  const [range, setRange] = useState<3 | 6 | 12 | 24>(6)
+  const [range, setRange] = useState<number>(6)
   const [syncing, setSyncing] = useState(false)
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
 
@@ -97,15 +97,22 @@ export default function Dashboard() {
               {syncing ? 'Syncing...' : 'Sync Libre'}
             </button>
             <div className={styles.rangeButtons}>
-            {([3, 6, 12, 24] as const).map(r => (
-              <button
-                key={r}
-                className={`${styles.rangeBtn} ${range === r ? styles.active : ''}`}
-                onClick={() => setRange(r)}
-              >
-                {r}u
-              </button>
-            ))}
+              {([
+                { value: 1/60, label: '1m' },
+                { value: 1, label: '1u' },
+                { value: 3, label: '3u' },
+                { value: 6, label: '6u' },
+                { value: 12, label: '12u' },
+                { value: 24, label: '24u' },
+              ]).map(r => (
+                <button
+                  key={r.label}
+                  className={`${styles.rangeBtn} ${range === r.value ? styles.active : ''}`}
+                  onClick={() => setRange(r.value)}
+                >
+                  {r.label}
+                </button>
+              ))}
             </div>
           </div>
         </div>
