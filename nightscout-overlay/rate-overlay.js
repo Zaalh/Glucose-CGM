@@ -11,6 +11,7 @@
   var updatingCurrentGlucose = false;
   var currentRows = [];
   var currentHypoRisk = null;
+  var chartReadingsAsc = [];
 
   function mmol(valueMgdl) {
     return valueMgdl / MGDL_PER_MMOL;
@@ -75,6 +76,26 @@
       .sort(function (a, b) { return readingTime(b) - readingTime(a); });
   }
 
+  function formatClock(timeMs) {
+    var date = new Date(timeMs);
+    return String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');
+  }
+
+  function rateBetween(fromEntry, toEntry) {
+    if (!fromEntry || !toEntry) return null;
+    var fromTime = readingTime(fromEntry);
+    var toTime = readingTime(toEntry);
+    var minutes = (toTime - fromTime) / 60000;
+    if (!Number.isFinite(minutes) || minutes <= 0) return null;
+
+    var delta = mmol(Number(toEntry.sgv) - Number(fromEntry.sgv));
+    return {
+      minutes: minutes,
+      delta: delta,
+      rate: delta / minutes
+    };
+  }
+
   function calculateRows(readings) {
     var latest = readings[0];
     if (!latest) return [];
@@ -126,6 +147,7 @@
     var primaryRate = getPrimaryRate(rows);
     var rateMmol = primaryRate ? primaryRate.rateMmol : 0;
     var minutesToHypo = rateMmol < -0.01 ? (valueMmol - 3.9) / Math.abs(rateMmol) : null;
+    var minutesToLow = rateMmol < -0.01 ? (valueMmol - 3.8) / Math.abs(rateMmol) : null;
     var minutesToUrgent = rateMmol < -0.01 ? (valueMmol - 3.0) / Math.abs(rateMmol) : null;
     var predictedHypoSoon = minutesToHypo !== null && minutesToHypo >= 0 && minutesToHypo <= 20;
     var predictedUrgentSoon = minutesToUrgent !== null && minutesToUrgent >= 0 && minutesToUrgent <= 20;
@@ -134,7 +156,7 @@
       return {
         css: 'urgent',
         title: valueMmol < 3.0 ? 'HYPO URGENT' : 'URGENT RISICO',
-        detail: valueMmol < 3.0 ? valueMmol.toFixed(2) + ' mmol/L' : 'richting 3.0 in ±' + Math.ceil(minutesToUrgent) + ' min',
+        detail: valueMmol < 3.0 ? valueMmol.toFixed(2) + ' mmol/L' : '3.8 ±' + Math.ceil(minutesToLow) + 'm · 3.0 ±' + Math.ceil(minutesToUrgent) + 'm',
         rate: rateMmol
       };
     }
@@ -180,6 +202,11 @@
       '#cgm-hypo-alert.watch{color:#2f1600;border-color:#facc15;background:linear-gradient(135deg,#fff3a3 0%,#fbbf24 100%)}',
       '#cgm-hypo-alert.warning{color:#2f1600;border-color:#f59e0b;background:linear-gradient(135deg,#ffe08a 0%,#fb923c 100%)}',
       '#cgm-hypo-alert.hypo,#cgm-hypo-alert.urgent{color:#fff7ed;border-color:#fb7185;background:linear-gradient(135deg,#f59e0b 0%,#e11d48 100%);text-shadow:0 1px 2px rgba(0,0,0,.45)}',
+      '#cgm-point-rate-tooltip{position:absolute!important;z-index:10001!important;display:none;min-width:178px;border:1px solid rgba(255,255,255,.22);border-radius:5px;background:rgba(0,0,0,.86);color:#f3f4f6;font-family:Arial,Helvetica,sans-serif;padding:7px 8px;box-shadow:0 2px 12px rgba(0,0,0,.55);pointer-events:none}',
+      '#cgm-point-rate-tooltip .pt-head{display:flex;justify-content:space-between;gap:12px;font-size:12px;font-weight:900;line-height:1.15;margin-bottom:4px}',
+      '#cgm-point-rate-tooltip .pt-row{display:flex;justify-content:space-between;gap:12px;font-size:11px;font-weight:700;line-height:1.25;white-space:nowrap}',
+      '#cgm-point-rate-tooltip .pt-rate{font-family:monospace;font-weight:900}',
+      '#cgm-current-average-rate{display:block!important;width:max-content;margin-top:4px;font-size:13px!important;line-height:1.2!important;padding:3px 7px!important;background:rgba(0,0,0,.72)!important;color:#f3f4f6!important;border:1px solid rgba(255,255,255,.2)!important;border-radius:5px!important;font-family:Arial,Helvetica,sans-serif!important;font-weight:900!important}',
       '#cgm-rate-toggle{position:absolute!important;z-index:10000!important;left:50%;transform:translateX(-50%);top:174px;border:1px solid rgba(255,255,255,.25);border-radius:5px;background:rgba(0,0,0,.72);color:#ddd;font:700 11px Arial,Helvetica,sans-serif;padding:5px 8px;cursor:pointer}',
       '#cgm-rate-toggle:hover{background:rgba(30,30,30,.9);color:#fff}',
       '.primary,.bgStatus.current{overflow:visible!important}',
@@ -238,6 +265,17 @@
     alert.setAttribute('aria-label', 'Hypoglykemie waarschuwing');
     document.body.appendChild(alert);
     return alert;
+  }
+
+  function ensurePointTooltip() {
+    var existing = document.getElementById('cgm-point-rate-tooltip');
+    if (existing) return existing;
+
+    var tooltip = document.createElement('div');
+    tooltip.id = 'cgm-point-rate-tooltip';
+    tooltip.setAttribute('aria-label', 'Glucose verandering rond meetpunt');
+    document.body.appendChild(tooltip);
+    return tooltip;
   }
 
   function getMode() {
@@ -299,6 +337,7 @@
     currentRows = rows;
     updateToggleLabel();
     renderHypoAlert(currentHypoRisk);
+    renderCurrentAverageRate();
     positionContainer();
 
     if (getMode() === 'off') {
@@ -348,6 +387,86 @@
     updatingCurrentGlucose = false;
   }
 
+  function renderCurrentAverageRate() {
+    var target = document.querySelector('.majorPills');
+    var existing = document.getElementById('cgm-current-average-rate');
+    if (!target) return;
+
+    var usableRows = currentRows.filter(function (row) {
+      return row && !row.missing && Number.isFinite(row.rateMmol) && row.actualMinutes <= 15;
+    });
+    if (!usableRows.length) {
+      if (existing) existing.remove();
+      return;
+    }
+
+    var avgRate = usableRows.reduce(function (sum, row) { return sum + row.rateMmol; }, 0) / usableRows.length;
+    var label = avgRate < -0.01 ? 'gem. daling' : avgRate > 0.01 ? 'gem. stijging' : 'gem. stabiel';
+    var node = existing || document.createElement('span');
+    node.id = 'cgm-current-average-rate';
+    node.className = 'pill';
+    node.textContent = label + ' ' + signed(avgRate, 2) + '/min';
+    if (!existing) target.appendChild(node);
+  }
+
+  function pointIndexFromDot(dot) {
+    var dots = Array.prototype.slice.call(document.querySelectorAll('circle.entry-dot')).filter(function (el) {
+      return Number.isFinite(Number(el.getAttribute('cx')));
+    }).sort(function (a, b) {
+      return Number(a.getAttribute('cx')) - Number(b.getAttribute('cx'));
+    });
+    var dotIndex = dots.indexOf(dot);
+    if (dotIndex < 0 || !chartReadingsAsc.length) return -1;
+
+    var offset = Math.max(0, chartReadingsAsc.length - dots.length);
+    return offset + dotIndex;
+  }
+
+  function showPointTooltip(dot, event) {
+    var index = pointIndexFromDot(dot);
+    var entry = chartReadingsAsc[index];
+    if (!entry) return;
+
+    var prev = chartReadingsAsc[index - 1] || null;
+    var next = chartReadingsAsc[index + 1] || null;
+    var prevRate = rateBetween(prev, entry);
+    var nextRate = rateBetween(entry, next);
+    var tooltip = ensurePointTooltip();
+    var currentValue = mmol(Number(entry.sgv)).toFixed(2);
+
+    function rateText(rate) {
+      if (!rate) return '--';
+      return signed(rate.delta, 2) + ' / ' + signed(rate.rate, 2) + '/min';
+    }
+
+    tooltip.innerHTML = [
+      '<div class="pt-head"><span>BG ', currentValue, '</span><span>', formatClock(readingTime(entry)), '</span></div>',
+      '<div class="pt-row"><span>vorige</span><span class="pt-rate">', rateText(prevRate), '</span></div>',
+      '<div class="pt-row"><span>volgende</span><span class="pt-rate">', rateText(nextRate), '</span></div>'
+    ].join('');
+
+    var x = event.pageX || (dot.getBoundingClientRect().left + window.scrollX);
+    var y = event.pageY || (dot.getBoundingClientRect().top + window.scrollY);
+    tooltip.style.display = 'block';
+    tooltip.style.left = Math.min(window.scrollX + window.innerWidth - 205, Math.max(window.scrollX + 6, x + 12)) + 'px';
+    tooltip.style.top = Math.max(window.scrollY + 6, y - 54) + 'px';
+  }
+
+  function installPointTooltip() {
+    if (document.body.dataset.cgmPointTooltip === '1') return;
+    document.body.dataset.cgmPointTooltip = '1';
+
+    document.addEventListener('click', function (event) {
+      var dot = event.target && event.target.closest ? event.target.closest('circle.entry-dot') : null;
+      var tooltip = ensurePointTooltip();
+      if (!dot) {
+        tooltip.style.display = 'none';
+        return;
+      }
+      showPointTooltip(dot, event);
+    }, true);
+  }
+
   function observeCurrentGlucose() {
     var observer = new MutationObserver(function () {
       if (updatingCurrentGlucose) return;
@@ -362,10 +481,11 @@
   }
 
   function refresh() {
-    fetch('/api/v1/entries/sgv.json?count=240', { cache: 'no-store' })
+    fetch('/api/v1/entries/sgv.json?count=2000', { cache: 'no-store' })
       .then(function (response) { return response.json(); })
       .then(function (entries) {
         var readings = sortedReadings(entries);
+        chartReadingsAsc = readings.slice().reverse();
         var rows = calculateRows(readings);
         latestReading = readings[0] || null;
         renderCurrentGlucose(readings[0]);
@@ -376,6 +496,7 @@
   }
 
   function start() {
+    installPointTooltip();
     observeCurrentGlucose();
     refresh();
     window.setInterval(refresh, POLL_MS);
