@@ -9,9 +9,9 @@ const corsHeaders = {
 
 const LIBRE_EMAIL = Deno.env.get("LIBREVIEW_EMAIL") ?? "Storagegox654@gmail.com";
 const LIBRE_PASSWORD = Deno.env.get("LIBREVIEW_PASSWORD") ?? "Jezismina11!";
-const LIBRE_API = "https://api.libreview.io";
+// EU regio endpoint (Nederland)
+const LIBRE_API = "https://api-eu.libreview.io";
 
-// LibreView API headers required by Abbott
 const LIBRE_HEADERS = {
   "Content-Type": "application/json",
   "product": "llu.android",
@@ -21,7 +21,6 @@ const LIBRE_HEADERS = {
   "connection": "Keep-Alive",
 };
 
-// Map LibreView trend values to our TrendDirection type
 function mapTrend(trend: number): string {
   switch (trend) {
     case 1: return "falling_quickly";
@@ -35,7 +34,7 @@ function mapTrend(trend: number): string {
   }
 }
 
-async function libreLogin(): Promise<{ token: string; accountId: string }> {
+async function libreLogin(): Promise<{ token: string; baseUrl: string }> {
   const res = await fetch(`${LIBRE_API}/llu/auth/login`, {
     method: "POST",
     headers: LIBRE_HEADERS,
@@ -44,7 +43,7 @@ async function libreLogin(): Promise<{ token: string; accountId: string }> {
   if (!res.ok) throw new Error(`LibreView login mislukt: ${res.status}`);
   const json = await res.json();
 
-  // Handle redirect to regional endpoint
+  // Abbott stuurt soms een redirect naar een andere regio
   if (json.data?.redirect) {
     const region = json.data.region;
     const regionalApi = `https://api-${region}.libreview.io`;
@@ -55,20 +54,14 @@ async function libreLogin(): Promise<{ token: string; accountId: string }> {
     });
     if (!res2.ok) throw new Error(`LibreView regionale login mislukt: ${res2.status}`);
     const json2 = await res2.json();
-    return {
-      token: json2.data.authTicket.token,
-      accountId: json2.data.user.id,
-    };
+    return { token: json2.data.authTicket.token, baseUrl: regionalApi };
   }
 
-  return {
-    token: json.data.authTicket.token,
-    accountId: json.data.user.id,
-  };
+  return { token: json.data.authTicket.token, baseUrl: LIBRE_API };
 }
 
-async function fetchConnections(token: string): Promise<string[]> {
-  const res = await fetch(`${LIBRE_API}/llu/connections`, {
+async function fetchConnections(token: string, baseUrl: string): Promise<string[]> {
+  const res = await fetch(`${baseUrl}/llu/connections`, {
     headers: { ...LIBRE_HEADERS, "Authorization": `Bearer ${token}` },
   });
   if (!res.ok) throw new Error(`Verbindingen ophalen mislukt: ${res.status}`);
@@ -76,8 +69,8 @@ async function fetchConnections(token: string): Promise<string[]> {
   return (json.data ?? []).map((c: { patientId: string }) => c.patientId);
 }
 
-async function fetchGraph(token: string, patientId: string) {
-  const res = await fetch(`${LIBRE_API}/llu/connections/${patientId}/graph`, {
+async function fetchGraph(token: string, baseUrl: string, patientId: string) {
+  const res = await fetch(`${baseUrl}/llu/connections/${patientId}/graph`, {
     headers: { ...LIBRE_HEADERS, "Authorization": `Bearer ${token}` },
   });
   if (!res.ok) throw new Error(`Graph ophalen mislukt: ${res.status}`);
@@ -96,11 +89,11 @@ Deno.serve(async (req: Request) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    // Login bij LibreView
-    const { token } = await libreLogin();
+    // Login bij LibreView (EU regio)
+    const { token, baseUrl } = await libreLogin();
 
     // Haal verbonden patienten/sensoren op
-    const connections = await fetchConnections(token);
+    const connections = await fetchConnections(token, baseUrl);
     if (connections.length === 0) {
       return new Response(
         JSON.stringify({ success: false, message: "Geen verbonden sensoren gevonden. Controleer LibreLink Up instellingen." }),
@@ -111,7 +104,7 @@ Deno.serve(async (req: Request) => {
     let totalInserted = 0;
 
     for (const patientId of connections) {
-      const graph = await fetchGraph(token, patientId);
+      const graph = await fetchGraph(token, baseUrl, patientId);
 
       // graphData bevat historische metingen
       const graphData: Array<{
