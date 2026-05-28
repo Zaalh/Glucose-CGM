@@ -102,6 +102,8 @@
         rateMgdl: rateMgdl,
         rateMmol: rateMmol,
         deltaMmol: mmol(deltaMgdl),
+        fromMmol: mmol(Number(baseline.sgv)),
+        toMmol: mmol(Number(latest.sgv)),
         css: trendClass(rateMgdl),
         text: trendLabel(rateMgdl)
       };
@@ -168,7 +170,7 @@
     var style = document.createElement('style');
     style.id = 'cgm-rate-overlay-style';
     style.textContent = [
-      '#cgm-rate-overlay{position:absolute!important;z-index:9999!important;top:174px;left:50%;transform:translateX(-50%);display:grid;grid-template-columns:repeat(4,minmax(96px,1fr));gap:4px;width:min(98vw,620px);font-family:Arial,Helvetica,sans-serif;pointer-events:none;align-items:start}',
+      '#cgm-rate-overlay{position:absolute!important;z-index:9999!important;top:174px;left:50%;transform:translateX(-50%);display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:6px;width:min(98vw,860px);font-family:Arial,Helvetica,sans-serif;pointer-events:none;align-items:start}',
       '#cgm-rate-overlay.all{grid-template-columns:repeat(7,minmax(72px,1fr));width:min(98vw,1040px)}',
       '#cgm-hypo-alert{position:absolute!important;z-index:10000!important;left:50%;transform:translateX(-50%);top:174px;display:flex;align-items:center;justify-content:center;gap:8px;width:max-content;max-width:min(560px,86vw);min-width:210px;border:1px solid rgba(255,255,255,.24);border-radius:5px;padding:5px 10px;font-family:Arial,Helvetica,sans-serif;box-sizing:border-box;box-shadow:0 1px 8px rgba(0,0,0,.5)}',
       '#cgm-hypo-alert .hypo-title{font-size:11px;font-weight:900;line-height:1;text-transform:uppercase;white-space:nowrap}',
@@ -181,12 +183,12 @@
       '#cgm-rate-toggle{position:absolute!important;z-index:10000!important;left:50%;transform:translateX(-50%);top:174px;border:1px solid rgba(255,255,255,.25);border-radius:5px;background:rgba(0,0,0,.72);color:#ddd;font:700 11px Arial,Helvetica,sans-serif;padding:5px 8px;cursor:pointer}',
       '#cgm-rate-toggle:hover{background:rgba(30,30,30,.9);color:#fff}',
       '.primary,.bgStatus.current{overflow:visible!important}',
-      '#cgm-rate-overlay .rate-card{border:1px solid rgba(255,255,255,.22);border-radius:5px;background:rgba(9,9,9,.82);color:#ddd;padding:4px 5px;text-align:left;box-shadow:0 -1px 6px rgba(0,0,0,.45);min-width:0;min-height:38px;box-sizing:border-box}',
+      '#cgm-rate-overlay .rate-card{border:1px solid rgba(255,255,255,.22);border-radius:5px;background:rgba(9,9,9,.82);color:#ddd;padding:5px 7px;text-align:left;box-shadow:0 -1px 6px rgba(0,0,0,.45);min-width:0;min-height:46px;box-sizing:border-box}',
       '#cgm-rate-overlay .rate-card.primary{border-width:1px;border-bottom-width:2px}',
-      '#cgm-rate-overlay .rate-window{display:block;font-size:8px;line-height:1;text-transform:uppercase;opacity:.9;letter-spacing:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-      '#cgm-rate-overlay .rate-main{display:block;font-family:monospace;font-size:12px;font-weight:900;line-height:1.12;letter-spacing:0;margin-top:2px}',
-      '#cgm-rate-overlay .rate-card.primary .rate-main{font-size:12px}',
-      '#cgm-rate-overlay .rate-sub{display:block;font-size:7px;line-height:1.1;opacity:.9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+      '#cgm-rate-overlay .rate-window{display:block;font-size:9px;line-height:1;text-transform:uppercase;opacity:.9;letter-spacing:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '#cgm-rate-overlay .rate-main{display:block;font-family:monospace;font-size:15px;font-weight:900;line-height:1.12;letter-spacing:0;margin-top:2px}',
+      '#cgm-rate-overlay .rate-card.primary .rate-main{font-size:15px}',
+      '#cgm-rate-overlay .rate-sub{display:block;font-size:9px;line-height:1.12;opacity:.92;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
       '#cgm-rate-overlay .very-fast-down{color:#fff7ed;border-color:#fb7185;background:linear-gradient(135deg,#f59e0b 0%,#e11d48 100%);text-shadow:0 1px 2px rgba(0,0,0,.45)}',
       '#cgm-rate-overlay .fast-down{color:#2f1600;border-color:#f59e0b;background:linear-gradient(135deg,#ffe08a 0%,#fb923c 100%)}',
       '#cgm-rate-overlay .down{color:#2f1600;border-color:#facc15;background:linear-gradient(135deg,#fff3a3 0%,#fbbf24 100%)}',
@@ -195,7 +197,7 @@
       '#cgm-rate-overlay .fast-up{color:#faf5ff;border-color:#a855f7;background:linear-gradient(135deg,#c084fc 0%,#9333ea 100%);text-shadow:0 1px 2px rgba(0,0,0,.42)}',
       '#cgm-rate-overlay .very-fast-up{color:#faf5ff;border-color:#7e22ce;background:linear-gradient(135deg,#9333ea 0%,#581c87 100%);text-shadow:0 1px 2px rgba(0,0,0,.52)}',
       '#cgm-rate-overlay .missing{color:#8a8a8a;border-color:rgba(255,255,255,.14);background:rgba(0,0,0,.28)}',
-      '@media(max-width:700px){#cgm-rate-overlay,#cgm-rate-overlay.all{grid-template-columns:repeat(4,minmax(72px,1fr));gap:3px;width:98vw}#cgm-hypo-alert{left:50%;right:auto;transform:translateX(-50%);max-width:86vw;min-width:0;gap:5px;padding:5px 7px}#cgm-hypo-alert .hypo-title,#cgm-hypo-alert .hypo-detail{font-size:10px}#cgm-hypo-alert .hypo-rate{font-size:9px}#cgm-rate-overlay .rate-card{padding:4px 5px 3px;min-height:38px}#cgm-rate-overlay .rate-main,#cgm-rate-overlay .rate-card.primary .rate-main{font-size:12px}#cgm-rate-overlay .rate-sub{font-size:7px}}'
+      '@media(max-width:700px){#cgm-rate-overlay,#cgm-rate-overlay.all{grid-template-columns:repeat(4,minmax(72px,1fr));gap:3px;width:98vw}#cgm-hypo-alert{left:50%;right:auto;transform:translateX(-50%);max-width:86vw;min-width:0;gap:5px;padding:5px 7px}#cgm-hypo-alert .hypo-title,#cgm-hypo-alert .hypo-detail{font-size:10px}#cgm-hypo-alert .hypo-rate{font-size:9px}#cgm-rate-overlay .rate-card{padding:4px 5px 3px;min-height:42px}#cgm-rate-overlay .rate-window{font-size:8px}#cgm-rate-overlay .rate-main,#cgm-rate-overlay .rate-card.primary .rate-main{font-size:13px}#cgm-rate-overlay .rate-sub{font-size:7px}}'
     ].join('');
     document.head.appendChild(style);
   }
@@ -328,7 +330,7 @@
         '<div class="rate-card ', row.css, index === 0 ? ' primary' : '', '">',
         '<span class="rate-window">', row.label, ' ', row.text, '</span>',
         '<span class="rate-main">', signed(row.rateMmol, 2), '</span>',
-        '<span class="rate-sub">mmol/L/min · ', row.actualMinutes.toFixed(1), 'm · Δ ', signed(row.deltaMmol, 1), '</span>',
+        '<span class="rate-sub">', row.fromMmol.toFixed(2), '→', row.toMmol.toFixed(2), ' · Δ ', signed(row.deltaMmol, 2), '</span>',
         '</div>'
       ].join('');
     }).join('');
