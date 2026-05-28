@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
+import { supabase } from '../lib/supabase'
 import type { GlucoseReading } from '../types'
 import { getGlucoseStatus, trendArrow } from '../types'
-import { fetchNightscoutReadings } from '../lib/nightscout'
-import { triggerLibreViewSync } from '../lib/libreviewSync'
 import GlucoseChart from '../components/GlucoseChart'
 import CurrentReading from '../components/CurrentReading'
 import styles from './Dashboard.module.css'
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string
 
 export default function Dashboard() {
   const [readings, setReadings] = useState<GlucoseReading[]>([])
@@ -18,35 +20,38 @@ export default function Dashboard() {
     fetchReadings()
   }, [range])
 
-  async function fetchReadings() {
-    setLoading(true)
-    try {
-      const data = await fetchNightscoutReadings(range)
-      setReadings(data)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Nightscout kon niet gelezen worden.'
-      setSyncMsg(message)
-      setReadings([])
-      setTimeout(() => setSyncMsg(null), 12000)
-    } finally {
-      setLoading(false)
-    }
-  }
-
   async function syncLibreView() {
     setSyncing(true)
     setSyncMsg(null)
     try {
-      const result = await triggerLibreViewSync()
-      setSyncMsg(result.message ?? (result.success ? 'Gesynchroniseerd.' : 'Synchronisatie mislukt.'))
-      await fetchReadings()
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Verbindingsfout bij synchronisatie.'
-      setSyncMsg(message)
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/libreview-sync`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+      })
+      const json = await res.json()
+      setSyncMsg(json.message ?? (json.success ? 'Gesynchroniseerd.' : 'Synchronisatie mislukt.'))
+      if (json.success) await fetchReadings()
+    } catch {
+      setSyncMsg('Verbindingsfout bij synchronisatie.')
     } finally {
       setSyncing(false)
       setTimeout(() => setSyncMsg(null), 12000)
     }
+  }
+
+  async function fetchReadings() {
+    setLoading(true)
+    const since = new Date(Date.now() - range * 60 * 60 * 1000).toISOString()
+    const { data, error } = await supabase
+      .from('glucose_readings')
+      .select('id, timestamp, value_mmol, trend, source, created_at')
+      .order('timestamp', { ascending: true })
+    console.log('fetchReadings', { since, count: data?.length, error })
+    setReadings((data as GlucoseReading[]) ?? [])
+    setLoading(false)
   }
 
   const latest = readings.at(-1) ?? null
@@ -85,7 +90,7 @@ export default function Dashboard() {
               className={styles.syncBtn}
               onClick={syncLibreView}
               disabled={syncing}
-              title="Synchroniseer LibreView naar Nightscout/MongoDB"
+              title="Synchroniseer met FreeStyle Libre 3"
             >
               <span className={syncing ? styles.spinning : ''}>⟳</span>
               {syncing ? 'Syncing...' : 'Sync Libre'}

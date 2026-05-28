@@ -1,8 +1,2 @@
 node_modules/
-dist/
-.npm-cache/
 .env
-.env.local
-.env.nightscout
-.env.libreview
-nightscout-mongo-data/
