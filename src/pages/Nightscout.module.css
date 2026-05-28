@@ -198,6 +198,11 @@
 .hero.very_high { background: #3d2a08; }
 
 .heroValue {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
   font-size: 80px;
   font-weight: 700;
   line-height: 1;
@@ -240,6 +245,56 @@
   font-size: 22px;
   font-weight: 500;
   color: #8b949e;
+}
+
+.heroRate {
+  align-self: center;
+  display: inline-grid;
+  grid-template-columns: auto auto;
+  column-gap: 8px;
+  row-gap: 1px;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: rgba(13, 17, 23, 0.68);
+  font-family: monospace;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: 0;
+  color: #8b949e;
+  white-space: nowrap;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.12);
+}
+
+.heroRate.rising {
+  color: #3fb950;
+  border-color: rgba(63, 185, 80, 0.65);
+  background: rgba(13, 42, 21, 0.85);
+}
+
+.heroRate.falling {
+  color: #ff6b63;
+  border-color: rgba(248, 81, 73, 0.78);
+  background: rgba(61, 8, 8, 0.88);
+}
+
+.heroRateArrow {
+  grid-row: span 2;
+  font-size: 28px;
+  line-height: 1;
+}
+
+.heroRateText {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.heroRateValue {
+  font-size: 14px;
+  color: #e6edf3;
 }
 
 .heroPrediction {
@@ -417,6 +472,7 @@
 
 @media (max-width: 768px) {
   .heroValue { font-size: 64px; }
+  .heroRate { font-size: 13px; }
   .statsRow { grid-template-columns: repeat(3, 1fr); }
   .statTile { border-right: 1px solid #21262d; }
   .statTile:nth-child(3n) { border-right: none; }
@@ -426,6 +482,11 @@
 @media (max-width: 480px) {
   .topBar { padding: 8px 12px; }
   .heroValue { font-size: 52px; }
+  .heroRate {
+    flex-basis: 100%;
+    max-width: max-content;
+    margin-top: 2px;
+  }
   .statsRow { grid-template-columns: repeat(2, 1fr); }
   .statTile:nth-child(2n) { border-right: none; }
   .statTile:nth-child(3n) { border-right: 1px solid #21262d; }

@@ -81,6 +81,7 @@ export default function NightscoutChart({ readings, unit = 'mmol', predictedIn20
   const timeMax = predLineData.length
     ? predLineData[predLineData.length - 1].time
     : data[data.length - 1]?.time ?? Date.now()
+  const timeSpanMs = timeMax - timeMin
 
   // Prediction line color based on where it ends up
   const lineColor = predictedIn20 !== null
@@ -114,7 +115,7 @@ export default function NightscoutChart({ readings, unit = 'mmol', predictedIn20
           dataKey="time"
           type="number"
           domain={[timeMin, timeMax]}
-          tickFormatter={formatTick}
+          tickFormatter={ts => formatTick(ts, timeSpanMs)}
           tick={{ fontSize: 11, fill: '#484f58' }}
           tickLine={false}
           axisLine={{ stroke: '#21262d' }}
@@ -131,7 +132,7 @@ export default function NightscoutChart({ readings, unit = 'mmol', predictedIn20
 
         <Tooltip
           cursor={{ stroke: '#30363d', strokeDasharray: '4 4' }}
-          content={<CustomTooltip unit={unit} lineColor={lineColor} />}
+          content={<CustomTooltip unit={unit} lineColor={lineColor} timeSpanMs={timeSpanMs} />}
         />
 
         <ReferenceLine y={low}  stroke="#f85149" strokeDasharray="4 4" strokeWidth={1} opacity={0.6} />
@@ -202,16 +203,20 @@ function HollowDot({ cx, cy, lineColor }: { cx?: number; cy?: number; lineColor:
   )
 }
 
-function formatTick(ts: number) {
+function formatTick(ts: number, spanMs = 0) {
   const d = new Date(ts)
+  if (spanMs > 72 * 60 * 60 * 1000) {
+    return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}`
+  }
   return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
 }
 
-function CustomTooltip({ active, payload, unit, lineColor }: {
+function CustomTooltip({ active, payload, unit, lineColor, timeSpanMs }: {
   active?: boolean
   payload?: Array<{ payload: { time: number; value?: number; pred?: number; predMmol?: number; status?: string } }>
   unit?: 'mmol' | 'mgdl'
   lineColor?: string
+  timeSpanMs?: number
 }) {
   if (!active || !payload?.length) return null
   const d = payload[0].payload
@@ -233,8 +238,17 @@ function CustomTooltip({ active, payload, unit, lineColor }: {
         {isPred ? `~ ${label}` : label}
       </div>
       <div style={{ color: '#8b949e' }}>
-        {formatTick(d.time)}{isPred ? ' (voorspelling)' : ''}
+        {formatTooltipTime(d.time, timeSpanMs)}{isPred ? ' (voorspelling)' : ''}
       </div>
     </div>
   )
+}
+
+function formatTooltipTime(ts: number, spanMs = 0) {
+  const d = new Date(ts)
+  const clock = `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
+  if (spanMs > 72 * 60 * 60 * 1000) {
+    return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')} ${clock}`
+  }
+  return clock
 }

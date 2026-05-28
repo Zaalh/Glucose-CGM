@@ -15,8 +15,11 @@ interface Props {
 }
 
 export default function GlucoseChart({ readings }: Props) {
+  const firstTime = readings[0] ? new Date(readings[0].timestamp).getTime() : Date.now()
+  const lastTime = readings.at(-1) ? new Date(readings.at(-1)!.timestamp).getTime() : Date.now()
+  const timeSpanMs = lastTime - firstTime
   const data = readings.map(r => ({
-    time: formatTime(r.timestamp),
+    time: formatTime(r.timestamp, timeSpanMs),
     value: r.value_mmol,
   }))
 
@@ -65,7 +68,10 @@ export default function GlucoseChart({ readings }: Props) {
   )
 }
 
-function formatTime(timestamp: string) {
+function formatTime(timestamp: string, spanMs = 0) {
   const d = new Date(timestamp)
+  if (spanMs > 72 * 60 * 60 * 1000) {
+    return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}`
+  }
   return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
 }

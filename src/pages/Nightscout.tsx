@@ -20,7 +20,18 @@ const NightscoutChart = lazy(() => import('../components/NightscoutChart'))
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string
 
-const RANGE_OPTIONS = [1, 2, 3, 6, 12, 24, 48] as const
+const RANGE_OPTIONS = [
+  { value: 1, label: '1u' },
+  { value: 2, label: '2u' },
+  { value: 3, label: '3u' },
+  { value: 6, label: '6u' },
+  { value: 12, label: '12u' },
+  { value: 24, label: '24u' },
+  { value: 48, label: '48u' },
+  { value: 24 * 7, label: '7d' },
+  { value: 24 * 30, label: '30d' },
+  { value: 24 * 90, label: '90d' },
+] as const
 type Range = typeof RANGE_OPTIONS[number]
 
 type Unit = 'mmol' | 'mgdl'
@@ -28,6 +39,23 @@ type Unit = 'mmol' | 'mgdl'
 function mmolToMgdl(v: number) { return Math.round(v * 18.0182) }
 function fmtVal(v: number, unit: Unit) {
   return unit === 'mgdl' ? `${mmolToMgdl(v)}` : v.toFixed(1)
+}
+function fmtRate(rateMmolPerMin: number, unit: Unit) {
+  if (unit === 'mgdl') {
+    const value = rateMmolPerMin * 18.0182
+    return `${value >= 0 ? '+' : ''}${value.toFixed(1)} mg/dL/min`
+  }
+
+  return `${rateMmolPerMin >= 0 ? '+' : ''}${rateMmolPerMin.toFixed(2)} mmol/L/min`
+}
+
+function rateLabel(rateMmolPerMin: number) {
+  const rateMgdlPerMin = rateMmolPerMin * 18.0182
+  const absRate = Math.abs(rateMgdlPerMin)
+
+  if (absRate < 1) return rateMmolPerMin < 0 ? 'daalt langzaam' : 'stabiel'
+  if (absRate < 2) return rateMmolPerMin < 0 ? 'daalt' : 'stijgt'
+  return rateMmolPerMin < 0 ? 'daalt snel' : 'stijgt snel'
 }
 
 // Estimated HbA1c from average glucose (mmol/L): IFCC formula
@@ -45,7 +73,7 @@ function stdDev(readings: GlucoseReading[]) {
 export default function Nightscout() {
   const [readings, setReadings] = useState<GlucoseReading[]>([])
   const [loading, setLoading] = useState(true)
-  const [range, setRange] = useState<Range>(3)
+  const [range, setRange] = useState<Range['value']>(3)
   const [unit, setUnit] = useState<Unit>('mmol')
   const [syncing, setSyncing] = useState(false)
   const [syncMsg, setSyncMsg] = useState<{ text: string; ok: boolean } | null>(null)
@@ -177,6 +205,9 @@ export default function Nightscout() {
   const delta = latest && prev
     ? latest.value_mmol - prev.value_mmol
     : null
+  const ratePerMinute = latest
+    ? glucoseRatePerMinute(readings, latest)
+    : null
 
   const avgMmol = readings.length > 0
     ? readings.reduce((s, r) => s + r.value_mmol, 0) / readings.length
@@ -202,11 +233,11 @@ export default function Nightscout() {
         <div className={styles.rangeButtons}>
           {RANGE_OPTIONS.map(r => (
             <button
-              key={r}
-              className={`${styles.rangeBtn} ${range === r ? styles.active : ''}`}
-              onClick={() => setRange(r)}
+              key={r.value}
+              className={`${styles.rangeBtn} ${range === r.value ? styles.active : ''}`}
+              onClick={() => setRange(r.value)}
             >
-              {r}u
+              {r.label}
             </button>
           ))}
         </div>
@@ -306,6 +337,15 @@ export default function Nightscout() {
             <div className={styles.heroValue}>
               {fmtVal(latest.value_mmol, unit)}
               <span className={styles.heroUnit}>{unit === 'mgdl' ? 'mg/dL' : 'mmol/L'}</span>
+              {ratePerMinute !== null && (
+                <span className={`${styles.heroRate} ${ratePerMinute > 0 ? styles.rising : ratePerMinute < 0 ? styles.falling : ''}`}>
+                  <span className={styles.heroRateArrow}>
+                    {ratePerMinute > 0 ? '↑' : ratePerMinute < 0 ? '↓' : '→'}
+                  </span>
+                  <span className={styles.heroRateText}>{rateLabel(ratePerMinute)}</span>
+                  <span className={styles.heroRateValue}>{fmtRate(ratePerMinute, unit)}</span>
+                </span>
+              )}
             </div>
             <div className={styles.heroRow}>
               <span className={styles.heroTrend}>{trendArrow(latest.trend)}</span>
@@ -423,4 +463,26 @@ function StatTile({ label, value, unit, color, hint }: {
 
 function formatClock(d: Date) {
   return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
+}
+
+function glucoseRatePerMinute(readings: GlucoseReading[], latest: GlucoseReading) {
+  const latestTime = new Date(latest.timestamp).getTime()
+  const sorted = [...readings].sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  )
+  const windowStart = latestTime - 15 * 60_000
+  const baseline = [...sorted]
+    .reverse()
+    .find(r => {
+      const time = new Date(r.timestamp).getTime()
+      const ageMin = (latestTime - time) / 60_000
+      return time >= windowStart && ageMin >= 4
+    }) ?? (sorted.length >= 2 ? sorted[sorted.length - 2] : null)
+
+  if (!baseline) return null
+
+  const dtMin = (latestTime - new Date(baseline.timestamp).getTime()) / 60_000
+  if (!Number.isFinite(dtMin) || dtMin <= 0) return null
+
+  return (latest.value_mmol - baseline.value_mmol) / dtMin
 }
