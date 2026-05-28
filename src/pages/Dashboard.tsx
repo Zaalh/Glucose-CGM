@@ -48,7 +48,6 @@ export default function Dashboard() {
     const { data, error } = await supabase
       .from('glucose_readings')
       .select('id, timestamp, value_mmol, trend, source, created_at')
-      .gte('timestamp', since)
       .order('timestamp', { ascending: true })
     console.log('fetchReadings', { since, count: data?.length, error })
     setReadings((data as GlucoseReading[]) ?? [])
