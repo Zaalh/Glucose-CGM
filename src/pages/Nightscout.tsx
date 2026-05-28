@@ -3,6 +3,17 @@ import { supabase } from '../lib/supabase'
 import type { GlucoseReading } from '../types'
 import { getGlucoseStatus, trendArrow } from '../types'
 import NightscoutChart from '../components/NightscoutChart'
+import {
+  loadThresholds,
+  checkAlarms,
+  checkStale,
+  playAlarm,
+  sendNotification,
+  snooze,
+  ALARM_LABELS,
+  ALARM_COLORS,
+  type ActiveAlarm,
+} from '../lib/alarms'
 import styles from './Nightscout.module.css'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
@@ -40,6 +51,9 @@ export default function Nightscout() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [countdown, setCountdown] = useState(60)
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [activeAlarm, setActiveAlarm] = useState<ActiveAlarm | null>(null)
+  const [staleAlarm, setStaleAlarm] = useState(false)
+  const lastAlarmKey = useRef<string | null>(null)
 
   const fetchReadings = useCallback(async () => {
     setLoading(true)
@@ -65,6 +79,34 @@ export default function Nightscout() {
     setLastUpdated(new Date())
     setLoading(false)
     setCountdown(60)
+
+    // Alarm check
+    const latest = readings.at(-1) ?? null
+    const thresholds = loadThresholds()
+    const alarm = checkAlarms(latest, thresholds)
+    const stale = thresholds.enabled ? checkStale(latest, thresholds.staleMinutes) : false
+
+    setActiveAlarm(alarm)
+    setStaleAlarm(stale)
+
+    if (alarm) {
+      const key = `${alarm.level}-${alarm.value}`
+      if (lastAlarmKey.current !== key) {
+        lastAlarmKey.current = key
+        playAlarm(alarm.level === 'urgent_low' || alarm.level === 'urgent_high')
+        const label = ALARM_LABELS[alarm.level]
+        sendNotification(label, `${alarm.value.toFixed(1)} mmol/L${alarm.isPredictive ? ' (voorspeld)' : ''}`)
+      }
+    } else if (stale) {
+      const key = 'stale'
+      if (lastAlarmKey.current !== key) {
+        lastAlarmKey.current = key
+        playAlarm(false)
+        sendNotification('Sensor verloren', 'Geen recente glucosemeting ontvangen.')
+      }
+    } else {
+      lastAlarmKey.current = null
+    }
   }, [range])
 
   useEffect(() => {
@@ -164,6 +206,74 @@ export default function Nightscout() {
           </button>
         </div>
       </div>
+
+      {/* Alarm banner */}
+      {(activeAlarm || staleAlarm) && (
+        <div
+          className={styles.alarmBanner}
+          style={{ borderColor: activeAlarm ? ALARM_COLORS[activeAlarm.level] : ALARM_COLORS.stale }}
+        >
+          <div className={styles.alarmBannerLeft}>
+            <span
+              className={styles.alarmBannerDot}
+              style={{ background: activeAlarm ? ALARM_COLORS[activeAlarm.level] : ALARM_COLORS.stale }}
+            />
+            <div>
+              <div className={styles.alarmBannerTitle}>
+                {activeAlarm
+                  ? `${ALARM_LABELS[activeAlarm.level]}${activeAlarm.isPredictive ? ' (voorspeld)' : ''}`
+                  : 'Sensor verloren'}
+              </div>
+              {activeAlarm && (
+                <div className={styles.alarmBannerSub}>
+                  {fmtVal(activeAlarm.value, unit)} {unit === 'mgdl' ? 'mg/dL' : 'mmol/L'}
+                  {activeAlarm.predicted !== undefined && (
+                    <> · voorspeld {fmtVal(activeAlarm.predicted, unit)} over 20 min</>
+                  )}
+                </div>
+              )}
+              {staleAlarm && !activeAlarm && (
+                <div className={styles.alarmBannerSub}>Geen recente meting ontvangen</div>
+              )}
+            </div>
+          </div>
+          <div className={styles.alarmBannerRight}>
+            <button
+              className={styles.snoozeBtn}
+              onClick={() => {
+                const level = activeAlarm ? activeAlarm.level : 'stale'
+                snooze(level, 15)
+                setActiveAlarm(null)
+                setStaleAlarm(false)
+              }}
+            >
+              Snooze 15 min
+            </button>
+            <button
+              className={styles.snoozeBtn}
+              onClick={() => {
+                const level = activeAlarm ? activeAlarm.level : 'stale'
+                snooze(level, 30)
+                setActiveAlarm(null)
+                setStaleAlarm(false)
+              }}
+            >
+              30 min
+            </button>
+            <button
+              className={styles.snoozeBtn}
+              onClick={() => {
+                const level = activeAlarm ? activeAlarm.level : 'stale'
+                snooze(level, 60)
+                setActiveAlarm(null)
+                setStaleAlarm(false)
+              }}
+            >
+              60 min
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main reading */}
       <div className={`${styles.hero} ${styles[status ?? 'normal']}`}>

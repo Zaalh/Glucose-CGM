@@ -107,6 +107,78 @@
   animation: spin 0.8s linear infinite;
 }
 
+/* Alarm banner */
+.alarmBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 20px;
+  border-left: 4px solid #f85149;
+  background: #1a0d0d;
+  flex-wrap: wrap;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.85; }
+}
+
+.alarmBannerLeft {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.alarmBannerDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.alarmBannerTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e6edf3;
+}
+
+.alarmBannerSub {
+  font-size: 12px;
+  color: #8b949e;
+  margin-top: 2px;
+}
+
+.alarmBannerRight {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.snoozeBtn {
+  padding: 5px 12px;
+  background: transparent;
+  border: 1px solid #30363d;
+  color: #8b949e;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+}
+
+.snoozeBtn:hover {
+  background: #21262d;
+  color: #e6edf3;
+}
+
 /* Hero reading */
 .hero {
   display: flex;

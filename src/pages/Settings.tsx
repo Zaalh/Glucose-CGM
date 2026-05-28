@@ -2,6 +2,15 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import type { AlertRule } from '../types'
 import AlertRuleRow from '../components/AlertRuleRow'
+import {
+  loadThresholds,
+  saveThresholds,
+  DEFAULT_THRESHOLDS,
+  requestNotificationPermission,
+  unlockAudio,
+  playAlarm,
+  type AlarmThresholds,
+} from '../lib/alarms'
 import styles from './Settings.module.css'
 
 export default function Settings() {
@@ -11,6 +20,12 @@ export default function Settings() {
   const [newName, setNewName] = useState('')
   const [newLow, setNewLow] = useState('')
   const [newHigh, setNewHigh] = useState('')
+
+  const [thresholds, setThresholds] = useState<AlarmThresholds>(loadThresholds)
+  const [notifGranted, setNotifGranted] = useState(
+    typeof Notification !== 'undefined' && Notification.permission === 'granted'
+  )
+  const [audioUnlocked, setAudioUnlocked] = useState(false)
 
   useEffect(() => {
     fetchRules()
@@ -56,8 +71,133 @@ export default function Settings() {
     setRules(prev => prev.filter(r => r.id !== id))
   }
 
+  function updateThreshold(key: keyof AlarmThresholds, value: number | boolean) {
+    const next = { ...thresholds, [key]: value }
+    setThresholds(next)
+    saveThresholds(next)
+  }
+
+  async function handleEnableAlarms(checked: boolean) {
+    if (checked) {
+      unlockAudio()
+      setAudioUnlocked(true)
+      const granted = await requestNotificationPermission()
+      setNotifGranted(granted)
+    }
+    updateThreshold('enabled', checked)
+  }
+
+  function handleTestAlarm(urgent: boolean) {
+    unlockAudio()
+    setAudioUnlocked(true)
+    playAlarm(urgent)
+  }
+
+  function resetThresholds() {
+    const next = { ...DEFAULT_THRESHOLDS, enabled: thresholds.enabled }
+    setThresholds(next)
+    saveThresholds(next)
+  }
+
   return (
     <div className={styles.page}>
+
+      {/* Alarm instellingen */}
+      <div className={styles.section}>
+        <h2 className={styles.sectionTitle}>Alarm instellingen</h2>
+        <p className={styles.sectionDesc}>
+          Stel drempelwaarden in voor glucose alarmen. Bij overschrijding klinkt er een geluid en verschijnt er een melding.
+        </p>
+
+        <div className={styles.alarmToggleRow}>
+          <label className={styles.toggleLabel}>
+            <span>Alarmen inschakelen</span>
+            <div className={styles.toggleWrap}>
+              <input
+                type="checkbox"
+                className={styles.toggleInput}
+                checked={thresholds.enabled}
+                onChange={e => handleEnableAlarms(e.target.checked)}
+              />
+              <span className={styles.toggleSlider} />
+            </div>
+          </label>
+          {thresholds.enabled && (
+            <div className={styles.alarmStatus}>
+              <span className={notifGranted ? styles.statusOk : styles.statusWarn}>
+                {notifGranted ? 'Meldingen aan' : 'Meldingen geblokkeerd'}
+              </span>
+              <span className={audioUnlocked ? styles.statusOk : styles.statusWarn}>
+                {audioUnlocked ? 'Geluid ontgrendeld' : 'Klik test om geluid te activeren'}
+              </span>
+            </div>
+          )}
+        </div>
+
+        <div className={styles.thresholdGrid}>
+          <ThresholdRow
+            label="Urgent laag"
+            color="#ff4444"
+            value={thresholds.urgentLow}
+            onChange={v => updateThreshold('urgentLow', v)}
+            min={2.0}
+            max={4.0}
+          />
+          <ThresholdRow
+            label="Laag"
+            color="#f85149"
+            value={thresholds.low}
+            onChange={v => updateThreshold('low', v)}
+            min={2.5}
+            max={5.0}
+          />
+          <ThresholdRow
+            label="Hoog"
+            color="#d29922"
+            value={thresholds.high}
+            onChange={v => updateThreshold('high', v)}
+            min={7.0}
+            max={15.0}
+          />
+          <ThresholdRow
+            label="Urgent hoog"
+            color="#ff9f0a"
+            value={thresholds.urgentHigh}
+            onChange={v => updateThreshold('urgentHigh', v)}
+            min={10.0}
+            max={22.0}
+          />
+          <div className={styles.thresholdRow}>
+            <span className={styles.thresholdLabel} style={{ color: '#8b949e' }}>Sensor verloren na</span>
+            <div className={styles.thresholdInputWrap}>
+              <input
+                type="number"
+                className={styles.thresholdInput}
+                value={thresholds.staleMinutes}
+                min={10}
+                max={60}
+                step={1}
+                onChange={e => updateThreshold('staleMinutes', Number(e.target.value))}
+              />
+              <span className={styles.thresholdUnit}>min</span>
+            </div>
+          </div>
+        </div>
+
+        <div className={styles.alarmActions}>
+          <button className={styles.testBtn} onClick={() => handleTestAlarm(false)}>
+            Test alarm (laag)
+          </button>
+          <button className={`${styles.testBtn} ${styles.testUrgent}`} onClick={() => handleTestAlarm(true)}>
+            Test alarm (urgent)
+          </button>
+          <button className={styles.resetBtn} onClick={resetThresholds}>
+            Standaard herstellen
+          </button>
+        </div>
+      </div>
+
+      {/* Alarmregels */}
       <div className={styles.section}>
         <h2 className={styles.sectionTitle}>Alarmregels</h2>
         <p className={styles.sectionDesc}>
@@ -112,6 +252,33 @@ export default function Settings() {
             ))}
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+function ThresholdRow({ label, color, value, onChange, min, max }: {
+  label: string
+  color: string
+  value: number
+  onChange: (v: number) => void
+  min: number
+  max: number
+}) {
+  return (
+    <div className={styles.thresholdRow}>
+      <span className={styles.thresholdLabel} style={{ color }}>{label}</span>
+      <div className={styles.thresholdInputWrap}>
+        <input
+          type="number"
+          className={styles.thresholdInput}
+          value={value}
+          min={min}
+          max={max}
+          step={0.1}
+          onChange={e => onChange(parseFloat(e.target.value))}
+        />
+        <span className={styles.thresholdUnit}>mmol/L</span>
       </div>
     </div>
   )
