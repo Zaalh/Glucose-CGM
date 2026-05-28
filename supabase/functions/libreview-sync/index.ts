@@ -1,5 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { crypto } from "jsr:@std/crypto@0.224.0";
+import { encodeHex } from "jsr:@std/encoding@0.224.0/hex";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -11,10 +13,10 @@ const LIBRE_EMAIL = Deno.env.get("LIBREVIEW_EMAIL") ?? "Storagegox654@gmail.com"
 const LIBRE_PASSWORD = Deno.env.get("LIBREVIEW_PASSWORD") ?? "Jezismina11!";
 const LIBRE_API = "https://api-eu.libreview.io";
 
-const LIBRE_HEADERS = {
+const LLU_HEADERS = {
   "Content-Type": "application/json",
   "product": "llu.android",
-  "version": "4.7.0",
+  "version": "4.12.0",
   "Accept-Encoding": "gzip",
   "cache-control": "no-cache",
   "connection": "Keep-Alive",
@@ -30,61 +32,70 @@ function mapTrend(trend: number): string {
   return map[trend] ?? "flat";
 }
 
-async function libreLogin(): Promise<{ token: string; baseUrl: string }> {
-  const res = await fetch(`${LIBRE_API}/llu/auth/login`, {
-    method: "POST",
-    headers: LIBRE_HEADERS,
-    body: JSON.stringify({ email: LIBRE_EMAIL, password: LIBRE_PASSWORD }),
-  });
-
-  const text = await res.text();
-  let json: Record<string, unknown>;
-  try { json = JSON.parse(text); } catch { throw new Error(`Login parse fout: ${text.slice(0, 200)}`); }
-
-  if (!res.ok) throw new Error(`Login mislukt (${res.status}): ${JSON.stringify(json)}`);
-
-  // Abbott stuurt redirect naar regionale server
-  if ((json.data as Record<string, unknown>)?.redirect) {
-    const region = (json.data as Record<string, unknown>).region as string;
-    const regionalApi = `https://api-${region}.libreview.io`;
-    const res2 = await fetch(`${regionalApi}/llu/auth/login`, {
-      method: "POST",
-      headers: LIBRE_HEADERS,
-      body: JSON.stringify({ email: LIBRE_EMAIL, password: LIBRE_PASSWORD }),
-    });
-    const json2 = await res2.json();
-    if (!res2.ok) throw new Error(`Regionale login mislukt (${res2.status})`);
-    return {
-      token: (json2.data as Record<string, unknown>).authTicket?.token as string,
-      baseUrl: regionalApi,
-    };
-  }
-
-  return {
-    token: ((json.data as Record<string, unknown>).authTicket as Record<string, unknown>)?.token as string,
-    baseUrl: LIBRE_API,
-  };
+async function sha256hex(str: string): Promise<string> {
+  const data = new TextEncoder().encode(str);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return encodeHex(new Uint8Array(hash));
 }
 
-async function apiGet(token: string, baseUrl: string, path: string) {
-  const res = await fetch(`${baseUrl}${path}`, {
-    headers: { ...LIBRE_HEADERS, "Authorization": `Bearer ${token}` },
-  });
+interface LoginResult {
+  token: string;
+  baseUrl: string;
+  accountId: string;
+  userId: string;
+}
+
+async function libreLogin(): Promise<LoginResult> {
+  const doLogin = async (baseUrl: string) => {
+    const res = await fetch(`${baseUrl}/llu/auth/login`, {
+      method: "POST",
+      headers: LLU_HEADERS,
+      body: JSON.stringify({ email: LIBRE_EMAIL, password: LIBRE_PASSWORD }),
+    });
+    const text = await res.text();
+    let json: Record<string, unknown>;
+    try { json = JSON.parse(text); } catch { throw new Error(`Login parse fout: ${text.slice(0, 200)}`); }
+    if (!res.ok) throw new Error(`Login mislukt (${res.status}): ${JSON.stringify(json).slice(0, 300)}`);
+    return json;
+  };
+
+  let json = await doLogin(LIBRE_API);
+  let baseUrl = LIBRE_API;
+
+  if ((json.data as Record<string, unknown>)?.redirect) {
+    const region = (json.data as Record<string, unknown>).region as string;
+    baseUrl = `https://api-${region}.libreview.io`;
+    json = await doLogin(baseUrl);
+  }
+
+  const data = json.data as Record<string, unknown>;
+  const userId = (data.user as Record<string, unknown>).id as string;
+  const token = (data.authTicket as Record<string, unknown>).token as string;
+  const accountId = await sha256hex(userId);
+
+  return { token, baseUrl, accountId, userId };
+}
+
+function lluHeaders(token: string, accountId: string) {
+  return { ...LLU_HEADERS, "Authorization": `Bearer ${token}`, "account-id": accountId };
+}
+
+async function apiGet(token: string, accountId: string, baseUrl: string, path: string) {
+  const res = await fetch(`${baseUrl}${path}`, { headers: lluHeaders(token, accountId) });
   const text = await res.text();
   let json: unknown;
-  try { json = JSON.parse(text); } catch { throw new Error(`Parse fout ${path}: ${text.slice(0, 200)}`); }
+  try { json = JSON.parse(text); } catch { json = null; }
   return { status: res.status, ok: res.ok, json };
 }
 
-async function collectReadings(token: string, baseUrl: string): Promise<RawReading[]> {
-  // Stap 1: probeer LibreLink Up verbindingen (voor followers/caregivers)
-  const connRes = await apiGet(token, baseUrl, "/llu/connections");
-
+async function collectReadings(token: string, accountId: string, baseUrl: string, userId: string): Promise<RawReading[]> {
+  // Stap 1: LibreLinkUp verbindingen (follower/caregiver account)
+  const connRes = await apiGet(token, accountId, baseUrl, "/llu/connections");
   if (connRes.ok) {
     const connections = ((connRes.json as Record<string, unknown>).data as Array<{ patientId: string }>) ?? [];
     const readings: RawReading[] = [];
     for (const conn of connections) {
-      const graphRes = await apiGet(token, baseUrl, `/llu/connections/${conn.patientId}/graph`);
+      const graphRes = await apiGet(token, accountId, baseUrl, `/llu/connections/${conn.patientId}/graph`);
       if (!graphRes.ok) continue;
       const graph = (graphRes.json as Record<string, unknown>).data as Record<string, unknown>;
       const pts: RawReading[] = (graph?.graphData as RawReading[]) ?? [];
@@ -95,18 +106,18 @@ async function collectReadings(token: string, baseUrl: string): Promise<RawReadi
     if (readings.length > 0) return readings;
   }
 
-  // Stap 2: probeer /llu/data (eigen sensor, nieuwere API versie)
-  const dataRes = await apiGet(token, baseUrl, "/llu/data");
-  if (dataRes.ok) {
-    const d = (dataRes.json as Record<string, unknown>).data as Record<string, unknown> | null;
-    const pts: RawReading[] = (d?.graphData as RawReading[]) ?? [];
-    const cur = d?.currentMeasurement as RawReading | undefined;
-    if (cur) pts.push(cur);
+  // Stap 2: eigen sensordata via lsl/api (patient account)
+  const lslRes = await apiGet(token, accountId, baseUrl,
+    `/lsl/api/measurements/GetPatientGlucoseMeasurements?country=NL&patientId=${userId}`
+  );
+  if (lslRes.ok && lslRes.json) {
+    const data = (lslRes.json as Record<string, unknown>).data;
+    const pts = Array.isArray(data) ? data as RawReading[] : [];
     if (pts.length > 0) return pts;
   }
 
-  // Stap 3: probeer /glucoseHistory
-  const histRes = await apiGet(token, baseUrl, "/glucoseHistory?numPeriods=1&period=13");
+  // Stap 3: glucoseHistory met juiste parameters
+  const histRes = await apiGet(token, accountId, baseUrl, "/glucoseHistory?numPeriods=5&period=7");
   if (histRes.ok) {
     const periods = ((histRes.json as Record<string, unknown>).data as Record<string, unknown>)
       ?.periods as Array<{ data?: RawReading[] }> ?? [];
@@ -114,10 +125,10 @@ async function collectReadings(token: string, baseUrl: string): Promise<RawReadi
     if (readings.length > 0) return readings;
   }
 
-  // Geef nuttige foutmelding met HTTP statussen voor diagnose
   throw new Error(
-    `Geen sensordata gevonden. API responses: connections=${connRes.status}, data=${dataRes.status}, history=${histRes.status}. ` +
-    `Zorg dat je sensor gekoppeld is in de FreeStyle LibreLink app en dat LibreLink Up is ingeschakeld.`
+    `Geen sensordata gevonden. API responses: connections=${connRes.status}, lsl=${lslRes.status}, history=${histRes.status}. ` +
+    `Controleer of de sensor actief is in de FreeStyle LibreLink app. ` +
+    `Als je geen LibreLink Up follower hebt: open de LibreLink app, ga naar Verbindingen en voeg een follower toe (kan je eigen tweede account zijn).`
   );
 }
 
@@ -132,8 +143,8 @@ Deno.serve(async (req: Request) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    const { token, baseUrl } = await libreLogin();
-    const graphData = await collectReadings(token, baseUrl);
+    const { token, baseUrl, accountId, userId } = await libreLogin();
+    const graphData = await collectReadings(token, accountId, baseUrl, userId);
 
     const rows = graphData.map((pt) => ({
       timestamp: new Date(pt.Timestamp.replace(" ", "T")).toISOString(),
