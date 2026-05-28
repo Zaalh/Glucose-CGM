@@ -9,14 +9,25 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-const LIBRE_EMAIL = Deno.env.get("LIBREVIEW_EMAIL") ?? "Storagegox654@gmail.com";
-const LIBRE_PASSWORD = Deno.env.get("LIBREVIEW_PASSWORD") ?? "Jezismina11!";
+const LIBRE_EMAIL = Deno.env.get("LIBREVIEW_EMAIL")!;
+const LIBRE_PASSWORD = Deno.env.get("LIBREVIEW_PASSWORD")!;
 const LIBRE_API = "https://api-eu.libreview.io";
 
-const LLU_HEADERS = {
+// Headers voor de LLU API (/llu/...)
+const LLU_BASE_HEADERS = {
   "Content-Type": "application/json",
   "product": "llu.android",
   "version": "4.12.0",
+  "Accept-Encoding": "gzip",
+  "cache-control": "no-cache",
+  "connection": "Keep-Alive",
+};
+
+// Headers voor de LSL API (/lsl/api/...) — vereist Domain + GatewayType
+const LSL_BASE_HEADERS = {
+  "Content-Type": "application/json",
+  "Domain": "Libreview",
+  "GatewayType": "LinkUp.Android",
   "Accept-Encoding": "gzip",
   "cache-control": "no-cache",
   "connection": "Keep-Alive",
@@ -39,17 +50,18 @@ async function sha256hex(str: string): Promise<string> {
 }
 
 interface LoginResult {
-  token: string;
+  lluToken: string;
+  lslToken: string;
   baseUrl: string;
   accountId: string;
   userId: string;
 }
 
 async function libreLogin(): Promise<LoginResult> {
-  const doLogin = async (baseUrl: string) => {
+  const doLluLogin = async (baseUrl: string) => {
     const res = await fetch(`${baseUrl}/llu/auth/login`, {
       method: "POST",
-      headers: LLU_HEADERS,
+      headers: LLU_BASE_HEADERS,
       body: JSON.stringify({ email: LIBRE_EMAIL, password: LIBRE_PASSWORD }),
     });
     const text = await res.text();
@@ -59,134 +71,149 @@ async function libreLogin(): Promise<LoginResult> {
     return json;
   };
 
-  let json = await doLogin(LIBRE_API);
+  let json = await doLluLogin(LIBRE_API);
   let baseUrl = LIBRE_API;
 
+  // Volg regionale redirect indien nodig
   if ((json.data as Record<string, unknown>)?.redirect) {
     const region = (json.data as Record<string, unknown>).region as string;
     baseUrl = `https://api-${region}.libreview.io`;
-    json = await doLogin(baseUrl);
+    json = await doLluLogin(baseUrl);
   }
 
   const data = json.data as Record<string, unknown>;
   const userId = (data.user as Record<string, unknown>).id as string;
-  const token = (data.authTicket as Record<string, unknown>).token as string;
+  const lluToken = (data.authTicket as Record<string, unknown>).token as string;
   const accountId = await sha256hex(userId);
 
-  return { token, baseUrl, accountId, userId };
+  // LSL login gebruikt andere endpoint en headers
+  const lslRes = await fetch(`${baseUrl}/lsl/api/nisperson/getauthenticateduser`, {
+    method: "POST",
+    headers: { ...LSL_BASE_HEADERS, "Authorization": `Bearer ${lluToken}` },
+    body: JSON.stringify({ email: LIBRE_EMAIL, password: LIBRE_PASSWORD }),
+  });
+  const lslText = await lslRes.text();
+  let lslJson: Record<string, unknown> = {};
+  try { lslJson = JSON.parse(lslText); } catch { /* gebruik lluToken als fallback */ }
+
+  // Extraheer lsl token of gebruik hetzelfde token als fallback
+  const lslToken = (lslJson.data as Record<string, unknown>)?.authToken as string ?? lluToken;
+
+  return { lluToken, lslToken, baseUrl, accountId, userId };
 }
 
-function authHeaders(token: string, accountId: string) {
-  return { ...LLU_HEADERS, "Authorization": `Bearer ${token}`, "account-id": accountId };
-}
-
-async function apiGet(token: string, accountId: string, baseUrl: string, path: string) {
-  const res = await fetch(`${baseUrl}${path}`, { headers: authHeaders(token, accountId) });
+async function lluGet(token: string, accountId: string, baseUrl: string, path: string) {
+  const res = await fetch(`${baseUrl}${path}`, {
+    headers: { ...LLU_BASE_HEADERS, "Authorization": `Bearer ${token}`, "account-id": accountId },
+  });
   const text = await res.text();
   let json: unknown;
   try { json = JSON.parse(text); } catch { json = null; }
-  return { status: res.status, ok: res.ok, json, text };
+  return { status: res.status, ok: res.ok, json };
 }
 
-// Extraheer readings uit het lsl response — probeer alle bekende structuren
-function extractLslReadings(json: unknown): RawReading[] {
+async function lslGet(token: string, baseUrl: string, path: string) {
+  const res = await fetch(`${baseUrl}${path}`, {
+    headers: { ...LSL_BASE_HEADERS, "Authorization": `Bearer ${token}` },
+  });
+  const text = await res.text();
+  let json: unknown;
+  try { json = JSON.parse(text); } catch { json = null; }
+  return { status: res.status, ok: res.ok, json };
+}
+
+// Probeer alle bekende response-structuren te parseren
+function extractReadings(json: unknown): RawReading[] {
   if (!json || typeof json !== "object") return [];
   const obj = json as Record<string, unknown>;
-
-  // Structuur 1: { data: { graphData: [...] } }
   const data = obj.data;
+
+  if (Array.isArray(data)) return data as RawReading[];
+
   if (data && typeof data === "object") {
     const d = data as Record<string, unknown>;
-    if (Array.isArray(d.graphData) && d.graphData.length > 0) {
-      const readings = d.graphData as RawReading[];
-      // voeg currentMeasurement toe indien aanwezig
-      const cur = d.currentMeasurement as RawReading | undefined;
-      if (cur?.Timestamp) readings.push(cur);
-      return readings;
+
+    // { data: { graphData: [...], connection: { glucoseMeasurement: {...} } } }
+    if (Array.isArray(d.graphData)) {
+      const pts = [...(d.graphData as RawReading[])];
+      const cur = (d.connection as Record<string, unknown>)?.glucoseMeasurement as RawReading | undefined;
+      if (cur?.Timestamp) pts.push(cur);
+      return pts;
     }
 
-    // Structuur 2: { data: [...] } (platte array)
-    if (Array.isArray(data)) return data as RawReading[];
-
-    // Structuur 3: { data: { data: [...] } }
-    if (Array.isArray(d.data)) return d.data as RawReading[];
-
-    // Structuur 4: { data: { periods: [{ data: [...] }] } }
+    // { data: { periods: [{ data: [...] }] } }
     if (Array.isArray(d.periods)) {
       return (d.periods as Array<{ data?: RawReading[] }>).flatMap(p => p.data ?? []);
     }
 
-    // Structuur 5: { data: { results: [...] } }
+    // { data: { results: [...] } }
     if (Array.isArray(d.results)) return d.results as RawReading[];
 
-    // Structuur 6: { data: { connection: {...}, graphData: [...] } } (zelfde als /llu/graph)
-    const connection = d.connection as Record<string, unknown> | undefined;
-    if (connection?.glucoseMeasurement) {
-      const pts: RawReading[] = Array.isArray(d.graphData) ? d.graphData as RawReading[] : [];
-      pts.push(connection.glucoseMeasurement as RawReading);
-      if (pts.length > 0) return pts;
-    }
+    // { data: { data: [...] } }
+    if (Array.isArray(d.data)) return d.data as RawReading[];
   }
 
-  // Structuur 7: root-level array
   if (Array.isArray(json)) return json as RawReading[];
-
   return [];
 }
 
 async function collectReadings(
-  token: string, accountId: string, baseUrl: string, userId: string
+  lluToken: string, lslToken: string, accountId: string, baseUrl: string, userId: string
 ): Promise<{ readings: RawReading[]; debugInfo: string }> {
   const debug: string[] = [];
 
-  // Stap 1: LibreLinkUp verbindingen (werkt voor follower-accounts)
-  const connRes = await apiGet(token, accountId, baseUrl, "/llu/connections");
-  debug.push(`connections=${connRes.status}`);
+  // Poging 1: LLU connections (follower-flow)
+  const connRes = await lluGet(lluToken, accountId, baseUrl, "/llu/connections");
+  debug.push(`llu_conn=${connRes.status}`);
 
   if (connRes.ok) {
     const connections = ((connRes.json as Record<string, unknown>).data as Array<{ patientId: string }>) ?? [];
-    debug.push(`conn_count=${connections.length}`);
     const readings: RawReading[] = [];
     for (const conn of connections) {
-      const graphRes = await apiGet(token, accountId, baseUrl, `/llu/connections/${conn.patientId}/graph`);
+      const graphRes = await lluGet(lluToken, accountId, baseUrl, `/llu/connections/${conn.patientId}/graph`);
       if (!graphRes.ok) continue;
-      const graph = (graphRes.json as Record<string, unknown>).data as Record<string, unknown>;
-      const pts: RawReading[] = (graph?.graphData as RawReading[]) ?? [];
-      const cur = (graph?.connection as Record<string, unknown>)?.glucoseMeasurement as RawReading | undefined;
-      if (cur?.Timestamp) pts.push(cur);
+      const pts = extractReadings(graphRes.json);
       readings.push(...pts);
     }
     if (readings.length > 0) return { readings, debugInfo: debug.join(", ") };
   }
 
-  // Stap 2: eigen sensordata via lsl/api — probeer meerdere paden
-  const lslPaths = [
-    `/lsl/api/measurements/GetPatientGlucoseMeasurements?country=NL&patientId=${userId}`,
-    `/lsl/api/measurements/GetPatientGlucoseMeasurements?patientId=${userId}`,
-    `/lsl/api/measurements`,
-    `/lsl/api/patients/${userId}/glucosemeasurements`,
-    `/llu/users/${userId}/graph`,
-  ];
-
-  for (const path of lslPaths) {
-    const res = await apiGet(token, accountId, baseUrl, path);
-    const key = path.split("?")[0].split("/").slice(-2).join("/");
-    debug.push(`${key}=${res.status}`);
-    if (res.ok) {
-      const readings = extractLslReadings(res.json);
-      if (readings.length > 0) {
-        debug.push(`found=${readings.length}`);
-        return { readings, debugInfo: debug.join(", ") };
-      }
-      // 200 maar geen data — log de response structuur voor diagnose
-      debug.push(`empty_body=${JSON.stringify(res.json).slice(0, 150)}`);
+  // Poging 2: LSL glucose history (eigen sensor, correcte headers)
+  const histRes = await lslGet(lslToken, baseUrl, "/glucoseHistory?numPeriods=5&period=7");
+  debug.push(`lsl_hist=${histRes.status}`);
+  if (histRes.ok) {
+    const readings = extractReadings(histRes.json);
+    if (readings.length > 0) {
+      debug.push(`found=${readings.length}`);
+      return { readings, debugInfo: debug.join(", ") };
     }
+    debug.push(`hist_body=${JSON.stringify(histRes.json).slice(0, 100)}`);
+  }
+
+  // Poging 3: LSL getPatientGlucoseMeasurements
+  const measRes = await lslGet(lslToken, baseUrl, `/lsl/api/measurements/GetPatientGlucoseMeasurements?patientId=${userId}`);
+  debug.push(`lsl_meas=${measRes.status}`);
+  if (measRes.ok) {
+    const readings = extractReadings(measRes.json);
+    if (readings.length > 0) {
+      debug.push(`found=${readings.length}`);
+      return { readings, debugInfo: debug.join(", ") };
+    }
+    debug.push(`meas_body=${JSON.stringify(measRes.json).slice(0, 120)}`);
+  }
+
+  // Poging 4: LLU graph voor eigen account
+  const selfGraphRes = await lluGet(lluToken, accountId, baseUrl, `/llu/users/${userId}/graph`);
+  debug.push(`llu_self=${selfGraphRes.status}`);
+  if (selfGraphRes.ok) {
+    const readings = extractReadings(selfGraphRes.json);
+    if (readings.length > 0) return { readings, debugInfo: debug.join(", ") };
   }
 
   throw new Error(
-    `Geen sensordata gevonden. Statuses: ${debug.join(", ")}. ` +
-    `Oplossing: open de FreeStyle LibreLink app, accepteer eventuele nieuwe gebruiksvoorwaarden, ` +
-    `en zorg dat LibreLink Up is ingeschakeld onder Verbindingen.`
+    `Geen sensordata. Debug: ${debug.join(", ")}. ` +
+    `De /llu/connections geeft 403 — open de FreeStyle LibreLink app en accepteer de gebruiksvoorwaarden. ` +
+    `Dit lost de 403 op zodat de sync kan werken.`
   );
 }
 
@@ -201,8 +228,10 @@ Deno.serve(async (req: Request) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    const { token, baseUrl, accountId, userId } = await libreLogin();
-    const { readings: graphData, debugInfo } = await collectReadings(token, accountId, baseUrl, userId);
+    const { lluToken, lslToken, baseUrl, accountId, userId } = await libreLogin();
+    const { readings: graphData, debugInfo } = await collectReadings(
+      lluToken, lslToken, accountId, baseUrl, userId
+    );
 
     const rows = graphData
       .filter(pt => pt.Timestamp && pt.Value)
