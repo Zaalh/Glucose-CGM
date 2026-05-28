@@ -1,4 +1,4 @@
-import type { GlucoseReading, TrendDirection } from '../types'
+import type { GlucoseReading } from '../types'
 
 export type AlarmLevel = 'urgent_low' | 'low' | 'high' | 'urgent_high' | 'stale'
 
@@ -68,22 +68,6 @@ export function clearSnooze(level: AlarmLevel) {
   saveSnooze(s)
 }
 
-// Trend rate of change in mmol/L per minute (approx)
-const TREND_RATE: Record<TrendDirection, number> = {
-  rising_quickly: 0.15,
-  rising: 0.08,
-  rising_slowly: 0.03,
-  flat: 0,
-  falling_slowly: -0.03,
-  falling: -0.08,
-  falling_quickly: -0.15,
-}
-
-export function predictedValue(reading: GlucoseReading, minutes = 20): number {
-  const rate = reading.trend ? TREND_RATE[reading.trend] ?? 0 : 0
-  return reading.value_mmol + rate * minutes
-}
-
 export type ActiveAlarm = {
   level: AlarmLevel
   value: number
@@ -94,11 +78,12 @@ export type ActiveAlarm = {
 export function checkAlarms(
   reading: GlucoseReading | null,
   thresholds: AlarmThresholds,
+  predicted: number | null = null,
 ): ActiveAlarm | null {
   if (!thresholds.enabled || !reading) return null
 
   const val = reading.value_mmol
-  const pred = predictedValue(reading, 20)
+  const pred = predicted ?? val
 
   // Actual urgent low
   if (val < thresholds.urgentLow && !isSnoozed('urgent_low')) {

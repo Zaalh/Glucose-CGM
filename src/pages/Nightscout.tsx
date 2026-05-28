@@ -14,6 +14,7 @@ import {
   ALARM_COLORS,
   type ActiveAlarm,
 } from '../lib/alarms'
+import { predictGlucose, computeAndSavePersonalRates, getPredictionConfidence } from '../lib/prediction'
 import styles from './Nightscout.module.css'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
@@ -53,6 +54,8 @@ export default function Nightscout() {
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [activeAlarm, setActiveAlarm] = useState<ActiveAlarm | null>(null)
   const [staleAlarm, setStaleAlarm] = useState(false)
+  const [predictedIn20, setPredictedIn20] = useState<number | null>(null)
+  const [predConfidence, setPredConfidence] = useState<'high' | 'medium' | 'low'>('low')
   const lastAlarmKey = useRef<string | null>(null)
 
   const fetchReadings = useCallback(async () => {
@@ -80,10 +83,25 @@ export default function Nightscout() {
     setLoading(false)
     setCountdown(60)
 
-    // Alarm check
+    // Compute personalized rates from full history (background learning)
+    computeAndSavePersonalRates(readings)
+
+    // Alarm check with smart prediction
     const latest = readings.at(-1) ?? null
     const thresholds = loadThresholds()
-    const alarm = checkAlarms(latest, thresholds)
+
+    let pred: number | null = null
+    let confidence: 'high' | 'medium' | 'low' = 'low'
+    if (latest) {
+      const window = readings.slice(-5)
+      pred = predictGlucose(window, latest, 20)
+      confidence = getPredictionConfidence(window)
+    }
+
+    setPredictedIn20(pred)
+    setPredConfidence(confidence)
+
+    const alarm = checkAlarms(latest, thresholds, pred)
     const stale = thresholds.enabled ? checkStale(latest, thresholds.staleMinutes) : false
 
     setActiveAlarm(alarm)
@@ -293,6 +311,17 @@ export default function Nightscout() {
                 </span>
               )}
             </div>
+            {predictedIn20 !== null && (
+              <div className={styles.heroPrediction}>
+                <span className={styles.heroPredLabel}>Over 20 min</span>
+                <span className={styles.heroPredValue}>
+                  {fmtVal(predictedIn20, unit)} {unit === 'mgdl' ? 'mg/dL' : 'mmol/L'}
+                </span>
+                <span className={`${styles.heroPredConf} ${styles[`conf_${predConfidence}`]}`}>
+                  {predConfidence === 'high' ? 'nauwkeurig' : predConfidence === 'medium' ? 'schatting' : 'beperkte data'}
+                </span>
+              </div>
+            )}
             <div className={styles.heroMeta}>
               <span>{minutesAgo !== null && minutesAgo <= 1 ? 'Nu' : `${minutesAgo} min geleden`}</span>
               {lastUpdated && <span className={styles.heroDot}>·</span>}
