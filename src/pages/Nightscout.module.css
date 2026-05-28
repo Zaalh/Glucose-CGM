@@ -1,0 +1,227 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: #0d1117;
+  min-height: calc(100vh - 57px);
+  color: #e6edf3;
+}
+
+/* Top bar */
+.topBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  background: #161b22;
+  border-bottom: 1px solid #21262d;
+}
+
+.rangeButtons {
+  display: flex;
+  gap: 4px;
+}
+
+.rangeBtn {
+  padding: 4px 12px;
+  border: 1px solid #30363d;
+  background: transparent;
+  color: #8b949e;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.rangeBtn:hover {
+  background: #21262d;
+  color: #e6edf3;
+}
+
+.rangeBtn.active {
+  background: #1f6feb;
+  border-color: #1f6feb;
+  color: #fff;
+}
+
+.topRight {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.syncBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 14px;
+  background: #1f6feb;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.syncBtn:hover:not(:disabled) { opacity: 0.85; }
+.syncBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.syncMsg {
+  font-size: 12px;
+  max-width: 340px;
+  line-height: 1.4;
+}
+
+.syncOk { color: #3fb950; }
+.syncErr { color: #f85149; }
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.spinning {
+  display: inline-block;
+  animation: spin 0.8s linear infinite;
+}
+
+/* Hero reading */
+.hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px 32px;
+  gap: 8px;
+  border-bottom: 1px solid #21262d;
+  transition: background 0.3s;
+}
+
+.hero.normal  { background: #0d2a15; }
+.hero.low     { background: #2a0d0d; }
+.hero.very_low { background: #3d0808; }
+.hero.high    { background: #2a1e0d; }
+.hero.very_high { background: #3d2a08; }
+
+.heroValue {
+  font-size: 80px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -2px;
+  color: #e6edf3;
+}
+
+.hero.normal  .heroValue { color: #3fb950; }
+.hero.low     .heroValue { color: #f85149; }
+.hero.very_low .heroValue { color: #ff4444; }
+.hero.high    .heroValue { color: #d29922; }
+.hero.very_high .heroValue { color: #ff9f0a; }
+
+.heroUnit {
+  font-size: 22px;
+  font-weight: 400;
+  margin-left: 6px;
+  color: #8b949e;
+}
+
+.heroTrend {
+  font-size: 40px;
+  line-height: 1;
+  color: #8b949e;
+}
+
+.hero.normal  .heroTrend { color: #3fb950; }
+.hero.low     .heroTrend { color: #f85149; }
+.hero.very_low .heroTrend { color: #ff4444; }
+.hero.high    .heroTrend { color: #d29922; }
+.hero.very_high .heroTrend { color: #ff9f0a; }
+
+.heroMeta {
+  font-size: 13px;
+  color: #8b949e;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.heroDot { color: #30363d; }
+
+.heroLoading,
+.heroEmpty {
+  font-size: 64px;
+  font-weight: 700;
+  color: #30363d;
+}
+
+/* Chart */
+.chartWrap {
+  background: #0d1117;
+  padding: 16px 8px 8px;
+}
+
+.chartLoading,
+.chartEmpty {
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #484f58;
+  font-size: 13px;
+}
+
+/* Stats */
+.statsRow {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  border-top: 1px solid #21262d;
+}
+
+.statTile {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-right: 1px solid #21262d;
+}
+
+.statTile:last-child { border-right: none; }
+
+.statLabel {
+  font-size: 11px;
+  font-weight: 500;
+  color: #484f58;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.statValue {
+  font-size: 20px;
+  font-weight: 600;
+  color: #e6edf3;
+}
+
+.statValue.low { color: #f85149; }
+.statValue.high { color: #d29922; }
+
+.statUnit {
+  font-size: 12px;
+  font-weight: 400;
+  color: #8b949e;
+}
+
+@media (max-width: 768px) {
+  .heroValue { font-size: 64px; }
+  .statsRow { grid-template-columns: repeat(3, 1fr); }
+  .statTile:nth-child(3) { border-right: none; }
+  .statTile:nth-child(4) { border-top: 1px solid #21262d; }
+  .statTile:nth-child(5) { border-top: 1px solid #21262d; border-right: none; }
+}
+
+@media (max-width: 480px) {
+  .statsRow { grid-template-columns: repeat(2, 1fr); }
+  .statTile { border-right: 1px solid #21262d; }
+  .statTile:nth-child(2n) { border-right: none; }
+  .statTile:nth-child(n+3) { border-top: 1px solid #21262d; }
+}
