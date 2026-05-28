@@ -285,7 +285,7 @@ Deno.serve(async (req: Request) => {
       .filter(pt => pt.Timestamp && pt.Value)
       .map((pt) => ({
         timestamp: parseLibreTimestamp(pt.Timestamp),
-        value_mmol: parseFloat((pt.Value / 18.018).toFixed(2)),
+        value_mmol: parseFloat(pt.Value.toFixed(2)),
         raw_value: pt.Value,
         unit: "mg/dL",
         trend: mapTrend(pt.TrendArrow ?? 4),
