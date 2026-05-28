@@ -38,7 +38,7 @@ export default function Dashboard() {
       setSyncMsg('Verbindingsfout bij synchronisatie.')
     } finally {
       setSyncing(false)
-      setTimeout(() => setSyncMsg(null), 5000)
+      setTimeout(() => setSyncMsg(null), 12000)
     }
   }
 

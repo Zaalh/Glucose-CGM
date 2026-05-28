@@ -20,121 +20,105 @@ const LIBRE_HEADERS = {
   "connection": "Keep-Alive",
 };
 
+type RawReading = { Timestamp: string; Value: number; TrendArrow: number };
+
 function mapTrend(trend: number): string {
-  switch (trend) {
-    case 1: return "falling_quickly";
-    case 2: return "falling";
-    case 3: return "falling_slowly";
-    case 4: return "flat";
-    case 5: return "rising_slowly";
-    case 6: return "rising";
-    case 7: return "rising_quickly";
-    default: return "flat";
-  }
+  const map: Record<number, string> = {
+    1: "falling_quickly", 2: "falling", 3: "falling_slowly",
+    4: "flat", 5: "rising_slowly", 6: "rising", 7: "rising_quickly",
+  };
+  return map[trend] ?? "flat";
 }
 
-interface LoginResult {
-  token: string;
-  baseUrl: string;
-  accountId: string;
-}
-
-async function libreLogin(): Promise<LoginResult> {
+async function libreLogin(): Promise<{ token: string; baseUrl: string }> {
   const res = await fetch(`${LIBRE_API}/llu/auth/login`, {
     method: "POST",
     headers: LIBRE_HEADERS,
     body: JSON.stringify({ email: LIBRE_EMAIL, password: LIBRE_PASSWORD }),
   });
-  if (!res.ok) throw new Error(`LibreView login mislukt: ${res.status}`);
-  const json = await res.json();
 
-  if (json.data?.redirect) {
-    const region = json.data.region;
+  const text = await res.text();
+  let json: Record<string, unknown>;
+  try { json = JSON.parse(text); } catch { throw new Error(`Login parse fout: ${text.slice(0, 200)}`); }
+
+  if (!res.ok) throw new Error(`Login mislukt (${res.status}): ${JSON.stringify(json)}`);
+
+  // Abbott stuurt redirect naar regionale server
+  if ((json.data as Record<string, unknown>)?.redirect) {
+    const region = (json.data as Record<string, unknown>).region as string;
     const regionalApi = `https://api-${region}.libreview.io`;
     const res2 = await fetch(`${regionalApi}/llu/auth/login`, {
       method: "POST",
       headers: LIBRE_HEADERS,
       body: JSON.stringify({ email: LIBRE_EMAIL, password: LIBRE_PASSWORD }),
     });
-    if (!res2.ok) throw new Error(`LibreView regionale login mislukt: ${res2.status}`);
     const json2 = await res2.json();
+    if (!res2.ok) throw new Error(`Regionale login mislukt (${res2.status})`);
     return {
-      token: json2.data.authTicket.token,
+      token: (json2.data as Record<string, unknown>).authTicket?.token as string,
       baseUrl: regionalApi,
-      accountId: json2.data.user.id,
     };
   }
 
   return {
-    token: json.data.authTicket.token,
+    token: ((json.data as Record<string, unknown>).authTicket as Record<string, unknown>)?.token as string,
     baseUrl: LIBRE_API,
-    accountId: json.data.user.id,
   };
 }
 
-// Probeer eerst /llu/connections (LibreLink Up followers)
-// Als 403, val terug op /glucoseHistory voor eigen sensor
-async function fetchReadingsFromConnections(
-  token: string,
-  baseUrl: string,
-): Promise<Array<{ Timestamp: string; Value: number; TrendArrow: number }>> {
-  const res = await fetch(`${baseUrl}/llu/connections`, {
+async function apiGet(token: string, baseUrl: string, path: string) {
+  const res = await fetch(`${baseUrl}${path}`, {
     headers: { ...LIBRE_HEADERS, "Authorization": `Bearer ${token}` },
   });
-
-  // 403 = account heeft geen LibreLink Up, gebruik eigen sensordata
-  if (res.status === 403) {
-    return [];
-  }
-  if (!res.ok) throw new Error(`Verbindingen ophalen mislukt: ${res.status}`);
-
-  const json = await res.json();
-  const connections: Array<{ patientId: string }> = json.data ?? [];
-  const readings: Array<{ Timestamp: string; Value: number; TrendArrow: number }> = [];
-
-  for (const conn of connections) {
-    const graphRes = await fetch(`${baseUrl}/llu/connections/${conn.patientId}/graph`, {
-      headers: { ...LIBRE_HEADERS, "Authorization": `Bearer ${token}` },
-    });
-    if (!graphRes.ok) continue;
-    const graphJson = await graphRes.json();
-    const graph = graphJson.data;
-
-    const pts: Array<{ Timestamp: string; Value: number; TrendArrow: number }> =
-      graph?.graphData ?? [];
-    if (graph?.connection?.glucoseMeasurement) {
-      pts.push(graph.connection.glucoseMeasurement);
-    }
-    readings.push(...pts);
-  }
-
-  return readings;
+  const text = await res.text();
+  let json: unknown;
+  try { json = JSON.parse(text); } catch { throw new Error(`Parse fout ${path}: ${text.slice(0, 200)}`); }
+  return { status: res.status, ok: res.ok, json };
 }
 
-// Haal de eigen sensordata op via /glucoseHistory (geen LibreLink Up nodig)
-async function fetchOwnSensorData(
-  token: string,
-  baseUrl: string,
-): Promise<Array<{ Timestamp: string; Value: number; TrendArrow: number }>> {
-  // Probeer /llu/glucoseHistory (nieuwere API)
-  const res = await fetch(`${baseUrl}/glucoseHistory?numPeriods=1&period=13`, {
-    headers: { ...LIBRE_HEADERS, "Authorization": `Bearer ${token}` },
-  });
+async function collectReadings(token: string, baseUrl: string): Promise<RawReading[]> {
+  // Stap 1: probeer LibreLink Up verbindingen (voor followers/caregivers)
+  const connRes = await apiGet(token, baseUrl, "/llu/connections");
 
-  if (!res.ok) {
-    throw new Error(
-      `Sensordata ophalen mislukt (${res.status}). Zorg dat LibreLink Up actief is in de FreeStyle LibreLink app, of koppel je sensor via LibreLink Up.`
-    );
+  if (connRes.ok) {
+    const connections = ((connRes.json as Record<string, unknown>).data as Array<{ patientId: string }>) ?? [];
+    const readings: RawReading[] = [];
+    for (const conn of connections) {
+      const graphRes = await apiGet(token, baseUrl, `/llu/connections/${conn.patientId}/graph`);
+      if (!graphRes.ok) continue;
+      const graph = (graphRes.json as Record<string, unknown>).data as Record<string, unknown>;
+      const pts: RawReading[] = (graph?.graphData as RawReading[]) ?? [];
+      const cur = (graph?.connection as Record<string, unknown>)?.glucoseMeasurement as RawReading | undefined;
+      if (cur) pts.push(cur);
+      readings.push(...pts);
+    }
+    if (readings.length > 0) return readings;
   }
 
-  const json = await res.json();
+  // Stap 2: probeer /llu/data (eigen sensor, nieuwere API versie)
+  const dataRes = await apiGet(token, baseUrl, "/llu/data");
+  if (dataRes.ok) {
+    const d = (dataRes.json as Record<string, unknown>).data as Record<string, unknown> | null;
+    const pts: RawReading[] = (d?.graphData as RawReading[]) ?? [];
+    const cur = d?.currentMeasurement as RawReading | undefined;
+    if (cur) pts.push(cur);
+    if (pts.length > 0) return pts;
+  }
 
-  // glucoseHistory geeft data per periode terug
-  const periods: Array<{
-    data?: Array<{ Timestamp: string; Value: number; TrendArrow: number }>;
-  }> = json.data?.periods ?? [];
+  // Stap 3: probeer /glucoseHistory
+  const histRes = await apiGet(token, baseUrl, "/glucoseHistory?numPeriods=1&period=13");
+  if (histRes.ok) {
+    const periods = ((histRes.json as Record<string, unknown>).data as Record<string, unknown>)
+      ?.periods as Array<{ data?: RawReading[] }> ?? [];
+    const readings = periods.flatMap((p) => p.data ?? []);
+    if (readings.length > 0) return readings;
+  }
 
-  return periods.flatMap((p) => p.data ?? []);
+  // Geef nuttige foutmelding met HTTP statussen voor diagnose
+  throw new Error(
+    `Geen sensordata gevonden. API responses: connections=${connRes.status}, data=${dataRes.status}, history=${histRes.status}. ` +
+    `Zorg dat je sensor gekoppeld is in de FreeStyle LibreLink app en dat LibreLink Up is ingeschakeld.`
+  );
 }
 
 Deno.serve(async (req: Request) => {
@@ -149,19 +133,7 @@ Deno.serve(async (req: Request) => {
     );
 
     const { token, baseUrl } = await libreLogin();
-
-    // Probeer verbindingen (LibreLink Up), anders eigen sensor
-    let graphData = await fetchReadingsFromConnections(token, baseUrl);
-    if (graphData.length === 0) {
-      graphData = await fetchOwnSensorData(token, baseUrl);
-    }
-
-    if (graphData.length === 0) {
-      return new Response(
-        JSON.stringify({ success: false, message: "Geen metingen gevonden." }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
+    const graphData = await collectReadings(token, baseUrl);
 
     const rows = graphData.map((pt) => ({
       timestamp: new Date(pt.Timestamp.replace(" ", "T")).toISOString(),
@@ -182,7 +154,7 @@ Deno.serve(async (req: Request) => {
     return new Response(
       JSON.stringify({
         success: true,
-        message: `Synchronisatie voltooid. ${count ?? 0} nieuwe metingen opgeslagen.`,
+        message: `Synchronisatie voltooid. ${count ?? 0} nieuwe metingen opgeslagen (${rows.length} verwerkt).`,
         synced: count ?? 0,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
