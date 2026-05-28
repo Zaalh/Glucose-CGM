@@ -297,6 +297,7 @@ Deno.serve(async (req: Request) => {
       lluToken, lslToken, accountId, baseUrl, userId
     );
 
+    const sampleRaw = graphData.slice(0, 2).map(pt => ({ raw_ts: pt.Timestamp, value: pt.Value }));
     const rows = graphData
       .filter(pt => pt.Timestamp && pt.Value)
       .map((pt) => ({
@@ -307,6 +308,8 @@ Deno.serve(async (req: Request) => {
         trend: mapTrend(pt.TrendArrow ?? 4),
         source: "freestyle_libre_3",
       }));
+
+    const sampleParsed = rows.slice(0, 2).map(r => r.timestamp);
 
     const { error, count } = await supabase
       .from("glucose_readings")
@@ -320,7 +323,7 @@ Deno.serve(async (req: Request) => {
         success: true,
         message: `Synchronisatie voltooid. ${count ?? 0} nieuwe metingen opgeslagen (${rows.length} verwerkt).`,
         synced: count ?? 0,
-        debug: debugInfo,
+        debug: { ...debugInfo, sampleRaw, sampleParsed, tzOffsetMinutes, denoNow: new Date().toISOString() },
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
