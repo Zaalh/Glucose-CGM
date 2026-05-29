@@ -12,11 +12,15 @@
   var ESTIMATE_LINE_CLASS = 'cgm-estimated-glucose-line';
   var ESTIMATE_GAP_MIN_MS = 150000;
   var ESTIMATE_OPEN_MAX_MS = 1200000;
+  var ESTIMATE_PIXEL_GAP_MIN = 3;
   var latestReading = null;
   var updatingCurrentGlucose = false;
   var currentRows = [];
   var currentHypoRisk = null;
   var chartReadingsAsc = [];
+  var estimateRenderTimer = null;
+  var chartObserver = null;
+  var observedChart = null;
 
   function mmol(valueMgdl) {
     return valueMgdl / MGDL_PER_MMOL;
@@ -709,6 +713,7 @@
   function estimateExpectedIntervalMs(points) {
     var intervals = points.map(function (point, index) {
       if (index === 0) return null;
+      if (!point.entry || !points[index - 1].entry) return null;
       return readingTime(point.entry) - readingTime(points[index - 1].entry);
     }).filter(function (interval) {
       return Number.isFinite(interval) && interval > 0;
@@ -740,18 +745,18 @@
     }).sort(function (a, b) {
       return Number(a.getAttribute('cx')) - Number(b.getAttribute('cx'));
     });
-    if (!dots.length || !chartReadingsAsc.length) return [];
+    if (!dots.length) return [];
 
     var offset = Math.max(0, chartReadingsAsc.length - dots.length);
     return dots.map(function (dot, index) {
       return {
         dot: dot,
-        entry: chartReadingsAsc[offset + index],
+        entry: chartReadingsAsc[offset + index] || null,
         x: Number(dot.getAttribute('cx')),
         y: Number(dot.getAttribute('cy'))
       };
     }).filter(function (point) {
-      return point.entry && Number.isFinite(readingTime(point.entry)) && Number.isFinite(Number(point.entry.sgv));
+      return Number.isFinite(point.x) && Number.isFinite(point.y);
     });
   }
 
@@ -774,9 +779,11 @@
   }
 
   function recentPixelSlope(points, latest) {
+    if (!latest.entry) return null;
     var latestTime = readingTime(latest.entry);
     for (var i = points.length - 2; i >= 0; i -= 1) {
       var point = points[i];
+      if (!point.entry) continue;
       var dt = latestTime - readingTime(point.entry);
       if (dt >= 240000 && latest.x !== point.x) {
         return {
@@ -801,7 +808,7 @@
     var expectedInterval = estimateExpectedIntervalMs(points);
     var gapThreshold = Math.max(ESTIMATE_GAP_MIN_MS, expectedInterval * 2.5);
     var expectedPixelGap = estimateExpectedPixelGap(points);
-    var pixelGapThreshold = Math.max(14, expectedPixelGap * 2.5);
+    var pixelGapThreshold = Math.max(ESTIMATE_PIXEL_GAP_MIN, expectedPixelGap * 2.5);
     var chart = document.querySelector('#chartContainer');
     var chartWidth = chart ? chart.getBoundingClientRect().width : window.innerWidth;
     var paths = [];
@@ -817,8 +824,8 @@
     }
 
     var latest = points[points.length - 1];
-    var staleMs = Date.now() - readingTime(latest.entry);
-    if (staleMs > gapThreshold && staleMs <= ESTIMATE_OPEN_MAX_MS) {
+    var staleMs = latest.entry ? Date.now() - readingTime(latest.entry) : 0;
+    if (latest.entry && staleMs > gapThreshold && staleMs <= ESTIMATE_OPEN_MAX_MS) {
       var slope = recentPixelSlope(points, latest);
       if (slope && slope.xPerMs > 0) {
         paths.push(pathBetween(latest, {
@@ -831,6 +838,68 @@
     layer.innerHTML = paths.map(function (d) {
       return '<path d="' + d + '"></path>';
     }).join('');
+  }
+
+  function scheduleEstimatedGlucoseLine(delay) {
+    if (estimateRenderTimer) window.clearTimeout(estimateRenderTimer);
+    estimateRenderTimer = window.setTimeout(function () {
+      estimateRenderTimer = null;
+      window.requestAnimationFrame(renderEstimatedGlucoseLine);
+    }, delay || 80);
+  }
+
+  function isOnlyEstimateLayerMutation(mutations) {
+    return mutations.every(function (mutation) {
+      var target = mutation.target;
+      if (target && target.closest && target.closest('.' + ESTIMATE_LINE_CLASS)) return true;
+
+      var added = Array.prototype.slice.call(mutation.addedNodes || []);
+      var removed = Array.prototype.slice.call(mutation.removedNodes || []);
+      return added.concat(removed).every(function (node) {
+        return node.nodeType === 1 && node.closest && node.closest('.' + ESTIMATE_LINE_CLASS);
+      });
+    });
+  }
+
+  function observeChartChanges() {
+    var chart = document.querySelector('#chartContainer');
+    if (!chart) {
+      window.setTimeout(observeChartChanges, 1000);
+      return;
+    }
+    if (chart === observedChart && chartObserver) return;
+
+    if (chartObserver) chartObserver.disconnect();
+    observedChart = chart;
+    chartObserver = new MutationObserver(function (mutations) {
+      if (isOnlyEstimateLayerMutation(mutations)) return;
+      scheduleEstimatedGlucoseLine();
+    });
+    chartObserver.observe(chart, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['cx', 'cy', 'r', 'transform', 'width', 'height']
+    });
+  }
+
+  function installChartRangeListeners() {
+    document.addEventListener('change', function (event) {
+      var target = event.target;
+      if (target && target.id && /^(12|24)-browser$/.test(target.id)) {
+        scheduleEstimatedGlucoseLine(300);
+        window.setTimeout(scheduleEstimatedGlucoseLine, 1200);
+        window.setTimeout(scheduleEstimatedGlucoseLine, 2500);
+      }
+    }, true);
+
+    document.addEventListener('click', function (event) {
+      var target = event.target;
+      if (target && target.closest && target.closest('#chartContainer, #settings, #drawer')) {
+        scheduleEstimatedGlucoseLine(300);
+        window.setTimeout(scheduleEstimatedGlucoseLine, 1200);
+      }
+    }, true);
   }
 
   function showPointTooltip(dot, event) {
@@ -903,9 +972,10 @@
         currentHypoRisk = calculateHypoRisk(readings, rows);
         renderStatsPanel(calculateStats(readings));
         render(rows);
-        window.requestAnimationFrame(renderEstimatedGlucoseLine);
-        window.setTimeout(renderEstimatedGlucoseLine, 500);
-        window.setTimeout(renderEstimatedGlucoseLine, 1500);
+        observeChartChanges();
+        scheduleEstimatedGlucoseLine(0);
+        window.setTimeout(scheduleEstimatedGlucoseLine, 500);
+        window.setTimeout(scheduleEstimatedGlucoseLine, 1500);
       })
       .catch(function () {
         renderStatsPanel(null);
@@ -917,14 +987,16 @@
   function start() {
     installSoundDefaultOff();
     installPointTooltip();
+    installChartRangeListeners();
     observeCurrentGlucose();
+    observeChartChanges();
     refresh();
     window.setInterval(refresh, POLL_MS);
     window.addEventListener('resize', positionContainer);
-    window.addEventListener('resize', renderEstimatedGlucoseLine);
+    window.addEventListener('resize', scheduleEstimatedGlucoseLine);
     window.setTimeout(positionContainer, 1000);
     window.setTimeout(positionContainer, 3000);
-    window.setTimeout(renderEstimatedGlucoseLine, 3000);
+    window.setTimeout(scheduleEstimatedGlucoseLine, 3000);
   }
 
   if (document.readyState === 'loading') {
