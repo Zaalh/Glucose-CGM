@@ -51,12 +51,59 @@ Een episode die waarschijnlijk met eten samenhangt:
 
 Deze detectie hoeft niet perfect te weten dat je at. Het is genoeg als de curve lijkt op een postprandiale piek.
 
+### 1b. Dynamische sprongen
+
+De app moet niet alleen kijken naar vaste grenzen zoals 10.0 of 4.0. Grote sprongen zeggen bij jou veel, zowel omhoog als omlaag. Een piek hoeft dus niet boven 10.0 te zijn om gevaarlijk te worden. Een piek rond 8.8 die snel naar 6.0 of lager zakt kan ook een belangrijk signaal zijn.
+
+Belangrijke signalen:
+
+- Snelle stijging: bijvoorbeeld +2.0 mmol/L binnen 15-30 minuten.
+- Zeer snelle stijging: bijvoorbeeld +3.0 mmol/L binnen 20-30 minuten.
+- Snelle daling: bijvoorbeeld -2.0 mmol/L binnen 15-30 minuten.
+- Zeer snelle daling: bijvoorbeeld -3.0 mmol/L binnen 20-30 minuten.
+- Val vanaf piek: bijvoorbeeld van 10.0 naar 6.0 in korte tijd.
+- Val vanaf lagere piek: bijvoorbeeld van 8.8 naar 6.0 of 5.5 in korte tijd.
+- Grote relatieve daling: bijvoorbeeld 25-35% daling vanaf recente piek.
+- Richtingsomslag: snel stijgen -> afvlakken -> snel dalen.
+
+Voorbeeldsignaal:
+
+```text
+piek rond 10.0
+nu al rond 6.0
+en dit gebeurde binnen 20-40 minuten
+= sterk waarschuwingssignaal, ook als je nog niet hypo bent
+```
+
+Dit moet dus opgepikt worden als `fast_drop_risk`, niet pas als `near_hypo`.
+
+Nog een voorbeeld:
+
+```text
+piek rond 8.8
+nu rond 6.0
+drop van 2.8 mmol/L
+en de daling loopt nog door
+= ook een waarschuwingssignaal, ondanks geen hyper boven 10
+```
+
+Daarom werken we met dynamische piekdetectie:
+
+- vaste drempels: 8.5, 9.0, 10.0;
+- relatieve drempels: piek ligt duidelijk boven jouw recente baseline;
+- drop-drempels: hoeveel je vanaf die piek bent gezakt;
+- rate-drempels: hoe snel die daling gaat;
+- patroonmatch: lijkt dit op eerdere episodes die bij jou eindigden in near-hypo of hypo?
+
 ### 2. Rebound-drop
 
 Na een spike letten we op:
 
 - Daling vanaf de piek.
 - Daaltempo over 3, 5, 10, 15, 20, 30 en 60 minuten.
+- Absolute delta over 5, 10, 15, 20, 30 en 60 minuten.
+- Hoeveel mmol/L er al verloren is sinds de piek.
+- Hoe snel de waarde van boven 10 naar 7, 6 of 5.5 gaat.
 - Hoe lang de daling aanhoudt.
 - Of de waarde onder 7.0, 6.0, 5.0 en 4.5 komt.
 - Of de daling versnelt of juist afvlakt.
@@ -85,14 +132,35 @@ Per actuele meting berekenen we:
 - Huidige glucosewaarde.
 - Snelheid over 5, 10, 15, 30, 45 en 60 minuten.
 - Snelheid over 3 en 20 minuten voor zeer snelle reacties.
+- Delta over 5, 10, 15, 20, 30, 45 en 60 minuten.
 - Versnelling: wordt de daling sterker of zwakker?
 - Tijd sinds laatste piek boven 8.5, 9.0 en 10.0.
 - Hoogte van de laatste piek.
 - Daling vanaf de piek in mmol/L.
+- Percentage/relatieve daling vanaf de piek.
+- Tijd van piek naar onder 8.0, 7.0, 6.0, 5.5, 5.0 en 4.5.
 - Gemiddelde daling per minuut sinds de piek.
 - Laagste waarde in vergelijkbare eerdere episodes.
 - Tijdstip van de dag.
 - Eventueel: handmatige maaltijdmarkering, als we die later toevoegen.
+
+Extra dynamische features:
+
+- `delta_10m`, `delta_20m`, `delta_30m`.
+- `rate_10m`, `rate_20m`, `rate_30m`.
+- `dropFromPeak`: actuele waarde minus laatste piek.
+- `minutesSincePeak`.
+- `peakToCurrentRate`.
+- `crossedDownFrom10To6`: boolean.
+- `crossedDownFrom9To6`: boolean.
+- `crossedDownFromPeakTo6`: boolean.
+- `crossedDownFromPeakTo55`: boolean.
+- `adaptivePeakMmol`: hoogste relevante piek, ook als die onder 10 ligt.
+- `baselineBeforeRise`: gemiddelde waarde voor de stijging.
+- `riseAboveBaseline`: piek minus baseline.
+- `dropPercentFromPeak`.
+- `largeRiseBeforeDrop`: boolean.
+- `turnaroundSpeed`: hoe snel stijging omslaat naar daling.
 
 ## Risicoscore versie 1
 
@@ -102,6 +170,12 @@ Voorbeeld:
 
 - `+3` als er in de afgelopen 6 uur een piek boven 10.0 was.
 - `+4` als er in de afgelopen 30 minuten een piek boven 10.0 was en de waarde nu snel daalt.
+- `+4` als de waarde van boven 10.0 naar rond 6.0 is gegaan binnen 20-45 minuten.
+- `+3` als een piek tussen 8.5 en 10.0 snel naar rond 6.0 of lager zakt.
+- `+3` als de daling vanaf een adaptieve piek groter is dan 25-35%.
+- `+3` als de waarde meer dan 3.0 mmol/L onder de recente piek zit.
+- `+2` als de waarde meer dan 2.0 mmol/L is gedaald binnen 20 minuten.
+- `+2` als er eerst een grote stijgsprong was en daarna een grote dalingssprong.
 - `+2` als de glucose nu onder 6.0 is en daalt.
 - `+3` als de 5- of 10-minuten rate lager is dan -0.08 mmol/L/min.
 - `+2` als de 15-minuten rate lager is dan -0.04 mmol/L/min.
@@ -121,6 +195,10 @@ Risiconiveaus:
 De app moet altijd tonen waarom de score hoog is, bijvoorbeeld:
 
 > Hoog hypo-risico: piek 10.7 mmol/L 22 min geleden, daling -0.09 mmol/L/min, vergelijkbare eerdere episodes gingen onder 4.5.
+
+Of:
+
+> Hoog hypo-risico: daling van 10.2 naar 6.1 in 28 min. Dit is bij jou vaak een vroeg signaal voor snelle hypo.
 
 ## Predictie versie 1
 
@@ -162,6 +240,36 @@ piek > 10.0
 = hoog risico op hypo binnen 10-30 min
 ```
 
+Tweede snelle patroon:
+
+```text
+piek >= 9.5-10.0
++ actuele waarde rond 6.0
++ drop vanaf piek >= 3.0 mmol/L
++ drop gebeurde snel
+= alarm/hoog risico, ook als actuele waarde nog niet laag is
+```
+
+Derde snelle patroon, zonder harde hyper:
+
+```text
+piek 8.5-9.5
++ actuele waarde rond 6.0 of lager
++ drop vanaf piek >= 2.0-3.0 mmol/L
++ daling loopt nog door
+= verhoogd risico, ook zonder piek boven 10
+```
+
+Vierde patroon, volledig adaptief:
+
+```text
+recente baseline 5.5-6.5
++ piek minimaal 2.0 mmol/L boven baseline
++ daarna snelle daling van minstens 25-35%
++ rate blijft negatief
+= risico op reactieve crash
+```
+
 ## Predictie versie 2
 
 Als er meer data is, kunnen we een klein persoonlijk model trainen:
@@ -189,6 +297,21 @@ Belangrijk: dit model moet alleen lokaal op jouw data draaien. Geen cloud nodig.
 De app moet niet alleen actuele waarden lezen, maar ook eigen analyses terugschrijven. Daarmee ontstaat een persoonlijke leerlaag bovenop Nightscout.
 
 Gebruik MongoDB als primaire bron, omdat Nightscout daar nu al op draait. Maak aparte collections naast `entries`, zodat ruwe CGM-data schoon blijft.
+
+De bestaande `entries` bevatten nu al veel bruikbare informatie:
+
+- `_id`.
+- `identifier`.
+- `sysTime`, `date`, `dateString`.
+- `device`.
+- `direction`.
+- `sgv`.
+- `utcOffset`.
+- `glucoseRate` en `glucoseRateMmolPerMin`.
+
+Vooral `glucoseRateMmolPerMin` is belangrijk: daar zitten al vensters in zoals 1, 2, 3, 4, 5, 10, 15, 20, 30, 45, 60, 90 en 120 minuten, met `rate`, `delta`, `actualMinutes` en `baselineDate`. Deze velden moeten de basis zijn voor dynamische sprongdetectie.
+
+Regel: gebruik alles wat al in `entries` staat voordat we iets opnieuw berekenen. Alleen ontbrekende of hogere-orde features schrijven we naar nieuwe collections.
 
 ### Collection: `pattern_events`
 
@@ -248,6 +371,70 @@ Na afloop wordt dezelfde snapshot verrijkt met:
 - `result`: `true_positive`, `false_positive`, `false_negative`, `true_negative`.
 - `leadTimeMinutes`: hoeveel minuten waarschuwing voor de echte hypo.
 
+### Collection: `entry_features`
+
+Per CGM-entry bewaren we afgeleide features die duurder of complexer zijn dan simpele rates.
+
+Velden:
+
+- `entryId`, `entryIdentifier`, `date`.
+- `mmol`.
+- `rawRates`: kopie of selectie uit `glucoseRateMmolPerMin`.
+- `baseline_30m`, `baseline_60m`, `baseline_120m`.
+- `localPeakMmol`, `localPeakDate`, `minutesSinceLocalPeak`.
+- `localTroughMmol`, `localTroughDate`.
+- `dropFromPeakMmol`.
+- `dropFromPeakPercent`.
+- `riseFromBaselineMmol`.
+- `turnaroundDetected`.
+- `turnaroundMinutes`.
+- `mealState`.
+- `curveType`.
+- `dataQualityScore`.
+- `featureVector`.
+- `featureVersion`.
+
+Deze collection maakt live voorspelling sneller: de app hoeft niet bij elke render opnieuw de hele historie te scannen.
+
+### Collection: `episode_vectors`
+
+Voor similarity search tussen episodes.
+
+Velden:
+
+- `eventId`.
+- `eventType`.
+- `startDate`, `peakDate`, `endDate`.
+- `curveType`.
+- `vectorVersion`.
+- `vector`: numerieke embedding van de curve.
+- `featureVector`: uitlegbare features naast de vector.
+- `outcome`: hypo, near-hypo, stable, unknown.
+
+Vectorinhoud eerste versie zonder LLM:
+
+- genormaliseerde glucosewaarden rond de episode, bijvoorbeeld 60-120 punten.
+- rates/deltas per venster.
+- piekhoogte, baseline, drop, tijd tot piek, tijd tot drop.
+- area boven/onder baseline.
+
+Later kan daar een AI/embedding bij komen, maar de eerste vector moet volledig lokaal en numeriek zijn.
+
+Gebruik:
+
+- Zoek historische episodes die lijken op de huidige curve.
+- Kijk wat daarna gebeurde.
+- Gebruik dat als patrooncorrectie en risicoreden.
+
+Voorbeeld:
+
+```text
+huidige curve lijkt op 5 eerdere episodes
+4 daarvan gingen onder 4.5 binnen 30 min
+2 daarvan gingen onder 4.0 binnen 30 min
+= high risk
+```
+
 ### Collection: `model_state`
 
 Bewaar de persoonlijke instellingen van het model.
@@ -279,6 +466,27 @@ Voorbeelden:
 - `meal_type`: `fast_carbs`, `mixed`, `high_fat`, `unknown`.
 
 Deze feedback wordt gekoppeld aan de dichtstbijzijnde CGM-entry en aan actieve prediction snapshots.
+
+### Collection: `daily_summaries`
+
+Dagelijkse aggregaties voor trends en AI-analyse.
+
+Velden:
+
+- `date`.
+- `pointsCount`.
+- `timeBelow40`, `timeBelow45`, `timeAbove85`, `timeAbove100`.
+- `hypoCount`, `nearHypoCount`.
+- `spikeCount`.
+- `fastDropCount`.
+- `suspectedMealCount`.
+- `fastCrashCurveCount`.
+- `falsePositiveCount`.
+- `missedHypoCount`.
+- `averageLeadTimeMinutes`.
+- `modelVersion`.
+
+Deze summaries zorgen dat de AI later niet steeds alle ruwe punten hoeft te lezen.
 
 ## Leerloop
 
@@ -389,9 +597,12 @@ Zo leert het systeem niet alleen van glucosewaarden, maar ook van jouw ervaring.
 Maak scripts:
 
 - `scripts/analyze-patterns.mjs`: scan alle entries en vul `pattern_events`.
+- `scripts/build-entry-features.mjs`: bereken `entry_features` vanuit alle bestaande Nightscout entries.
+- `scripts/build-episode-vectors.mjs`: maak vectors voor alle episodes.
 - `scripts/evaluate-predictions.mjs`: vul uitkomsten van oude `prediction_snapshots`.
 - `scripts/train-risk-model.mjs`: bereken nieuwe gewichten en schrijf `model_state`.
 - `scripts/backfill-prediction-snapshots.mjs`: simuleer historische voorspellingen op oude data voor snellere training.
+- `scripts/summarize-days.mjs`: vul `daily_summaries`.
 
 De backfill is belangrijk: daarmee kunnen we doen alsof het model in het verleden live draaide en zien of het jouw snelle hypo's had voorspeld.
 
@@ -413,6 +624,62 @@ Backtest-uitvoer:
 - Lijst valse alarmen.
 - Beste thresholds voor `watch`, `high`, `urgent`.
 - Voorbeelden van vergelijkbare historische patronen.
+
+## Vector search en episode similarity
+
+Omdat jouw patroon dynamisch is, is alleen een paar drempels niet genoeg. Het systeem moet kunnen vragen:
+
+```text
+waar heb ik deze curve eerder gezien, en wat gebeurde daarna?
+```
+
+Daarvoor gebruiken we episode similarity.
+
+### Eerste versie: numerieke vectors
+
+Geen externe AI nodig.
+
+Maak per episode een vaste vector:
+
+- baseline.
+- peak.
+- trough.
+- rise amount.
+- drop amount.
+- time to peak.
+- time from peak to 6.0, 5.5, 5.0, 4.5, 4.0.
+- max rise rate.
+- max fall rate.
+- deltas 5/10/15/20/30/60 minuten.
+- area above baseline.
+- area below baseline.
+- curve samples genormaliseerd naar vaste lengte.
+
+Similarity:
+
+- cosine similarity voor genormaliseerde vectors.
+- Euclidean distance voor simpele featurevectors.
+- Dynamic Time Warping later als curves verschoven in tijd lijken.
+
+### Tweede versie: vector index
+
+Als de database groeit:
+
+- MongoDB collection `episode_vectors` met vectorveld.
+- Lokale vector search in Node.js als Mongo geen vector index heeft.
+- Of later MongoDB Atlas Vector Search / pgvector / sqlite-vss als we overstappen.
+
+Voor nu is lokale vector search voldoende, omdat jouw persoonlijke dataset klein begint.
+
+### Derde versie: AI embeddings
+
+Later kan een LLM/embedding model tekstuele episode-samenvattingen embedden:
+
+```text
+snelle stijging vanaf 5.8 naar 8.8, daarna daling naar 5.7 binnen 24 min, near-hypo later
+```
+
+Maar dit is aanvullend. De numerieke curvevector blijft leidend.
 
 ## Privacy en veiligheid
 
@@ -543,6 +810,55 @@ meal_spike -> peak_watch -> drop_watch -> fast_drop_risk
 
 Als de piek boven 10 was en de daling binnen 5-10 minuten hard inzet, moet de app al in `fast_drop_risk` komen. Hij moet dan niet wachten tot je onder 5.0 bent.
 
+Een extra directe overgang:
+
+```text
+peak_watch/drop_watch -> fast_drop_risk
+```
+
+als:
+
+- laatste piek boven 9.5-10.0 was, of een adaptieve piek duidelijk boven baseline;
+- actuele waarde rond of onder 6.5 zit;
+- drop vanaf piek groter is dan 2.0-3.0 mmol/L, afhankelijk van piekhoogte;
+- dit binnen ongeveer 20-45 minuten gebeurde.
+
+Dit is precies het "van 10 naar 6" signaal, maar ook het "van 8.8 naar 6" signaal: nog geen hypo, maar wel een sterke aanwijzing dat het systeem alert moet zijn.
+
+## Adaptieve drempels
+
+Vaste drempels zijn nuttig, maar mogen nooit het enige criterium zijn. Het systeem moet leren wat voor jou groot, snel en gevaarlijk is.
+
+Startwaarden:
+
+- `absoluteHighPeak`: 10.0 mmol/L.
+- `moderatePeak`: 8.5 mmol/L.
+- `baselineRiseSignal`: +2.0 mmol/L boven recente baseline.
+- `largeDrop`: -2.0 mmol/L binnen 20-30 minuten.
+- `veryLargeDrop`: -3.0 mmol/L binnen 20-45 minuten.
+- `dropPercentSignal`: 25-35% daling vanaf piek.
+- `fastNegativeRate`: lager dan -0.08 mmol/L/min.
+
+Deze waarden worden later persoonlijk bijgesteld op basis van:
+
+- Welke signalen voorafgingen aan echte hypo's.
+- Welke signalen vaak vals alarm waren.
+- Welke piekhoogtes bij jou gevaarlijk zijn.
+- Welke dropsnelheden bij jou gevaarlijk zijn.
+- Hoe snel de daling na de piek begon.
+
+Voorbeeld van leren:
+
+```text
+Als piek 8.7-9.2 en drop >= 2.4 binnen 25 min:
+  historisch vaak near-hypo
+  drempel verhogen naar high risk
+
+Als piek 10.0 maar daling vlakt snel af boven 7.0:
+  historisch vaak geen hypo
+  drempel verlagen naar watch
+```
+
 ## Wat kan dit systeem uiteindelijk allemaal?
 
 ### Realtime waarschuwingen
@@ -594,6 +910,386 @@ Als de piek boven 10 was en de daling binnen 5-10 minuten hard inzet, moet de ap
 - Vergelijken: oude modelversie vs nieuwe modelversie.
 - Uitzoeken hoeveel minuten eerder een alarm had kunnen komen.
 
+## Extra databronnen voor maximale voorspelling
+
+De beste voorspelling komt niet uit glucose alleen. Online onderzoek naar postprandiale glucose- en hypoglykemievoorspelling gebruikt vaak recente CGM-geschiedenis, maaltijdinformatie, activiteit en soms wearable-data. Voor jouw situatie is dit de prioriteit.
+
+### Prioriteit 1: CGM zelf
+
+Altijd beschikbaar en het belangrijkst.
+
+- Ruwe glucosewaarde.
+- Sensortrend.
+- 1-minuut of 5-minuten interval.
+- Deltas over 3, 5, 10, 15, 20, 30, 45, 60 minuten.
+- Rates over dezelfde vensters.
+- Versnelling.
+- Curvevorm: stijging, piek, plateau, omslag, daling, herstel.
+- Tijd sinds laatste piek.
+- Tijd sinds laatste hypo.
+- Time in range per dag.
+- Variabiliteit per dag.
+- Sensorleeftijd en datagaps.
+
+### Prioriteit 2: Afgeleide maaltijddata
+
+Voor reactieve hypo's is eten waarschijnlijk de belangrijkste context, maar de standaard moet zero-input zijn: jij hoeft niets in te vullen. Maaltijddata wordt primair automatisch afgeleid uit de CGM-curve.
+
+Automatisch afleidbaar:
+
+- vermoedelijke maaltijdstart.
+- vermoedelijke piektijd.
+- snelheid van stijging na vermoedelijke maaltijd.
+- piekhoogte boven baseline.
+- tijd tot piek.
+- duur van plateau.
+- snelheid van daling na piek.
+- late tweede piek, mogelijk vet/proteine-effect of gemengde maaltijd.
+- snelle hoge piek, mogelijk snelle koolhydraten.
+- brede trage piek, mogelijk gemengde/vettere maaltijd.
+- kleine piek met snelle crash, mogelijk zeer gevoelige respons.
+
+Optionele invoer, niet vereist:
+
+- `ik eet nu`.
+- maaltijdtype: `snelle carbs`, `normaal`, `vet/proteine`, `onbekend`.
+- geschatte grootte: `klein`, `normaal`, `groot`.
+
+Nog betere optionele invoer:
+
+- geschatte koolhydraten.
+- suiker/snelle koolhydraten ja/nee.
+- eiwit/vet indicatie.
+- vezels indicatie.
+- cafeine/alcohol.
+- tijd sinds vorige maaltijd.
+
+Afgeleide maaltijdfeatures:
+
+- unannounced meal detection uit CGM-curve.
+- piekhoogte na vermoedelijke maaltijd.
+- tijd tot piek.
+- tijd tot daling.
+- oppervlakte boven baseline.
+- post-meal drop onder baseline.
+- piekbreedte.
+- aantal pieken binnen 3 uur.
+- verhouding snelle stijging / langzame daling.
+- verhouding stijging / crash.
+
+### Prioriteit 3: Symptomen en bevestiging
+
+Omdat CGM en klachten niet altijd perfect samenvallen, moet jouw ervaring worden meegenomen.
+
+- `ik voel hypo`.
+- klachtenniveau: mild, medium, heftig.
+- symptomen: trillen, zweten, hartkloppingen, duizelig, honger, brain fog, paniek/onrust.
+- vingerprik bevestigd ja/nee.
+- snelle koolhydraten genomen ja/nee.
+- herstel na eten/drinken ja/nee.
+
+Dit helpt onderscheid maken tussen:
+
+- echte lage glucose;
+- sensor-lag of sensorfout;
+- postprandiaal syndroom met klachten zonder echte lage waarde;
+- snelle daling die klachten geeft voordat de absolute waarde laag is.
+
+### Prioriteit 4: Activiteit en beweging
+
+Beweging kan glucose sneller laten dalen of herstel veranderen.
+
+Bronnen:
+
+- Apple Health, Google Fit, Garmin, Oura, Fitbit of handmatig.
+
+Velden:
+
+- stappen laatste 15, 30, 60, 120 minuten.
+- workout ja/nee.
+- intensiteit.
+- hartslag.
+- hartslagvariabiliteit als beschikbaar.
+- wandelen direct na eten.
+- rust/slaap.
+
+### Prioriteit 5: Slaap, stress en herstel
+
+Niet alles is maaltijd. Stress, slechte slaap en ziekte kunnen curvevorm veranderen.
+
+- slaapduur.
+- slaapkwaliteit.
+- rusthartslag.
+- HRV.
+- stressscore.
+- ziekte/koorts.
+- menstruatiecyclus indien relevant.
+- medicatie/supplementen.
+
+### Prioriteit 6: Context
+
+- tijdstip van de dag.
+- dag van de week.
+- thuis/werk/reis.
+- ochtend/lunch/avond/nacht.
+- vorige hypo binnen 6-12 uur.
+- meerdere spikes achter elkaar.
+
+## Sensorbetrouwbaarheid en datakwaliteit
+
+Een voorspelmodel moet ook weten wanneer data minder betrouwbaar is.
+
+Te bewaren:
+
+- ontbrekende minuten.
+- dubbele entries.
+- sensorwissel.
+- extreem abrupte enkelpunt-sprongen die mogelijk sensorruis zijn.
+- compressie-lows tijdens slaap of druk op sensor.
+- verschil tussen CGM en vingerprik als beschikbaar.
+
+Regel:
+
+```text
+laag vertrouwen in sensor = voorzichtig tonen, minder hard alarmeren tenzij trend en context sterk zijn
+```
+
+## Featuregroepen
+
+Het model krijgt features in groepen, zodat we later kunnen zien welke groep echt helpt.
+
+### Glucose-shape features
+
+- baseline voor stijging.
+- piekhoogte.
+- tijd tot piek.
+- delta vanaf baseline.
+- drop vanaf piek.
+- droppercentage.
+- area under curve boven baseline.
+- area below baseline na piek.
+- steepest rise.
+- steepest fall.
+- turnaround speed.
+
+### Meal-context features
+
+- vermoedelijke maaltijd uit curve.
+- afgeleid curve-type: `fast_carbs_like`, `mixed_meal_like`, `fat_protein_like`, `small_sensitive_response`, `uncertain_meal`.
+- tijd sinds maaltijd.
+- maaltijdgrootte.
+- carbs/suiker indicatie.
+- vet/proteine indicatie.
+- maaltijd gemarkeerd, alleen als optionele extra.
+
+### Body-context features
+
+- stappen.
+- hartslag.
+- beweging na maaltijd.
+- slaap.
+- stress/HRV.
+- klachten.
+
+### History features
+
+- aantal hypo's afgelopen 24 uur.
+- vorige snelle drop.
+- vergelijkbare episode count.
+- historische kans op near-hypo bij soortgelijke curve.
+- modelconfidence.
+
+## Hoe anderen dit ongeveer doen
+
+Patronen uit literatuur en CGM/ML-systemen:
+
+- Postprandiale voorspelling gebruikt vaak een venster met recente glucosewaarden, bijvoorbeeld 30-60 minuten of langer voor maaltijdcontext.
+- Voor hypo na maaltijd is een speciaal postprandiaal model nuttiger dan een algemeen nachtelijk/lineair model, omdat de dalingen sneller en grilliger kunnen zijn.
+- Meal detection is een eigen taak: systemen proberen een maaltijd te herkennen uit snelle stijging en curvevorm als de maaltijd niet handmatig gelogd is.
+- Modellen worden beter met maaltijdinformatie, carbs/macronutrienten en activiteit, maar recente CGM-trend blijft meestal de sterkste realtime input.
+- CGM bij reactieve hypoglykemie wordt juist gebruikt omdat losse vingerprikken vaak het moment missen en symptomen vertraagd of eerder kunnen komen.
+
+Vertaling naar ons systeem:
+
+- CGM-curvevorm is de realtime basis.
+- Meal-state machine detecteert vermoedelijk eten zonder handmatige input.
+- Handmatige maaltijd/symptoomknoppen zijn optioneel en mogen nooit nodig zijn.
+- Activity/wearable-data komt als extra context, niet als vereiste.
+- AI/LLM analyseert episodes en stelt vragen, maar de live waarschuwing blijft snel en lokaal.
+
+## Data-roadmap
+
+### Nu
+
+- CGM entries.
+- Pattern events.
+- Prediction snapshots.
+- Zero-input maaltijdherkenning.
+- Afgeleide maaltijdtypes uit curvevorm.
+
+### Daarna
+
+- Optionele feedbackknoppen.
+- Symptomen en bevestiging als jij dat ooit wilt.
+- Backtesting en dagelijkse modelmetrics.
+
+### Later
+
+- Apple Health/Google Fit stappen en hartslag.
+- Slaap en HRV.
+- Foto of tekst van maaltijd door AI laten samenvatten naar simpele features.
+- Weekrapporten.
+- Arts/export-overzicht.
+
+## AI met maaltijdfoto of tekst
+
+Later kan de AI helpen om maaltijdinformatie minder irritant te maken, maar dit is optioneel. De basis moet zonder invoer werken.
+
+Voorbeelden:
+
+- Jij typt: "boterham jam en koffie".
+- AI maakt features: snelle carbs ja, vet/proteine laag, maaltijdgrootte klein/normaal.
+- Jij maakt foto.
+- AI schat grof: carbs/suiker indicatie, maaltijdtype, onzekerheid.
+
+Belangrijk:
+
+- AI schattingen zijn onzeker.
+- De app moet ze als context gebruiken, niet als waarheid.
+- Jij moet makkelijk kunnen corrigeren.
+
+## Zero-input maaltijdherkenning
+
+Omdat jij niets wilt invoeren, moet maaltijdherkenning automatisch gebeuren. Dit heet vaak unannounced meal detection.
+
+De app zoekt naar maaltijdachtige patronen:
+
+```text
+stabiele baseline
++ duidelijke stijging
++ stijging houdt meerdere minuten aan
++ piek of plateau
+= vermoedelijke maaltijd
+```
+
+Mogelijke categorieen zonder handmatige invoer:
+
+- `fast_carbs_like`: snelle stijging, hoge of smalle piek, snelle daling.
+- `mixed_meal_like`: middelmatige stijging, bredere piek, geleidelijke daling.
+- `fat_protein_like`: tragere stijging, langer plateau, soms tweede piek.
+- `small_sensitive_response`: kleine of matige piek, maar daarna opvallend snelle daling.
+- `uncertain_meal`: patroon lijkt op eten, maar confidence is laag.
+
+Dit zijn curve-types, geen harde voedingswaarheden. De app moet dus zeggen:
+
+```text
+lijkt op snelle-koolhydraat curve
+```
+
+niet:
+
+```text
+je hebt suiker gegeten
+```
+
+### Afgeleide maaltijdtype-features
+
+Voor elk vermoedelijk maaltijd-event:
+
+- `riseStartDate`.
+- `peakDate`.
+- `peakMmol`.
+- `baselineMmol`.
+- `riseMmol`.
+- `riseRateMax`.
+- `timeToPeakMinutes`.
+- `peakWidthMinutes`.
+- `areaAboveBaseline_2h`.
+- `areaAboveBaseline_3h`.
+- `dropAfterPeakMmol`.
+- `dropAfterPeakRateMax`.
+- `timePeakToUnder6`.
+- `timePeakToUnder55`.
+- `timePeakToUnder45`.
+- `secondPeakDetected`.
+- `curveType`.
+- `curveTypeConfidence`.
+
+### Meal-type inference regels versie 1
+
+Startregels:
+
+- Snelle-koolhydraat-achtig:
+  - snelle stijging;
+  - korte tijd tot piek;
+  - smalle piek;
+  - daarna snelle daling.
+- Gemengd-achtig:
+  - gemiddelde stijging;
+  - piek houdt langer aan;
+  - daling minder abrupt.
+- Vet/proteine-achtig:
+  - trage stijging;
+  - brede plateau;
+  - tweede piek of langdurig verhoogde waarde.
+- Kleine-gevoelige respons:
+  - piek hoeft niet hoog te zijn;
+  - drop vanaf piek is relatief groot;
+  - near-hypo risico kan toch hoog zijn.
+
+Deze regels worden later vervangen of aangevuld met clustering op jouw eigen data.
+
+### Clustering zonder labels
+
+Omdat er geen maaltijdlabels zijn, moet het systeem unsupervised leren.
+
+Aanpak:
+
+1. Detecteer vermoedelijke maaltijd-events.
+2. Bereken curvefeatures per event.
+3. Cluster episodes op curvevorm.
+4. Meet per cluster hoe vaak near-hypo/hypo volgt.
+5. Geef clusters praktische namen.
+
+Voorbeeld:
+
+```text
+Cluster A:
+  snelle stijging, smalle piek, crash binnen 30 min
+  hypo/near-hypo risico hoog
+  naam: fast_crash_curve
+
+Cluster B:
+  lagere piek rond 8.5-9.0, toch snelle daling
+  risico medium/hoog
+  naam: moderate_peak_crash_curve
+
+Cluster C:
+  brede piek, geen crash
+  risico laag
+  naam: broad_stable_curve
+```
+
+De AI mag later helpen om deze clusters begrijpelijk te beschrijven, maar het model moet de clusters uit de data halen.
+
+## Zero-input leerstrategie
+
+Zonder handmatige invoer leert de app vooral uit uitkomsten:
+
+- Welke curvevormen worden gevolgd door hypo?
+- Welke piekhoogtes zijn gevaarlijk?
+- Welke dropgroottes zijn gevaarlijk?
+- Welke tijdstippen geven vaker crashes?
+- Welke combinatie van stijging en daling lijkt op jouw snelle episodes?
+
+Het systeem hoeft niet zeker te weten wat je at. Het hoeft alleen te weten:
+
+```text
+dit soort curve eindigt bij jou vaak in hypo
+```
+
+Dat is genoeg voor voorspelling.
+
 ## Minimale geavanceerde versie
 
 De eerste serieuze versie moet minimaal dit kunnen:
@@ -635,7 +1331,9 @@ Dit lijkt op eerdere snelle post-hyper drops
 
 ## Data-uitbreiding
 
-Sterk aanbevolen om later optioneel toe te voegen:
+Handmatige input mag helpen, maar het systeem mag er niet van afhankelijk zijn. De standaardmodus is zero-input: jij hoeft niets in te vullen.
+
+Optionele input voor later:
 
 - Knop: `Ik eet nu`.
 - Optioneel: geschatte koolhydraten.
@@ -643,7 +1341,7 @@ Sterk aanbevolen om later optioneel toe te voegen:
 - Knop: `symptomen`.
 - Knop: `vingerprik bevestigd`.
 
-Zelfs simpele maaltijdmarkeringen maken het model veel beter, omdat we dan niet hoeven te raden of een spike door eten kwam.
+Zelfs simpele maaltijdmarkeringen maken het model sneller beter, maar ze zijn niet vereist. Zonder input moet de app zelf vermoedelijke maaltijdmomenten en maaltijdtypes afleiden uit de curve.
 
 ## Implementatiestappen
 
