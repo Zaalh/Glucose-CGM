@@ -1,8 +1,16 @@
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
+import { MongoClient } from 'mongodb'
 
 const LIBRE_API = 'https://api-eu.libreview.io'
 const DEFAULT_INTERVAL_SECONDS = 60
+const DEFAULT_GRACE_WINDOW_MINUTES = 30
+const DEFAULT_RETRY_ATTEMPTS = 3
+const DEFAULT_RETRY_BASE_DELAY_MS = 750
+const DEFAULT_RETRY_MAX_DELAY_MS = 12_000
+const DEFAULT_HTTP_TIMEOUT_MS = 12_000
+const DEFAULT_RETRY_JITTER_MS = 300
+const HISTORY_PERIOD_MINUTES = 7
 const RATE_WINDOWS_MINUTES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 20, 30, 45, 60, 90, 120]
 const RATE_MAX_BASELINE_DIFF_MS = 45_000
 const MGDL_PER_MMOL = 18.0182
@@ -67,6 +75,7 @@ async function syncOnce() {
   }
 
   await uploadEntries(entries)
+  await writePredictionSnapshots(entries, previousEntries)
   console.log(`[libreview-sync] ${entries.length} metingen naar Nightscout geschreven. ${debugInfo}`)
   return {
     success: true,
@@ -75,6 +84,148 @@ async function syncOnce() {
     message: `${entries.length} metingen naar Nightscout geschreven.`,
     debug: debugInfo,
   }
+}
+
+async function writePredictionSnapshots(entries, previousEntries = []) {
+  if (!entries.length) return
+
+  const timeline = [...previousEntries, ...entries]
+    .filter((entry) => Number.isFinite(Number(entry.sgv)) && Number.isFinite(Number(entry.date)))
+    .sort((a, b) => a.date - b.date)
+
+  const snapshots = entries.map((entry) => {
+    const idx = timeline.findIndex((candidate) => candidate.identifier === entry.identifier)
+    if (idx < 0) return null
+
+    const windowStart = entry.date - 120 * 60_000
+    let peak = entry
+    for (let i = idx; i >= 0; i -= 1) {
+      if (timeline[i].date < windowStart) break
+      if (timeline[i].sgv > peak.sgv) peak = timeline[i]
+    }
+
+    const currentMmol = Number(entry.sgv) / MGDL_PER_MMOL
+    const peakMmol = Number(peak.sgv) / MGDL_PER_MMOL
+    const dropFromPeakMmol = peakMmol - currentMmol
+    const dropFromPeakPercent = peakMmol > 0 ? (dropFromPeakMmol / peakMmol) * 100 : 0
+    const minutesSincePeak = (entry.date - peak.date) / 60_000
+
+    const rate5m = calcRateFromTimeline(timeline, idx, 5)
+    const rate10m = calcRateFromTimeline(timeline, idx, 10)
+    const rate15m = calcRateFromTimeline(timeline, idx, 15)
+
+    const risk = evaluateRiskRuleV1({
+      currentMmol,
+      rate5m,
+      rate10m,
+      rate15m,
+      peakMmol,
+      minutesSincePeak,
+      dropFromPeakMmol,
+      dropFromPeakPercent,
+    })
+
+    return {
+      createdAt: entry.dateString ?? new Date(entry.date).toISOString(),
+      entryIdentifier: entry.identifier,
+      currentMmol: round(currentMmol, 3),
+      risk: risk.risk,
+      riskScore: risk.score,
+      reasons: risk.reasons,
+      modelVersion: 'rules-v1',
+      outcomeEvaluated: false,
+    }
+  }).filter(Boolean)
+
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    const collection = client.db().collection('prediction_snapshots')
+
+    for (const snapshot of snapshots) {
+      await collection.updateOne(
+        { entryIdentifier: snapshot.entryIdentifier },
+        {
+          $set: {
+            createdAt: snapshot.createdAt,
+            currentMmol: snapshot.currentMmol,
+            risk: snapshot.risk,
+            riskScore: snapshot.riskScore,
+            reasons: snapshot.reasons,
+            modelVersion: snapshot.modelVersion,
+            outcomeEvaluated: false,
+            updatedAt: new Date().toISOString(),
+          },
+          $setOnInsert: {
+            insertedAt: new Date().toISOString(),
+          },
+        },
+        { upsert: true }
+      )
+    }
+  } catch (err) {
+    console.warn(`[libreview-sync] snapshot mongo write mislukt: ${formatError(err)}`)
+  } finally {
+    if (client) await client.close().catch(() => undefined)
+  }
+}
+
+function calcRateFromTimeline(timeline, latestIndex, minutesBack) {
+  const latest = timeline[latestIndex]
+  const target = latest.date - minutesBack * 60_000
+
+  for (let i = latestIndex - 1; i >= 0; i -= 1) {
+    if (timeline[i].date <= target) {
+      const dtMin = (latest.date - timeline[i].date) / 60_000
+      if (dtMin <= 0) return null
+      return (Number(latest.sgv) / MGDL_PER_MMOL - Number(timeline[i].sgv) / MGDL_PER_MMOL) / dtMin
+    }
+  }
+
+  return null
+}
+
+function evaluateRiskRuleV1(input) {
+  let score = 0
+  const reasons = []
+
+  if ((input.peakMmol ?? 0) >= 10 && (input.minutesSincePeak ?? 999) <= 30) {
+    score += 3
+    reasons.push('Recente piek boven 10.0 mmol/L')
+  }
+  if ((input.dropFromPeakMmol ?? 0) >= 3) {
+    score += 3
+    reasons.push('Grote daling vanaf piek')
+  } else if ((input.dropFromPeakMmol ?? 0) >= 2) {
+    score += 2
+    reasons.push('Snelle daling vanaf piek')
+  }
+  if ((input.dropFromPeakPercent ?? 0) >= 30) {
+    score += 3
+    reasons.push('Relatieve piekdaling >= 30%')
+  } else if ((input.dropFromPeakPercent ?? 0) >= 25) {
+    score += 2
+    reasons.push('Relatieve piekdaling >= 25%')
+  }
+  if ((input.rate5m ?? 0) <= -0.08 || (input.rate10m ?? 0) <= -0.08) {
+    score += 3
+    reasons.push('Zeer snelle negatieve rate')
+  }
+  if ((input.rate15m ?? 0) <= -0.04) {
+    score += 2
+    reasons.push('Aanhoudende daling over 15 min')
+  }
+  if ((input.currentMmol ?? 99) < 4.0) {
+    score += 100
+    reasons.push('Actuele waarde onder 4.0 mmol/L')
+  } else if ((input.currentMmol ?? 99) < 4.5) {
+    score += 4
+    reasons.push('Actuele waarde onder 4.5 mmol/L')
+  }
+
+  const risk = score >= 7 ? 'urgent' : score >= 5 ? 'high' : score >= 3 ? 'watch' : 'low'
+  return { score, risk, reasons }
 }
 
 function startServer() {
@@ -97,6 +248,12 @@ function startServer() {
         ok: true,
         configured: Boolean(current.email && current.password && current.apiSecret),
         intervalSeconds: current.intervalSeconds,
+        graceWindowMinutes: current.graceWindowMinutes,
+        retryAttempts: current.retryAttempts,
+        retryBaseDelayMs: current.retryBaseDelayMs,
+        retryMaxDelayMs: current.retryMaxDelayMs,
+        httpTimeoutMs: current.httpTimeoutMs,
+        retryJitterMs: current.retryJitterMs,
       }))
       return
     }
@@ -140,11 +297,11 @@ function toNightscoutEntry(pt) {
 
 async function libreLogin(email, password) {
   const doLluLogin = async (baseUrl) => {
-    const res = await fetch(`${baseUrl}/llu/auth/login`, {
+    const res = await fetchWithRetry(`${baseUrl}/llu/auth/login`, {
       method: 'POST',
       headers: LLU_BASE_HEADERS,
       body: JSON.stringify({ email, password }),
-    })
+    }, 'llu_login')
     const text = await res.text()
     const json = parseJson(text, `Login parse fout: ${text.slice(0, 200)}`)
     if (!res.ok) throw new Error(`Login mislukt (${res.status}): ${JSON.stringify(json).slice(0, 300)}`)
@@ -167,11 +324,11 @@ async function libreLogin(email, password) {
   const lluToken = json.data.authTicket.token
   const accountId = sha256hex(userId)
 
-  const lslRes = await fetch(`${baseUrl}/lsl/api/nisperson/getauthenticateduser`, {
+  const lslRes = await fetchWithRetry(`${baseUrl}/lsl/api/nisperson/getauthenticateduser`, {
     method: 'POST',
     headers: { ...LSL_BASE_HEADERS, Authorization: `Bearer ${lluToken}` },
     body: JSON.stringify({ email, password }),
-  })
+  }, 'lsl_login')
   const lslText = await lslRes.text()
   let lslJson = {}
   try {
@@ -186,47 +343,51 @@ async function libreLogin(email, password) {
 
 async function collectReadings(lluToken, lslToken, accountId, baseUrl, userId) {
   const debug = []
+  const readings = []
 
   const connRes = await lluGet(lluToken, accountId, baseUrl, '/llu/connections')
   debug.push(`llu_conn=${connRes.status}`)
 
   if (connRes.ok) {
     const connections = connRes.json?.data ?? []
-    const readings = []
     for (const conn of connections) {
       const graphRes = await lluGet(lluToken, accountId, baseUrl, `/llu/connections/${conn.patientId}/graph`)
       debug.push(`llu_graph=${graphRes.status}`)
       if (!graphRes.ok) continue
-      readings.push(...extractReadings(graphRes.json))
+      const pts = extractReadings(graphRes.json)
+      debug.push(`llu_graph_points=${pts.length}`)
+      readings.push(...pts)
     }
-    if (readings.length > 0) return { readings, debugInfo: debug.join(', ') }
   }
 
-  const histRes = await lslGet(lslToken, baseUrl, '/glucoseHistory?numPeriods=5&period=7')
+  const historyPeriods = Math.max(1, Math.ceil(config.graceWindowMinutes / HISTORY_PERIOD_MINUTES))
+  const histRes = await lslGet(lslToken, baseUrl, `/glucoseHistory?numPeriods=${historyPeriods}&period=${HISTORY_PERIOD_MINUTES}`)
   debug.push(`lsl_hist=${histRes.status}`)
   if (histRes.ok) {
-    const readings = extractReadings(histRes.json)
-    if (readings.length > 0) {
-      debug.push(`found=${readings.length}`)
-      return { readings, debugInfo: debug.join(', ') }
-    }
+    const pts = extractReadings(histRes.json)
+    debug.push(`lsl_hist_points=${pts.length}`)
+    readings.push(...pts)
   }
 
   const measRes = await lslGet(lslToken, baseUrl, `/lsl/api/measurements/GetPatientGlucoseMeasurements?patientId=${userId}`)
   debug.push(`lsl_meas=${measRes.status}`)
   if (measRes.ok) {
-    const readings = extractReadings(measRes.json)
-    if (readings.length > 0) {
-      debug.push(`found=${readings.length}`)
-      return { readings, debugInfo: debug.join(', ') }
-    }
+    const pts = extractReadings(measRes.json)
+    debug.push(`lsl_meas_points=${pts.length}`)
+    readings.push(...pts)
   }
 
   const selfGraphRes = await lluGet(lluToken, accountId, baseUrl, `/llu/users/${userId}/graph`)
   debug.push(`llu_self=${selfGraphRes.status}`)
   if (selfGraphRes.ok) {
-    const readings = extractReadings(selfGraphRes.json)
-    if (readings.length > 0) return { readings, debugInfo: debug.join(', ') }
+    const pts = extractReadings(selfGraphRes.json)
+    debug.push(`llu_self_points=${pts.length}`)
+    readings.push(...pts)
+  }
+
+  if (readings.length > 0) {
+    debug.push(`found=${readings.length}`)
+    return { readings, debugInfo: debug.join(', ') }
   }
 
   throw new Error(
@@ -236,16 +397,16 @@ async function collectReadings(lluToken, lslToken, accountId, baseUrl, userId) {
 }
 
 async function lluGet(token, accountId, baseUrl, path) {
-  const res = await fetch(`${baseUrl}${path}`, {
+  const res = await fetchWithRetry(`${baseUrl}${path}`, {
     headers: { ...LLU_BASE_HEADERS, Authorization: `Bearer ${token}`, 'account-id': accountId },
-  })
+  }, `llu:${path}`)
   return responseJson(res)
 }
 
 async function lslGet(token, baseUrl, path) {
-  const res = await fetch(`${baseUrl}${path}`, {
+  const res = await fetchWithRetry(`${baseUrl}${path}`, {
     headers: { ...LSL_BASE_HEADERS, Authorization: `Bearer ${token}` },
-  })
+  }, `lsl:${path}`)
   return responseJson(res)
 }
 
@@ -352,14 +513,14 @@ function round(value, digits) {
 }
 
 async function uploadEntries(entries) {
-  const res = await fetch(`${config.nightscoutUrl}/api/v1/entries`, {
+  const res = await fetchWithRetry(`${config.nightscoutUrl}/api/v1/entries`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'api-secret': sha1hex(config.apiSecret),
     },
     body: JSON.stringify(entries),
-  })
+  }, 'nightscout_upload')
 
   if (!res.ok) {
     const body = await res.text()
@@ -435,6 +596,44 @@ async function responseJson(res) {
   return { status: res.status, ok: res.ok, json }
 }
 
+async function fetchWithRetry(url, options, label) {
+  let lastError = null
+
+  for (let attempt = 1; attempt <= config.retryAttempts; attempt++) {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), config.httpTimeoutMs)
+    try {
+      const res = await fetch(url, { ...options, signal: controller.signal })
+      if (res.ok || !shouldRetryStatus(res.status) || attempt === config.retryAttempts) {
+        if (!res.ok && attempt > 1) {
+          console.warn(`[libreview-sync] ${label} stopte na poging ${attempt} met HTTP ${res.status}`)
+        }
+        clearTimeout(timeout)
+        return res
+      }
+
+      console.warn(`[libreview-sync] ${label} gaf HTTP ${res.status}, poging ${attempt}/${config.retryAttempts}`)
+    } catch (err) {
+      lastError = err
+      if (attempt === config.retryAttempts) break
+      console.warn(`[libreview-sync] ${label} netwerkfout, poging ${attempt}/${config.retryAttempts}: ${formatError(err)}`)
+    } finally {
+      clearTimeout(timeout)
+    }
+
+    const exponential = config.retryBaseDelayMs * (2 ** (attempt - 1))
+    const jitter = Math.floor(Math.random() * (config.retryJitterMs + 1))
+    const delay = Math.min(config.retryMaxDelayMs, exponential + jitter)
+    await sleep(delay)
+  }
+
+  throw lastError ?? new Error(`${label} mislukte na ${config.retryAttempts} pogingen.`)
+}
+
+function shouldRetryStatus(status) {
+  return status === 408 || status === 429 || status >= 500
+}
+
 function parseJson(text, errorMessage) {
   try {
     return JSON.parse(text)
@@ -476,8 +675,15 @@ function readConfig(requireSecrets) {
     password: requireSecrets ? requiredEnv('LIBREVIEW_PASSWORD') : optionalEnv('LIBREVIEW_PASSWORD'),
     tzOffsetMinutes: Number(process.env.LIBREVIEW_TZ_OFFSET ?? 120),
     nightscoutUrl: trimTrailingSlash(process.env.NIGHTSCOUT_URL ?? 'http://localhost:1337'),
+    mongoUri: process.env.MONGODB_URI ?? 'mongodb://nightscout-mongo:27017/nightscout',
     apiSecret: requireSecrets ? requiredEnv('API_SECRET') : optionalEnv('API_SECRET'),
     intervalSeconds: Number(process.env.LIBREVIEW_INTERVAL_SECONDS ?? DEFAULT_INTERVAL_SECONDS),
+    graceWindowMinutes: Number(process.env.LIBREVIEW_GRACE_WINDOW_MINUTES ?? DEFAULT_GRACE_WINDOW_MINUTES),
+    retryAttempts: Number(process.env.LIBREVIEW_RETRY_ATTEMPTS ?? DEFAULT_RETRY_ATTEMPTS),
+    retryBaseDelayMs: Number(process.env.LIBREVIEW_RETRY_BASE_DELAY_MS ?? DEFAULT_RETRY_BASE_DELAY_MS),
+    retryMaxDelayMs: Number(process.env.LIBREVIEW_RETRY_MAX_DELAY_MS ?? DEFAULT_RETRY_MAX_DELAY_MS),
+    httpTimeoutMs: Number(process.env.LIBREVIEW_HTTP_TIMEOUT_MS ?? DEFAULT_HTTP_TIMEOUT_MS),
+    retryJitterMs: Number(process.env.LIBREVIEW_RETRY_JITTER_MS ?? DEFAULT_RETRY_JITTER_MS),
   }
 
   if (!Number.isFinite(next.tzOffsetMinutes)) {
@@ -486,6 +692,30 @@ function readConfig(requireSecrets) {
 
   if (!Number.isFinite(next.intervalSeconds) || next.intervalSeconds < 30) {
     throw new Error('LIBREVIEW_INTERVAL_SECONDS moet minimaal 30 zijn.')
+  }
+
+  if (!Number.isFinite(next.graceWindowMinutes) || next.graceWindowMinutes < HISTORY_PERIOD_MINUTES) {
+    throw new Error(`LIBREVIEW_GRACE_WINDOW_MINUTES moet minimaal ${HISTORY_PERIOD_MINUTES} zijn.`)
+  }
+
+  if (!Number.isInteger(next.retryAttempts) || next.retryAttempts < 1 || next.retryAttempts > 10) {
+    throw new Error('LIBREVIEW_RETRY_ATTEMPTS moet een geheel getal tussen 1 en 10 zijn.')
+  }
+
+  if (!Number.isFinite(next.retryBaseDelayMs) || next.retryBaseDelayMs < 100) {
+    throw new Error('LIBREVIEW_RETRY_BASE_DELAY_MS moet minimaal 100 zijn.')
+  }
+
+  if (!Number.isFinite(next.retryMaxDelayMs) || next.retryMaxDelayMs < next.retryBaseDelayMs) {
+    throw new Error('LIBREVIEW_RETRY_MAX_DELAY_MS moet minimaal LIBREVIEW_RETRY_BASE_DELAY_MS zijn.')
+  }
+
+  if (!Number.isFinite(next.httpTimeoutMs) || next.httpTimeoutMs < 1000) {
+    throw new Error('LIBREVIEW_HTTP_TIMEOUT_MS moet minimaal 1000 zijn.')
+  }
+
+  if (!Number.isFinite(next.retryJitterMs) || next.retryJitterMs < 0) {
+    throw new Error('LIBREVIEW_RETRY_JITTER_MS moet 0 of hoger zijn.')
   }
 
   return next

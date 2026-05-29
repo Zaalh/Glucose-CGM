@@ -107,9 +107,6 @@ export default function Dashboard() {
                 { value: 6, label: '6u' },
                 { value: 12, label: '12u' },
                 { value: 24, label: '24u' },
-                { value: 24 * 7, label: '7d' },
-                { value: 24 * 30, label: '30d' },
-                { value: 24 * 90, label: '90d' },
               ]).map(r => (
                 <button
                   key={r.label}

@@ -89,6 +89,25 @@
 .syncBtn:hover:not(:disabled) { opacity: 0.85; }
 .syncBtn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+.modeSwitch {
+  display: inline-flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.modeBtn {
+  padding: 4px 10px;
+  border: 1px solid #30363d;
+  background: #0d1117;
+  color: #8b949e;
+  border-radius: 999px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.modeBtn:hover { color: #e6edf3; border-color: #8b949e; }
+.modeActive { color: #fff; background: #1f6feb; border-color: #1f6feb; }
+
 .syncMsg {
   font-size: 12px;
   max-width: 280px;
@@ -491,4 +510,44 @@
   .statTile:nth-child(2n) { border-right: none; }
   .statTile:nth-child(3n) { border-right: 1px solid #21262d; }
   .statTile:nth-child(n+3) { border-top: 1px solid #21262d; }
+}
+
+.riskCard {
+  margin-top: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.riskHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.riskLabel {
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.riskBadge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.risk_low { background: #3d6d4f; color: #e9fff0; }
+.risk_watch { background: #8d6c2e; color: #fff8e8; }
+.risk_high { background: #9e4f22; color: #fff1ea; }
+.risk_urgent { background: #8a1d1d; color: #ffecec; }
+
+.riskReasons {
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: 0.95;
+  line-height: 1.4;
 }

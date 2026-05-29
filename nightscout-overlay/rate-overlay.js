@@ -8,6 +8,7 @@
   var COMPACT_WINDOWS_MINUTES = [1, 2, 3, 4, 5, 10, 15, 30];
   var CLASSIC_WINDOWS_MINUTES = [1, 2, 3, 4, 5, 10, 15, 20, 30, 45, 60, 90, 120];
   var RATE_MODE_KEY = 'cgm-rate-overlay-mode';
+  var RATE_VIEW_KEY = 'cgm-rate-overlay-view';
   var SOUND_OFF_KEY = 'cgm-nightscout-sound-off';
   var ESTIMATE_LINE_CLASS = 'cgm-estimated-glucose-line';
   var ESTIMATE_GAP_MIN_MS = 150000;
@@ -16,6 +17,8 @@
   var latestReading = null;
   var updatingCurrentGlucose = false;
   var currentRows = [];
+  var currentReadings = [];
+  var selectedReadingTime = null;
   var currentHypoRisk = null;
   var chartReadingsAsc = [];
   var estimateRenderTimer = null;
@@ -119,8 +122,8 @@
     };
   }
 
-  function calculateRows(readings) {
-    var latest = readings[0];
+  function calculateRows(readings, anchorEntry) {
+    var latest = anchorEntry || readings[0];
     if (!latest) return [];
 
     var latestTime = readingTime(latest);
@@ -331,23 +334,29 @@
       '#cgm-rate-overlay{position:absolute!important;z-index:9999!important;top:174px;left:50%;transform:translateX(-50%);display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:6px;width:min(98vw,860px);font-family:Arial,Helvetica,sans-serif;pointer-events:none;align-items:start}',
       '#cgm-rate-overlay.classic{grid-template-columns:repeat(5,minmax(110px,1fr));width:min(98vw,900px)}',
       '#cgm-rate-overlay.all{left:6px;transform:none;grid-template-columns:repeat(21,minmax(0,1fr));width:calc(100vw - 12px)}',
-      '#cgm-rate-overlay.all .rate-card{padding:2px 10px 2px 3px}',
-      '#cgm-rate-overlay.all .rate-window{font-size:6px}',
-      '#cgm-rate-overlay.all .rate-main{font-size:9px}',
-      '#cgm-rate-overlay.all .rate-sub{font-size:5px}',
-      '#cgm-rate-overlay.all .rate-arrow{right:2px;font-size:10px}',
+      '#cgm-rate-overlay.all .rate-card{padding:3px 11px 3px 4px}',
+      '#cgm-rate-overlay.all .rate-window{font-size:7px}',
+      '#cgm-rate-overlay.all .rate-main{font-size:11px;line-height:1.03}',
+      '#cgm-rate-overlay.all .rate-card.primary .rate-main{font-size:11px;line-height:1.03}',
+      '#cgm-rate-overlay.all .rate-sub{font-size:6px}',
+      '#cgm-rate-overlay.all .rate-arrow{right:2px;font-size:12px}',
       '#cgm-hypo-alert{position:absolute!important;z-index:10000!important;left:50%;transform:translateX(-50%);top:174px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;width:max-content;max-width:min(560px,86vw);min-width:210px;border:1px solid rgba(255,255,255,.24);border-radius:5px;padding:5px 10px;font-family:Arial,Helvetica,sans-serif;box-sizing:border-box;box-shadow:0 1px 8px rgba(0,0,0,.5)}',
-      '#cgm-hypo-alert .hypo-line{display:flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap}',
-      '#cgm-hypo-alert .hypo-title{font-size:11px;font-weight:900;line-height:1;text-transform:uppercase;white-space:nowrap}',
-      '#cgm-hypo-alert .hypo-detail{font-size:11px;font-weight:700;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-      '#cgm-hypo-alert .hypo-rate{font-family:monospace;font-size:10px;font-weight:900;line-height:1;white-space:nowrap;opacity:.9}',
-      '#cgm-hypo-alert .hypo-average{font-family:monospace;font-size:10px;font-weight:900;line-height:1;white-space:nowrap;opacity:.95}',
+      '#cgm-hypo-alert .hypo-line{display:flex;align-items:center;justify-content:center;gap:10px;white-space:nowrap}',
+      '#cgm-hypo-alert .hypo-line.primary{display:flex;flex-direction:column;gap:2px;align-items:center;justify-content:center}',
+      '#cgm-hypo-alert .hypo-title{font-size:15px;font-weight:900;line-height:1;text-transform:uppercase;white-space:nowrap}',
+      '#cgm-hypo-alert .hypo-detail{font-size:24px;font-weight:900;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+      '#cgm-hypo-alert .hypo-rate{font-family:monospace;font-size:19px;font-weight:900;line-height:1;white-space:nowrap;opacity:.95}',
+      '#cgm-hypo-alert .hypo-average{font-family:monospace;font-size:14px;font-weight:900;line-height:1.1;white-space:nowrap;opacity:.95}',
       '#cgm-hypo-alert.ok{color:#063b1d;border-color:#4ade80;background:linear-gradient(135deg,#bbf7d0 0%,#4ade80 100%)}',
       '#cgm-hypo-alert.watch{color:#2f1600;border-color:#facc15;background:linear-gradient(135deg,#fff3a3 0%,#fbbf24 100%)}',
       '#cgm-hypo-alert.warning{color:#2f1600;border-color:#f59e0b;background:linear-gradient(135deg,#ffe08a 0%,#fb923c 100%)}',
       '#cgm-hypo-alert.hypo,#cgm-hypo-alert.urgent{color:#fff7ed;border-color:#fb7185;background:linear-gradient(135deg,#f59e0b 0%,#e11d48 100%);text-shadow:0 1px 2px rgba(0,0,0,.45)}',
       '#cgm-point-rate-tooltip{position:absolute!important;z-index:10001!important;display:none;min-width:178px;border:1px solid rgba(255,255,255,.22);border-radius:5px;background:rgba(0,0,0,.86);color:#f3f4f6;font-family:Arial,Helvetica,sans-serif;padding:7px 8px;box-shadow:0 2px 12px rgba(0,0,0,.55);pointer-events:none}',
-      '#cgm-point-rate-tooltip .pt-head{display:flex;justify-content:space-between;gap:12px;font-size:12px;font-weight:900;line-height:1.15;margin-bottom:4px}',
+      '#cgm-point-rate-tooltip .pt-head{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:8px;font-size:12px;font-weight:900;line-height:1.15;margin-bottom:4px}',
+      '#cgm-point-rate-tooltip .pt-head .pt-bg{text-align:left}',
+      '#cgm-point-rate-tooltip .pt-head .pt-mid{font-size:13px;text-align:center;white-space:nowrap}',
+      '#cgm-point-rate-tooltip .pt-head .pt-time{text-align:right}',
+      '#cgm-point-rate-tooltip .pt-delta{justify-content:center;font-size:12px;font-weight:900}',
       '#cgm-point-rate-tooltip .pt-row{display:flex;justify-content:space-between;gap:12px;font-size:11px;font-weight:700;line-height:1.25;white-space:nowrap}',
       '#cgm-point-rate-tooltip .pt-rate{font-family:monospace;font-weight:900}',
       '.cgm-estimated-glucose-line{pointer-events:none}',
@@ -359,8 +368,15 @@
       '#cgm-stats-panel .stat-label{display:block;font-size:9px;line-height:1;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
       '#cgm-stats-panel .stat-value{display:block;font-family:monospace;font-size:13px;font-weight:900;line-height:1.15;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
       '#cgm-stats-panel .low .stat-value{color:#fb7185}#cgm-stats-panel .range .stat-value{color:#4ade80}#cgm-stats-panel .high .stat-value{color:#c084fc}',
-      '#cgm-rate-toggle{position:absolute!important;z-index:10000!important;left:50%;transform:translateX(-50%);top:174px;border:1px solid rgba(255,255,255,.25);border-radius:5px;background:rgba(0,0,0,.72);color:#ddd;font:700 11px Arial,Helvetica,sans-serif;padding:5px 8px;cursor:pointer}',
-      '#cgm-rate-toggle:hover{background:rgba(30,30,30,.9);color:#fff}',
+      '#cgm-rate-toggle,#cgm-rate-view-toggle{position:absolute!important;z-index:10000!important;border:1px solid rgba(255,255,255,.25);border-radius:5px;background:rgba(0,0,0,.72);color:#ddd;font:700 11px Arial,Helvetica,sans-serif;padding:5px 8px;cursor:pointer}',
+      '#cgm-rate-toggle{left:50%;transform:translateX(-50%);top:174px}',
+      '#cgm-rate-view-toggle{top:174px}',
+      '#cgm-rate-toggle:hover,#cgm-rate-view-toggle:hover{background:rgba(30,30,30,.9);color:#fff}',
+      '#cgm-rate-history-nav{position:absolute!important;z-index:10000!important;display:none;align-items:center;gap:6px;border:1px solid rgba(255,255,255,.25);border-radius:5px;background:rgba(0,0,0,.72);padding:3px 6px;color:#ddd;font:700 11px Arial,Helvetica,sans-serif}',
+      '#cgm-rate-history-nav button{border:1px solid rgba(255,255,255,.25);background:rgba(30,30,30,.6);color:#ddd;border-radius:4px;padding:2px 6px;font:700 11px Arial,Helvetica,sans-serif;cursor:pointer}',
+      '#cgm-rate-history-nav button:hover:not(:disabled){background:rgba(60,60,60,.9);color:#fff}',
+      '#cgm-rate-history-nav button:disabled{opacity:.45;cursor:not-allowed}',
+      '#cgm-rate-history-nav .hist-time{min-width:40px;text-align:center}',
       '.primary,.bgStatus.current{overflow:visible!important}',
       '#cgm-rate-overlay .rate-card{position:relative;border:1px solid rgba(255,255,255,.22);border-radius:5px;background:rgba(9,9,9,.82);color:#ddd;padding:4px 25px 4px 7px;text-align:left;box-shadow:0 -1px 6px rgba(0,0,0,.45);min-width:0;box-sizing:border-box}',
       '#cgm-rate-overlay .rate-card.primary{border-width:1px;border-bottom-width:2px}',
@@ -379,7 +395,7 @@
       '#cgm-rate-overlay .fast-up{color:#faf5ff;border-color:#a855f7;background:linear-gradient(135deg,#c084fc 0%,#9333ea 100%);text-shadow:0 1px 2px rgba(0,0,0,.42)}',
       '#cgm-rate-overlay .very-fast-up{color:#faf5ff;border-color:#7e22ce;background:linear-gradient(135deg,#9333ea 0%,#581c87 100%);text-shadow:0 1px 2px rgba(0,0,0,.52)}',
       '#cgm-rate-overlay .missing{color:#8a8a8a;border-color:rgba(255,255,255,.14);background:rgba(0,0,0,.28)}',
-      '@media(max-width:700px){#cgm-rate-overlay,#cgm-rate-overlay.classic,#cgm-rate-overlay.all{grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;width:98vw;align-items:start}#cgm-hypo-alert{left:50%;right:auto;transform:translateX(-50%);max-width:94vw;min-width:0;gap:3px;padding:5px 7px}#cgm-hypo-alert .hypo-line{gap:5px}#cgm-hypo-alert .hypo-title,#cgm-hypo-alert .hypo-detail{font-size:10px}#cgm-hypo-alert .hypo-rate,#cgm-hypo-alert .hypo-average{font-size:9px}#cgm-rate-overlay .rate-card{padding:3px 16px 3px 5px;min-height:0}#cgm-rate-overlay .rate-window{font-size:8px;line-height:1}#cgm-rate-overlay .rate-main,#cgm-rate-overlay .rate-card.primary .rate-main{font-size:12px;line-height:1.02;margin-top:1px}#cgm-rate-overlay .rate-arrow{right:4px;font-size:14px}#cgm-rate-overlay .rate-sub{font-size:7px;line-height:1.02;margin-top:1px}#cgm-stats-panel{grid-template-columns:repeat(3,minmax(0,1fr));gap:3px;width:98vw;padding:4px}#cgm-stats-panel .stat{padding:3px 4px}#cgm-stats-panel .stat-label{font-size:8px}#cgm-stats-panel .stat-value{font-size:11px}}'
+      '@media(max-width:700px){#cgm-rate-overlay,#cgm-rate-overlay.classic,#cgm-rate-overlay.all{grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;width:98vw;align-items:start}#cgm-hypo-alert{left:50%;right:auto;transform:translateX(-50%);max-width:94vw;min-width:0;gap:3px;padding:5px 7px}#cgm-hypo-alert .hypo-line{gap:5px}#cgm-hypo-alert .hypo-title{font-size:12px}#cgm-hypo-alert .hypo-detail{font-size:18px}#cgm-hypo-alert .hypo-rate{font-size:14px}#cgm-hypo-alert .hypo-average{font-size:11px}#cgm-rate-overlay .rate-card{padding:3px 16px 3px 5px;min-height:0}#cgm-rate-overlay .rate-window{font-size:8px;line-height:1}#cgm-rate-overlay .rate-main,#cgm-rate-overlay .rate-card.primary .rate-main{font-size:12px;line-height:1.02;margin-top:1px}#cgm-rate-overlay .rate-arrow{right:4px;font-size:14px}#cgm-rate-overlay .rate-sub{font-size:7px;line-height:1.02;margin-top:1px}#cgm-stats-panel{grid-template-columns:repeat(3,minmax(0,1fr));gap:3px;width:98vw;padding:4px}#cgm-stats-panel .stat{padding:3px 4px}#cgm-stats-panel .stat-label{font-size:8px}#cgm-stats-panel .stat-value{font-size:11px}}'
     ].join('');
     document.head.appendChild(style);
   }
@@ -491,6 +507,55 @@
     return button;
   }
 
+  function ensureViewToggle() {
+    var existing = document.getElementById('cgm-rate-view-toggle');
+    if (existing) return existing;
+
+    var button = document.createElement('button');
+    button.id = 'cgm-rate-view-toggle';
+    button.type = 'button';
+    button.addEventListener('click', function () {
+      var next = getViewMode() === 'live' ? 'history' : 'live';
+      localStorage.setItem(RATE_VIEW_KEY, next);
+      if (next === 'live') selectedReadingTime = null;
+      refresh();
+    });
+    document.body.appendChild(button);
+    return button;
+  }
+
+  function ensureHistoryNav() {
+    var existing = document.getElementById('cgm-rate-history-nav');
+    if (existing) return existing;
+
+    var nav = document.createElement('div');
+    nav.id = 'cgm-rate-history-nav';
+    nav.innerHTML = [
+      '<button type="button" data-dir="1">← ouder</button>',
+      '<span class="hist-time">--:--</span>',
+      '<button type="button" data-dir="-1">nieuwer →</button>'
+    ].join('');
+
+    nav.addEventListener('click', function (event) {
+      var btn = event.target && event.target.closest ? event.target.closest('button[data-dir]') : null;
+      if (!btn) return;
+      var dir = Number(btn.getAttribute('data-dir'));
+      stepHistory(dir);
+    });
+
+    document.body.appendChild(nav);
+    return nav;
+  }
+
+  function stepHistory(direction) {
+    if (!currentReadings.length) return;
+    var idx = currentReadings.findIndex(function (entry) { return readingTime(entry) === selectedReadingTime; });
+    if (idx < 0) idx = 0;
+    var nextIdx = Math.max(0, Math.min(currentReadings.length - 1, idx + direction));
+    selectedReadingTime = readingTime(currentReadings[nextIdx]);
+    refresh();
+  }
+
   function ensureHypoAlert() {
     var existing = document.getElementById('cgm-hypo-alert');
     if (existing) return existing;
@@ -529,6 +594,11 @@
     return mode === 'classic' || mode === 'all' || mode === 'off' ? mode : 'compact';
   }
 
+  function getViewMode() {
+    var mode = localStorage.getItem(RATE_VIEW_KEY);
+    return mode === 'history' ? 'history' : 'live';
+  }
+
   function visibleRows(rows) {
     if (getMode() === 'all') return rows;
     if (getMode() === 'classic') {
@@ -546,8 +616,37 @@
 
   function updateToggleLabel() {
     var button = ensureToggle();
+    var viewButton = ensureViewToggle();
     var mode = getMode();
     button.textContent = mode === 'compact' ? 'compact' : mode === 'classic' ? 'klassiek' : mode === 'all' ? 'alles' : 'uit';
+    var view = getViewMode();
+    viewButton.textContent = view === 'history' ? 'history' : 'live';
+  }
+
+  function updateHistoryNav() {
+    var nav = ensureHistoryNav();
+    var view = getViewMode();
+    if (view !== 'history') {
+      nav.style.display = 'none';
+      return;
+    }
+
+    nav.style.display = 'flex';
+    var current = currentReadings.find(function (entry) {
+      return readingTime(entry) === selectedReadingTime;
+    }) || null;
+    if (!current && currentReadings.length) {
+      current = currentReadings[0];
+      selectedReadingTime = readingTime(current);
+    }
+
+    var idx = current ? currentReadings.findIndex(function (entry) { return readingTime(entry) === readingTime(current); }) : -1;
+    var prevBtn = nav.querySelector('button[data-dir="1"]');
+    var nextBtn = nav.querySelector('button[data-dir="-1"]');
+    var timeLabel = nav.querySelector('.hist-time');
+    if (timeLabel) timeLabel.textContent = current ? formatClock(readingTime(current)) : '--:--';
+    if (prevBtn) prevBtn.disabled = idx < 0 || idx >= currentReadings.length - 1;
+    if (nextBtn) nextBtn.disabled = idx <= 0;
   }
 
   function renderHypoAlert(risk) {
@@ -561,11 +660,11 @@
     alert.style.display = 'flex';
     alert.className = risk.css;
     alert.innerHTML = [
-      '<div class="hypo-line">',
+      '<div class="hypo-line primary">',
       '<span class="hypo-title">', risk.title, '</span>',
       '<span class="hypo-detail">', risk.detail, '</span>',
-      '<span class="hypo-rate">', signed(risk.rate, 3), '/min</span>',
       '</div>',
+      '<div class="hypo-line"><span class="hypo-rate">', signed(risk.rate, 3), '/min</span></div>',
       '<div class="hypo-line"><span class="hypo-average">', averageRateText(true), '</span></div>'
     ].join('');
   }
@@ -573,6 +672,7 @@
   function positionContainer() {
     var container = ensureContainer();
     var button = ensureToggle();
+    var viewButton = ensureViewToggle();
     var alert = ensureHypoAlert();
     var statsPanel = ensureStatsPanel();
     var chart = document.querySelector('#chartContainer');
@@ -584,6 +684,13 @@
     var buttonTop = chartTop - buttonHeight - 6;
     var containerTop = chartTop + 4;
     button.style.top = Math.max(0, Math.round(buttonTop)) + 'px';
+    viewButton.style.top = Math.max(0, Math.round(buttonTop)) + 'px';
+    var buttonRect = button.getBoundingClientRect();
+    var viewWidth = viewButton.getBoundingClientRect().width || 56;
+    viewButton.style.left = Math.round(window.scrollX + buttonRect.left - viewWidth - 8) + 'px';
+    var nav = ensureHistoryNav();
+    nav.style.top = Math.max(0, Math.round(buttonTop)) + 'px';
+    nav.style.left = Math.round(window.scrollX + buttonRect.right + 8) + 'px';
     alert.style.top = '8px';
     container.style.top = Math.max(0, Math.round(containerTop)) + 'px';
     statsPanel.style.top = Math.max(0, Math.round(chartBottom + 8)) + 'px';
@@ -626,6 +733,7 @@
     var container = ensureContainer();
     if (!container) return;
     currentRows = rows;
+    updateHistoryNav();
     updateToggleLabel();
     renderHypoAlert(currentHypoRisk);
     removeCurrentAverageRate();
@@ -919,8 +1027,13 @@
       return signed(rate.delta, 2) + ' / ' + signed(rate.rate, 3) + '/min';
     }
 
+    var trendRateMmol = prevRate ? prevRate.rate : (nextRate ? nextRate.rate : 0);
+    var trendArrowText = trendArrow(trendRateMmol * MGDL_PER_MMOL);
+    var deltaFromPrev = prevRate ? signed(prevRate.delta, 1) + 'mmol/L' : '--';
+
     tooltip.innerHTML = [
-      '<div class="pt-head"><span>BG ', currentValue, '</span><span>', formatClock(readingTime(entry)), '</span></div>',
+      '<div class="pt-head"><span class="pt-bg">BG ', currentValue, '</span><span class="pt-mid">', currentValue, ' ', trendArrowText, '</span><span class="pt-time">', formatClock(readingTime(entry)), '</span></div>',
+      '<div class="pt-row pt-delta"><span>Δ ', deltaFromPrev, '</span></div>',
       '<div class="pt-row"><span>vorige</span><span class="pt-rate">', rateText(prevRate), '</span></div>',
       '<div class="pt-row"><span>volgende</span><span class="pt-rate">', rateText(nextRate), '</span></div>'
     ].join('');
@@ -937,12 +1050,25 @@
     document.body.dataset.cgmPointTooltip = '1';
 
     document.addEventListener('click', function (event) {
+      var protectedUi = event.target && event.target.closest
+        ? event.target.closest('#cgm-rate-history-nav, #cgm-rate-toggle, #cgm-rate-view-toggle')
+        : null;
+      if (protectedUi) return;
+
       var dot = event.target && event.target.closest ? event.target.closest('circle.entry-dot') : null;
       var tooltip = ensurePointTooltip();
       if (!dot) {
         tooltip.style.display = 'none';
+        if (getViewMode() === 'history') selectedReadingTime = null;
+        refresh();
         return;
       }
+      var index = pointIndexFromDot(dot);
+      var entry = chartReadingsAsc[index];
+      if (getViewMode() === 'history') {
+        selectedReadingTime = entry ? readingTime(entry) : null;
+      }
+      refresh();
       showPointTooltip(dot, event);
     }, true);
   }
@@ -965,10 +1091,22 @@
       .then(function (response) { return response.json(); })
       .then(function (entries) {
         var readings = sortedReadings(entries);
+        currentReadings = readings;
         chartReadingsAsc = readings.slice().reverse();
-        var rows = calculateRows(readings);
+        var anchorEntry = null;
+        if (getViewMode() === 'history' && selectedReadingTime !== null) {
+          anchorEntry = readings.find(function (entry) {
+            return readingTime(entry) === selectedReadingTime;
+          }) || null;
+          if (!anchorEntry) selectedReadingTime = null;
+        }
+        if (getViewMode() === 'history' && selectedReadingTime === null && readings.length) {
+          selectedReadingTime = readingTime(readings[0]);
+          anchorEntry = readings[0];
+        }
+        var rows = calculateRows(readings, anchorEntry);
         latestReading = readings[0] || null;
-        renderCurrentGlucose(readings[0]);
+        renderCurrentGlucose(anchorEntry || readings[0]);
         currentHypoRisk = calculateHypoRisk(readings, rows);
         renderStatsPanel(calculateStats(readings));
         render(rows);

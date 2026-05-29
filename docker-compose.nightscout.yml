@@ -58,12 +58,11 @@ services:
       - .env.libreview
     environment:
       NIGHTSCOUT_URL: http://nightscout:1337
-      LIBREVIEW_INTERVAL_SECONDS: ${LIBREVIEW_INTERVAL_SECONDS:-30}
-      LIBREVIEW_TZ_OFFSET: ${LIBREVIEW_TZ_OFFSET:-120}
+      MONGODB_URI: mongodb://nightscout-mongo:27017/nightscout
       LIBREVIEW_SYNC_PORT: 8787
     working_dir: /app
     volumes:
-      - ./scripts:/app/scripts:ro
+      - ./:/app
     command: ["node", "scripts/libreview-nightscout-sync.mjs", "--server", "--loop"]
     ports:
       - "8787:8787"

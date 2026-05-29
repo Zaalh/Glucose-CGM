@@ -110,6 +110,49 @@ npm run nightscout:down
 
 Stop de Docker-services.
 
+```bash
+npm run model:retrain
+```
+
+Trained het persoonlijke risicomodel op `prediction_snapshots` in MongoDB en exporteert de actieve drempels naar `src/lib/risk-model-state.json` voor gebruik in de app.
+
+```bash
+npm run snapshots:live
+```
+
+Maakt één live `prediction_snapshots` record op basis van de meest recente Nightscout entry (idempotent per `entryId`).
+
+```bash
+npm run summaries:build
+```
+
+Bouwt/actualiseert `daily_summaries` vanuit `entries`, `pattern_events` en geëvalueerde `prediction_snapshots`.
+
+```bash
+npm run model:retrain:balanced
+npm run model:retrain:precision
+```
+
+Alternatieve trainingspolicies naast de standaard recall-first.
+
+## Predictie Status
+
+Afgerond:
+
+- `entry_features` backfill script
+- `pattern_events` detectiescript
+- regelgebaseerde live risicoscore in de Nightscout UI
+- `prediction_snapshots` backfill
+- live snapshot command (`npm run snapshots:live`)
+- snapshot evaluatiescript (`TP/FP/FN/TN`)
+- modeltraining + export naar app-config
+- `daily_summaries` script
+- policy-gestuurde training (`balanced` / `precision-first`)
+
+Nog open (bewust):
+
+- fine-tuning van thresholds/policies op langere dataperiode (optioneel)
+
 ## Environment Files
 
 ### `.env.nightscout`
@@ -137,6 +180,12 @@ LIBREVIEW_EMAIL=mail@example.com
 LIBREVIEW_PASSWORD=your-libreview-password
 LIBREVIEW_TZ_OFFSET=120
 LIBREVIEW_INTERVAL_SECONDS=60
+LIBREVIEW_GRACE_WINDOW_MINUTES=30
+LIBREVIEW_RETRY_ATTEMPTS=6
+LIBREVIEW_RETRY_BASE_DELAY_MS=1200
+LIBREVIEW_RETRY_MAX_DELAY_MS=20000
+LIBREVIEW_HTTP_TIMEOUT_MS=15000
+LIBREVIEW_RETRY_JITTER_MS=400
 ```
 
 `LIBREVIEW_TZ_OFFSET=120` is UTC+2 in minuten, geschikt voor Amsterdam in de zomer. Pas dit aan als timestamps verschuiven.

@@ -6,10 +6,21 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "nightscout:up": "docker compose -f docker-compose.nightscout.yml up -d",
+    "nightscout:libre": "docker compose -f docker-compose.nightscout.yml --profile libre up -d",
+    "nightscout:down": "docker compose -f docker-compose.nightscout.yml down",
+    "nightscout:logs": "docker compose -f docker-compose.nightscout.yml logs -f nightscout",
+    "libre:logs": "docker compose -f docker-compose.nightscout.yml logs -f libreview-sync",
+    "model:retrain": "node scripts/retrain-and-export-model.mjs",
+    "snapshots:live": "node scripts/live-snapshot-from-latest.mjs",
+    "summaries:build": "docker compose -f docker-compose.nightscout.yml exec -T nightscout-mongo sh -lc \"mongo nightscout --quiet\" < scripts/summarize-days.mjs",
+    "model:retrain:balanced": "TRAIN_POLICY=balanced node scripts/retrain-and-export-model.mjs",
+    "model:retrain:precision": "TRAIN_POLICY=precision-first node scripts/retrain-and-export-model.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.4",
+    "mongodb": "^7.2.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "recharts": "^2.15.3"

@@ -18,6 +18,7 @@ interface Props {
   readings: GlucoseReading[]
   unit?: 'mmol' | 'mgdl'
   predictedIn20?: number | null
+  onSelectTimestamp?: (timestampMs: number) => void
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -45,13 +46,23 @@ function predColor(mmol: number, low: number, high: number): string {
   return '#3fb950'
 }
 
-export default function NightscoutChart({ readings, unit = 'mmol', predictedIn20 = null }: Props) {
-  const data = readings.map(r => ({
-    time: new Date(r.timestamp).getTime(),
-    value: toDisplay(r.value_mmol, unit),
-    mmol: r.value_mmol,
-    status: getGlucoseStatus(r.value_mmol),
-  }))
+export default function NightscoutChart({ readings, unit = 'mmol', predictedIn20 = null, onSelectTimestamp }: Props) {
+  const data = readings.map((r, index) => {
+    const time = new Date(r.timestamp).getTime()
+    const prev = index > 0 ? readings[index - 1] : null
+    const prevTime = prev ? new Date(prev.timestamp).getTime() : null
+    const ratePerMin = prev && prevTime !== null && time > prevTime
+      ? (r.value_mmol - prev.value_mmol) / ((time - prevTime) / 60000)
+      : null
+
+    return {
+      time,
+      value: toDisplay(r.value_mmol, unit),
+      mmol: r.value_mmol,
+      status: getGlucoseStatus(r.value_mmol),
+      ratePerMin,
+    }
+  })
   const { actualSegments, estimatedSegments } = buildLineSegments(data, unit)
 
   const low  = unit === 'mgdl' ? 70  : 3.9
@@ -117,7 +128,13 @@ export default function NightscoutChart({ readings, unit = 'mmol', predictedIn20
 
   return (
     <ResponsiveContainer width="100%" height={280}>
-      <ComposedChart margin={{ top: 8, right: 20, bottom: 4, left: -8 }}>
+      <ComposedChart
+        margin={{ top: 8, right: 20, bottom: 4, left: -8 }}
+        onClick={(state: { activePayload?: Array<{ payload?: { time?: number } }> }) => {
+          const ts = state?.activePayload?.[0]?.payload?.time
+          if (typeof ts === 'number' && onSelectTimestamp) onSelectTimestamp(ts)
+        }}
+      >
         <CartesianGrid strokeDasharray="3 3" stroke="#21262d" vertical={false} />
         <ReferenceArea y1={low} y2={high} fill="#3fb950" fillOpacity={0.06} ifOverflow="hidden" />
 
@@ -347,7 +364,7 @@ function formatTick(ts: number, spanMs = 0) {
 
 function CustomTooltip({ active, payload, unit, lineColor, timeSpanMs }: {
   active?: boolean
-  payload?: Array<{ payload: { time: number; value?: number; pred?: number; predMmol?: number; estimated?: number; estimatedMmol?: number; status?: string } }>
+  payload?: Array<{ payload: { time: number; value?: number; pred?: number; predMmol?: number; estimated?: number; estimatedMmol?: number; status?: string; ratePerMin?: number | null } }>
   unit?: 'mmol' | 'mgdl'
   lineColor?: string
   timeSpanMs?: number
@@ -359,6 +376,11 @@ function CustomTooltip({ active, payload, unit, lineColor, timeSpanMs }: {
   const val = isPred ? d.pred! : isEstimated ? d.estimated! : d.value!
   const color = isPred ? (lineColor ?? '#8b949e') : isEstimated ? ESTIMATED_LINE_COLOR : STATUS_COLORS[d.status ?? 'normal']
   const label = unit === 'mgdl' ? `${val} mg/dL` : `${typeof val === 'number' ? val.toFixed(1) : val} mmol/L`
+  const rateText = d.ratePerMin !== null && d.ratePerMin !== undefined
+    ? unit === 'mgdl'
+      ? `${d.ratePerMin >= 0 ? '+' : ''}${(d.ratePerMin * 18.0182).toFixed(1)} mg/dL/min`
+      : `${d.ratePerMin >= 0 ? '+' : ''}${d.ratePerMin.toFixed(2)} mmol/L/min`
+    : null
   return (
     <div style={{
       background: '#161b22',
@@ -375,6 +397,11 @@ function CustomTooltip({ active, payload, unit, lineColor, timeSpanMs }: {
       <div style={{ color: '#8b949e' }}>
         {formatTooltipTime(d.time, timeSpanMs)}{isPred ? ' (voorspelling)' : isEstimated ? ' (geschat)' : ''}
       </div>
+      {!isPred && !isEstimated && rateText && (
+        <div style={{ color: '#8b949e' }}>
+          Snelheid: {rateText}
+        </div>
+      )}
     </div>
   )
 }

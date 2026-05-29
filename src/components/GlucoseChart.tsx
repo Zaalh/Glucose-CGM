@@ -18,10 +18,20 @@ export default function GlucoseChart({ readings }: Props) {
   const firstTime = readings[0] ? new Date(readings[0].timestamp).getTime() : Date.now()
   const lastTime = readings.at(-1) ? new Date(readings.at(-1)!.timestamp).getTime() : Date.now()
   const timeSpanMs = lastTime - firstTime
-  const data = readings.map(r => ({
-    time: formatTime(r.timestamp, timeSpanMs),
-    value: r.value_mmol,
-  }))
+  const data = readings.map((r, index) => {
+    const currentTime = new Date(r.timestamp).getTime()
+    const prev = index > 0 ? readings[index - 1] : null
+    const prevTime = prev ? new Date(prev.timestamp).getTime() : null
+    const ratePerMin = prev && prevTime !== null && currentTime > prevTime
+      ? (r.value_mmol - prev.value_mmol) / ((currentTime - prevTime) / 60000)
+      : null
+
+    return {
+      time: formatTime(r.timestamp, timeSpanMs),
+      value: r.value_mmol,
+      ratePerMin,
+    }
+  })
 
   return (
     <ResponsiveContainer width="100%" height={220}>
@@ -50,7 +60,11 @@ export default function GlucoseChart({ readings }: Props) {
             padding: '8px 12px',
             boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
           }}
-          formatter={(value: number) => [`${value.toFixed(1)} mmol/L`, 'Glucose']}
+          formatter={(value: number, _name, item) => {
+            const ratePerMin = typeof item?.payload?.ratePerMin === 'number' ? item.payload.ratePerMin : null
+            const speed = ratePerMin === null ? null : `${ratePerMin >= 0 ? '+' : ''}${ratePerMin.toFixed(2)} mmol/L/min`
+            return [`${value.toFixed(1)} mmol/L${speed ? ` • ${speed}` : ''}`, 'Glucose']
+          }}
           labelStyle={{ color: '#6c757d', fontWeight: 500 }}
         />
         <ReferenceLine y={3.9} stroke="#c92a2a" strokeDasharray="4 4" strokeWidth={1.5} />

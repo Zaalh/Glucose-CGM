@@ -1,0 +1,23 @@
+{
+  "modelVersion": "rules-v1-calibrated",
+  "updatedAt": "2026-05-29T17:56:35.137Z",
+  "thresholds": {
+    "watchScoreMin": 2,
+    "highScoreMin": 3,
+    "urgentScoreMin": 5
+  },
+  "calibration": {
+    "selectedHighThreshold": 2,
+    "selectionPolicy": "recall-first"
+  },
+  "metrics": {
+    "totalEvaluated": 4028,
+    "tp": 298,
+    "fp": 1710,
+    "fn": 272,
+    "tn": 1748,
+    "precision": 0.14840637450199204,
+    "recall": 0.5228070175438596,
+    "f1": 0.23118696664080682
+  }
+}
