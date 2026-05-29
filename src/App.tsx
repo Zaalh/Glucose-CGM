@@ -1,10 +1,10 @@
-import { useState } from 'react'
-import Dashboard from './pages/Dashboard'
-import Settings from './pages/Settings'
-import Nightscout from './pages/Nightscout'
+import { Suspense, lazy, useState } from 'react'
 import styles from './App.module.css'
 
 type Page = 'dashboard' | 'nightscout' | 'settings'
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const Settings = lazy(() => import('./pages/Settings'))
+const Nightscout = lazy(() => import('./pages/Nightscout'))
 
 export default function App() {
   const [page, setPage] = useState<Page>('dashboard')
@@ -40,9 +40,11 @@ export default function App() {
         </div>
       </header>
       <main className={`${styles.main} ${page === 'nightscout' ? styles.mainDark : ''}`}>
-        {page === 'dashboard' && <Dashboard />}
-        {page === 'nightscout' && <Nightscout />}
-        {page === 'settings' && <Settings />}
+        <Suspense fallback={<div className={styles.pageLoading}>Laden...</div>}>
+          {page === 'dashboard' && <Dashboard />}
+          {page === 'nightscout' && <Nightscout />}
+          {page === 'settings' && <Settings />}
+        </Suspense>
       </main>
     </div>
   )

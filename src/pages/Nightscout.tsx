@@ -1,8 +1,7 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { Suspense, lazy, useEffect, useState, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import type { GlucoseReading } from '../types'
 import { getGlucoseStatus, trendArrow } from '../types'
-import NightscoutChart from '../components/NightscoutChart'
 import {
   loadThresholds,
   checkAlarms,
@@ -16,6 +15,7 @@ import {
 } from '../lib/alarms'
 import { predictGlucose, computeAndSavePersonalRates, getPredictionConfidence } from '../lib/prediction'
 import styles from './Nightscout.module.css'
+const NightscoutChart = lazy(() => import('../components/NightscoutChart'))
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string
@@ -346,7 +346,9 @@ export default function Nightscout() {
         ) : readings.length === 0 ? (
           <div className={styles.chartEmpty}>Geen metingen in dit tijdvenster</div>
         ) : (
-          <NightscoutChart readings={readings} unit={unit} predictedIn20={predictedIn20} />
+          <Suspense fallback={<div className={styles.chartLoading}>Laden...</div>}>
+            <NightscoutChart readings={readings} unit={unit} predictedIn20={predictedIn20} />
+          </Suspense>
         )}
       </div>
 

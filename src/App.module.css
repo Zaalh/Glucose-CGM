@@ -80,6 +80,15 @@
   background: #0d1117;
 }
 
+.pageLoading {
+  min-height: 40vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  font-size: 14px;
+}
+
 @media (max-width: 600px) {
   .headerInner {
     padding: 0 16px;

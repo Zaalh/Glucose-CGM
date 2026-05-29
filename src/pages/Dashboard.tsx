@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { Suspense, lazy, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import type { GlucoseReading } from '../types'
 import { getGlucoseStatus, trendArrow } from '../types'
-import GlucoseChart from '../components/GlucoseChart'
 import CurrentReading from '../components/CurrentReading'
 import styles from './Dashboard.module.css'
+const GlucoseChart = lazy(() => import('../components/GlucoseChart'))
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string
@@ -124,7 +124,9 @@ export default function Dashboard() {
         ) : readings.length === 0 ? (
           <div className={styles.empty}>Geen metingen gevonden voor dit tijdvenster.</div>
         ) : (
-          <GlucoseChart readings={readings} />
+          <Suspense fallback={<div className={styles.chartLoading}>Laden...</div>}>
+            <GlucoseChart readings={readings} />
+          </Suspense>
         )}
       </div>
 
