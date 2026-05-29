@@ -5,6 +5,7 @@
   var WINDOWS_MINUTES = Array.from({ length: 60 }, function (_, index) { return index + 1; }).concat([90, 120]);
   var MAX_BASELINE_DIFF_MS = 45000;
   var POLL_MS = 30000;
+  var OVERLAY_ENTRY_COUNT = 1600;
   var COMPACT_WINDOWS_MINUTES = [1, 2, 3, 4, 5, 10, 15, 30];
   var CLASSIC_WINDOWS_MINUTES = [1, 2, 3, 4, 5, 10, 15, 20, 30, 45, 60, 90, 120];
   var RATE_MODE_KEY = 'cgm-rate-overlay-mode';
@@ -1533,11 +1534,36 @@
     });
   }
 
+  function overlayServiceUrl(path) {
+    var proto = window.location.protocol === 'https:' ? 'https://' : 'http://';
+    return proto + window.location.hostname + ':8787' + path;
+  }
+
+  function fetchOverlayEntries() {
+    return fetch(overlayServiceUrl('/overlay/entries?count=' + OVERLAY_ENTRY_COUNT), { cache: 'no-store' })
+      .then(function (response) {
+        if (!response.ok) throw new Error('Overlay entries gaf HTTP ' + response.status);
+        return response.json();
+      })
+      .then(function (json) {
+        if (!json || !Array.isArray(json.entries)) throw new Error('Overlay entries response mist entries');
+        return json.entries;
+      })
+      .catch(function (error) {
+        if (window.console && window.console.warn) window.console.warn('[CGM Overlay] Lightweight refresh fallback:', error);
+        return fetch('/api/v1/entries/sgv.json?count=' + OVERLAY_ENTRY_COUNT, { cache: 'no-store' })
+          .then(function (response) {
+            if (!response.ok) throw new Error('Nightscout entries gaf HTTP ' + response.status);
+            return response.json();
+          });
+      });
+  }
+
   function refresh() {
-    fetch('/api/v1/entries/sgv.json?count=2000', { cache: 'no-store' })
-      .then(function (response) { return response.json(); })
+    fetchOverlayEntries()
       .then(function (entries) {
         var readings = sortedReadings(entries);
+        if (!readings.length) throw new Error('Geen bruikbare SGV entries ontvangen');
         currentReadings = readings;
         chartReadingsAsc = readings.slice().reverse();
         calibrateFromHistory(readings);
@@ -1587,20 +1613,22 @@
         scheduleEstimatedGlucoseLine(0);
         window.setTimeout(scheduleEstimatedGlucoseLine, 500);
         window.setTimeout(scheduleEstimatedGlucoseLine, 1500);
-        if (window.console && window.console.log) window.console.log('[CGM Overlay] Refreshed at ' + new Date().toLocaleTimeString());
+        if (window.console && window.console.log) {
+          window.console.log('[CGM Overlay] Refreshed ' + readings.length + ' entries at ' + new Date().toLocaleTimeString());
+        }
       })
       .catch(function (err) {
-        renderStatsPanel(null);
-        render([]);
-        renderEstimatedGlucoseLine();
+        if (!currentReadings.length) {
+          renderStatsPanel(null);
+          render([]);
+          renderEstimatedGlucoseLine();
+        }
         if (window.console && window.console.error) window.console.error('[CGM Overlay] Refresh error:', err);
       });
   }
 
   function fetchLatestDbPrediction() {
-    var proto = window.location.protocol === 'https:' ? 'https://' : 'http://';
-    var url = proto + window.location.hostname + ':8787/prediction/latest';
-    fetch(url, { cache: 'no-store' })
+    fetch(overlayServiceUrl('/prediction/latest'), { cache: 'no-store' })
       .then(function (response) { return response.ok ? response.json() : null; })
       .then(function (json) {
         latestDbPrediction = json && json.snapshot ? json.snapshot : null;

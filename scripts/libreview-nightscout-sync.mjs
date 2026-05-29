@@ -323,7 +323,9 @@ function startServer() {
       return
     }
 
-    if (req.url === '/health') {
+    const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
+
+    if (url.pathname === '/health') {
       const current = readConfig(false)
       res.end(JSON.stringify({
         ok: true,
@@ -339,7 +341,7 @@ function startServer() {
       return
     }
 
-    if (req.url === '/sync' && (req.method === 'POST' || req.method === 'GET')) {
+    if (url.pathname === '/sync' && (req.method === 'POST' || req.method === 'GET')) {
       try {
         const result = await syncOnce()
         res.end(JSON.stringify(result))
@@ -350,10 +352,22 @@ function startServer() {
       return
     }
 
-    if (req.url === '/prediction/latest' && req.method === 'GET') {
+    if (url.pathname === '/prediction/latest' && req.method === 'GET') {
       try {
         const latest = await getLatestPredictionSnapshot()
         res.end(JSON.stringify({ ok: true, snapshot: latest }))
+      } catch (err) {
+        res.writeHead(500)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
+    if (url.pathname === '/overlay/entries' && req.method === 'GET') {
+      try {
+        const count = parsePositiveInt(url.searchParams.get('count'), 1600, 3000)
+        const entries = await getOverlayEntries(count)
+        res.end(JSON.stringify({ ok: true, entries }))
       } catch (err) {
         res.writeHead(500)
         res.end(JSON.stringify({ ok: false, message: formatError(err) }))
@@ -370,6 +384,32 @@ function startServer() {
   })
 }
 
+async function getOverlayEntries(count) {
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    return await client.db().collection('entries')
+      .find({ type: 'sgv', sgv: { $exists: true } }, {
+        projection: {
+          _id: 0,
+          date: 1,
+          dateString: 1,
+          direction: 1,
+          identifier: 1,
+          mills: 1,
+          sgv: 1,
+          sysTime: 1,
+        },
+      })
+      .sort({ date: -1 })
+      .limit(count)
+      .toArray()
+  } finally {
+    if (client) await client.close().catch(() => undefined)
+  }
+}
+
 async function getLatestPredictionSnapshot() {
   let client = null
   try {
@@ -383,6 +423,12 @@ async function getLatestPredictionSnapshot() {
   } finally {
     if (client) await client.close().catch(() => undefined)
   }
+}
+
+function parsePositiveInt(value, fallback, max) {
+  const parsed = Number.parseInt(value ?? '', 10)
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback
+  return Math.min(parsed, max)
 }
 
 function toNightscoutEntry(pt) {
