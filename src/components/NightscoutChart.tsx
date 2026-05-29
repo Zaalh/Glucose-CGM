@@ -28,6 +28,10 @@ const STATUS_COLORS: Record<string, string> = {
   very_high: '#ff9f0a',
 }
 
+const ESTIMATED_LINE_COLOR = '#58a6ff'
+const MIN_GAP_MS = 2.5 * 60_000
+const MAX_OPEN_ESTIMATE_MS = 20 * 60_000
+
 function toDisplay(mmol: number, unit: 'mmol' | 'mgdl') {
   return unit === 'mgdl' ? Math.round(mmol * 18.0182) : mmol
 }
@@ -48,6 +52,7 @@ export default function NightscoutChart({ readings, unit = 'mmol', predictedIn20
     mmol: r.value_mmol,
     status: getGlucoseStatus(r.value_mmol),
   }))
+  const { actualSegments, estimatedSegments } = buildLineSegments(data, unit)
 
   const low  = unit === 'mgdl' ? 70  : 3.9
   const high = unit === 'mgdl' ? 180 : 10.0
@@ -78,9 +83,14 @@ export default function NightscoutChart({ readings, unit = 'mmol', predictedIn20
   }
 
   const timeMin = data[0]?.time ?? Date.now()
-  const timeMax = predLineData.length
-    ? predLineData[predLineData.length - 1].time
-    : data[data.length - 1]?.time ?? Date.now()
+  const estimatedTimeMax = estimatedSegments
+    .flat()
+    .reduce((max, point) => Math.max(max, point.time), 0)
+  const timeMax = Math.max(
+    predLineData.length ? predLineData[predLineData.length - 1].time : 0,
+    estimatedTimeMax,
+    data[data.length - 1]?.time ?? Date.now(),
+  )
   const timeSpanMs = timeMax - timeMin
 
   // Prediction line color based on where it ends up
@@ -138,18 +148,39 @@ export default function NightscoutChart({ readings, unit = 'mmol', predictedIn20
         <ReferenceLine y={low}  stroke="#f85149" strokeDasharray="4 4" strokeWidth={1} opacity={0.6} />
         <ReferenceLine y={high} stroke="#d29922" strokeDasharray="4 4" strokeWidth={1} opacity={0.6} />
 
-        {/* Historical connecting line */}
-        <Line
-          data={data}
-          dataKey="value"
-          type="monotone"
-          stroke="#3fb950"
-          strokeWidth={1.5}
-          dot={false}
-          activeDot={false}
-          isAnimationActive={false}
-          legendType="none"
-        />
+        {/* Historical connecting line, split so sensor gaps are not shown as real data */}
+        {actualSegments.map((segment, i) => (
+          <Line
+            key={`actual-${i}`}
+            data={segment}
+            dataKey="value"
+            type="monotone"
+            stroke="#3fb950"
+            strokeWidth={1.5}
+            dot={false}
+            activeDot={false}
+            isAnimationActive={false}
+            legendType="none"
+          />
+        ))}
+
+        {/* Estimated line over sensor gaps */}
+        {estimatedSegments.map((segment, i) => (
+          <Line
+            key={`estimated-${i}`}
+            data={segment}
+            dataKey="estimated"
+            type="monotone"
+            stroke={ESTIMATED_LINE_COLOR}
+            strokeWidth={2}
+            strokeDasharray="3 4"
+            dot={false}
+            activeDot={false}
+            isAnimationActive={false}
+            legendType="none"
+            opacity={0.78}
+          />
+        ))}
 
         {/* Historical colored dots */}
         <Scatter data={data} isAnimationActive={false}>
@@ -203,6 +234,109 @@ function HollowDot({ cx, cy, lineColor }: { cx?: number; cy?: number; lineColor:
   )
 }
 
+type ChartPoint = {
+  time: number
+  value: number
+  mmol: number
+  status: string
+}
+
+type EstimatedPoint = {
+  time: number
+  estimated: number
+  estimatedMmol: number
+}
+
+function buildLineSegments(data: ChartPoint[], unit: 'mmol' | 'mgdl') {
+  if (data.length === 0) return { actualSegments: [] as ChartPoint[][], estimatedSegments: [] as EstimatedPoint[][] }
+
+  const expectedInterval = estimateExpectedIntervalMs(data)
+  const gapThreshold = Math.max(MIN_GAP_MS, expectedInterval * 2.5)
+  const actualSegments: ChartPoint[][] = []
+  const estimatedSegments: EstimatedPoint[][] = []
+  let currentSegment: ChartPoint[] = [data[0]]
+
+  for (let i = 1; i < data.length; i++) {
+    const prev = data[i - 1]
+    const current = data[i]
+    const gapMs = current.time - prev.time
+
+    if (gapMs > gapThreshold) {
+      actualSegments.push(currentSegment)
+      currentSegment = [current]
+      estimatedSegments.push([
+        toEstimatedPoint(prev, unit),
+        toEstimatedPoint(current, unit),
+      ])
+    } else {
+      currentSegment.push(current)
+    }
+  }
+
+  actualSegments.push(currentSegment)
+
+  const openEstimate = buildOpenEstimate(data, gapThreshold, unit)
+  if (openEstimate) estimatedSegments.push(openEstimate)
+
+  return { actualSegments, estimatedSegments }
+}
+
+function estimateExpectedIntervalMs(data: ChartPoint[]) {
+  const intervals = data
+    .slice(1)
+    .map((point, index) => point.time - data[index].time)
+    .filter(interval => Number.isFinite(interval) && interval > 0)
+    .sort((a, b) => a - b)
+
+  if (intervals.length === 0) return 60_000
+  return intervals[Math.floor(intervals.length / 2)]
+}
+
+function buildOpenEstimate(data: ChartPoint[], gapThreshold: number, unit: 'mmol' | 'mgdl') {
+  const last = data.at(-1)
+  if (!last) return null
+
+  const now = Date.now()
+  const staleMs = now - last.time
+  if (staleMs <= gapThreshold || staleMs > MAX_OPEN_ESTIMATE_MS) return null
+
+  const rate = recentRateMmolPerMs(data)
+  if (rate === null) return null
+
+  const estimatedMmol = Math.max(2, Math.min(18, last.mmol + rate * staleMs))
+  return [
+    toEstimatedPoint(last, unit),
+    {
+      time: now,
+      estimated: toDisplay(estimatedMmol, unit),
+      estimatedMmol,
+    },
+  ]
+}
+
+function recentRateMmolPerMs(data: ChartPoint[]) {
+  const latest = data.at(-1)
+  if (!latest) return null
+
+  const baseline = [...data]
+    .reverse()
+    .find(point => point.time < latest.time && latest.time - point.time >= 4 * 60_000)
+
+  if (!baseline) return null
+  const dt = latest.time - baseline.time
+  if (dt <= 0) return null
+
+  return (latest.mmol - baseline.mmol) / dt
+}
+
+function toEstimatedPoint(point: ChartPoint, unit: 'mmol' | 'mgdl'): EstimatedPoint {
+  return {
+    time: point.time,
+    estimated: toDisplay(point.mmol, unit),
+    estimatedMmol: point.mmol,
+  }
+}
+
 function formatTick(ts: number, spanMs = 0) {
   const d = new Date(ts)
   if (spanMs > 72 * 60 * 60 * 1000) {
@@ -213,7 +347,7 @@ function formatTick(ts: number, spanMs = 0) {
 
 function CustomTooltip({ active, payload, unit, lineColor, timeSpanMs }: {
   active?: boolean
-  payload?: Array<{ payload: { time: number; value?: number; pred?: number; predMmol?: number; status?: string } }>
+  payload?: Array<{ payload: { time: number; value?: number; pred?: number; predMmol?: number; estimated?: number; estimatedMmol?: number; status?: string } }>
   unit?: 'mmol' | 'mgdl'
   lineColor?: string
   timeSpanMs?: number
@@ -221,8 +355,9 @@ function CustomTooltip({ active, payload, unit, lineColor, timeSpanMs }: {
   if (!active || !payload?.length) return null
   const d = payload[0].payload
   const isPred = d.pred !== undefined && d.status === undefined
-  const val = isPred ? d.pred! : d.value!
-  const color = isPred ? (lineColor ?? '#8b949e') : STATUS_COLORS[d.status ?? 'normal']
+  const isEstimated = d.estimated !== undefined && d.status === undefined
+  const val = isPred ? d.pred! : isEstimated ? d.estimated! : d.value!
+  const color = isPred ? (lineColor ?? '#8b949e') : isEstimated ? ESTIMATED_LINE_COLOR : STATUS_COLORS[d.status ?? 'normal']
   const label = unit === 'mgdl' ? `${val} mg/dL` : `${typeof val === 'number' ? val.toFixed(1) : val} mmol/L`
   return (
     <div style={{
@@ -238,7 +373,7 @@ function CustomTooltip({ active, payload, unit, lineColor, timeSpanMs }: {
         {isPred ? `~ ${label}` : label}
       </div>
       <div style={{ color: '#8b949e' }}>
-        {formatTooltipTime(d.time, timeSpanMs)}{isPred ? ' (voorspelling)' : ''}
+        {formatTooltipTime(d.time, timeSpanMs)}{isPred ? ' (voorspelling)' : isEstimated ? ' (geschat)' : ''}
       </div>
     </div>
   )

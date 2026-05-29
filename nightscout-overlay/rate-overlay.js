@@ -9,6 +9,9 @@
   var CLASSIC_WINDOWS_MINUTES = [1, 2, 3, 4, 5, 10, 15, 20, 30, 45, 60, 90, 120];
   var RATE_MODE_KEY = 'cgm-rate-overlay-mode';
   var SOUND_OFF_KEY = 'cgm-nightscout-sound-off';
+  var ESTIMATE_LINE_CLASS = 'cgm-estimated-glucose-line';
+  var ESTIMATE_GAP_MIN_MS = 150000;
+  var ESTIMATE_OPEN_MAX_MS = 1200000;
   var latestReading = null;
   var updatingCurrentGlucose = false;
   var currentRows = [];
@@ -42,11 +45,11 @@
   }
 
   function trendLabel(rateMgdlPerMin) {
-    if (rateMgdlPerMin <= -3) return 'daalt zeer snel';
+    if (rateMgdlPerMin <= -3) return 'zeer snel';
     if (rateMgdlPerMin <= -2) return 'daalt snel';
     if (rateMgdlPerMin < -1) return 'daalt';
     if (rateMgdlPerMin < -0.5) return 'daalt rustig';
-    if (rateMgdlPerMin >= 3) return 'stijgt zeer snel';
+    if (rateMgdlPerMin >= 3) return 'zeer snel';
     if (rateMgdlPerMin >= 2) return 'stijgt snel';
     if (rateMgdlPerMin > 1) return 'stijgt';
     if (rateMgdlPerMin > 0.5) return 'stijgt rustig';
@@ -168,12 +171,14 @@
     var minutesToUrgent = rateMmol < -0.01 ? (valueMmol - 3.0) / Math.abs(rateMmol) : null;
     var predictedHypoSoon = minutesToHypo !== null && minutesToHypo >= 0 && minutesToHypo <= 20;
     var predictedUrgentSoon = minutesToUrgent !== null && minutesToUrgent >= 0 && minutesToUrgent <= 20;
+    var lowEta = minutesToLow !== null && minutesToLow <= 0 ? 'nu' : '±' + Math.ceil(minutesToLow) + 'm';
+    var urgentEta = minutesToUrgent !== null && minutesToUrgent <= 0 ? 'nu' : '±' + Math.ceil(minutesToUrgent) + 'm';
 
-    if (valueMmol < 3.0 || predictedUrgentSoon) {
+    if (valueMmol < 3.0) {
       return {
         css: 'urgent',
-        title: valueMmol < 3.0 ? 'HYPO URGENT' : 'URGENT RISICO',
-        detail: valueMmol < 3.0 ? valueMmol.toFixed(2) + ' mmol/L' : '3.8 ±' + Math.ceil(minutesToLow) + 'm · 3.0 ±' + Math.ceil(minutesToUrgent) + 'm',
+        title: 'HYPO URGENT',
+        detail: valueMmol.toFixed(2) + ' mmol/L',
         rate: rateMmol
       };
     }
@@ -182,7 +187,16 @@
       return {
         css: 'hypo',
         title: 'HYPO NU',
-        detail: valueMmol.toFixed(2) + ' mmol/L',
+        detail: predictedUrgentSoon ? '3.8 ' + lowEta + ' · 3.0 ' + urgentEta : valueMmol.toFixed(2) + ' mmol/L',
+        rate: rateMmol
+      };
+    }
+
+    if (predictedUrgentSoon) {
+      return {
+        css: 'urgent',
+        title: 'URGENT RISICO',
+        detail: '3.8 ' + lowEta + ' · 3.0 ' + urgentEta,
         rate: rateMmol
       };
     }
@@ -209,6 +223,102 @@
     };
   }
 
+  function calculateStats(readings) {
+    if (!readings.length) return null;
+
+    var latestTime = readingTime(readings[0]);
+    var since = latestTime - 24 * 60 * 60000;
+    var values = readings.filter(function (entry) {
+      var time = readingTime(entry);
+      return Number.isFinite(time) && time >= since && Number.isFinite(Number(entry.sgv));
+    }).map(function (entry) {
+      return mmol(Number(entry.sgv));
+    });
+
+    if (!values.length) return null;
+
+    var count = values.length;
+    var entries = readings.filter(function (entry) {
+      var time = readingTime(entry);
+      return Number.isFinite(time) && time >= since && Number.isFinite(Number(entry.sgv));
+    }).sort(function (a, b) {
+      return readingTime(a) - readingTime(b);
+    });
+    var lowCount = values.filter(function (value) { return value < 3.9; }).length;
+    var urgentLowCount = values.filter(function (value) { return value < 3.0; }).length;
+    var highCount = values.filter(function (value) { return value > 10.0; }).length;
+    var inRangeCount = count - lowCount - highCount;
+    var sum = values.reduce(function (total, value) { return total + value; }, 0);
+    var average = sum / count;
+    var min = Math.min.apply(null, values);
+    var max = Math.max.apply(null, values);
+    var variance = values.reduce(function (total, value) {
+      var diff = value - average;
+      return total + diff * diff;
+    }, 0) / count;
+    var stdDev = Math.sqrt(variance);
+    var cv = average > 0 ? stdDev / average * 100 : 0;
+    var estimatedA1c = (average * MGDL_PER_MMOL + 46.7) / 28.7;
+    var hypoEvents = 0;
+    var inHypo = false;
+    var lastHypoTime = null;
+    var missingIntervals = 0;
+    var fastestRise = null;
+    var fastestDrop = null;
+    var nightValues = [];
+
+    entries.forEach(function (entry, index) {
+      var value = mmol(Number(entry.sgv));
+      var time = readingTime(entry);
+      var hour = new Date(time).getHours();
+      if (hour < 6) nightValues.push(value);
+
+      if (value < 3.9) {
+        lastHypoTime = time;
+        if (!inHypo) {
+          hypoEvents += 1;
+          inHypo = true;
+        }
+      } else {
+        inHypo = false;
+      }
+
+      if (index === 0) return;
+      var previous = entries[index - 1];
+      var previousTime = readingTime(previous);
+      var minutes = (time - previousTime) / 60000;
+      if (minutes > 7) missingIntervals += 1;
+      if (minutes <= 0 || minutes > 20) return;
+
+      var rate = (value - mmol(Number(previous.sgv))) / minutes;
+      if (fastestRise === null || rate > fastestRise) fastestRise = rate;
+      if (fastestDrop === null || rate < fastestDrop) fastestDrop = rate;
+    });
+
+    var lastHypoMinutes = lastHypoTime ? Math.round((latestTime - lastHypoTime) / 60000) : null;
+
+    return {
+      lowPct: Math.round(lowCount / count * 100),
+      urgentLowPct: Math.round(urgentLowCount / count * 100),
+      inRangePct: Math.round(inRangeCount / count * 100),
+      highPct: Math.round(highCount / count * 100),
+      average: average,
+      min: min,
+      max: max,
+      stdDev: stdDev,
+      cv: cv,
+      stability: cv <= 36 ? 'stabiel' : 'wisselend',
+      estimatedA1c: estimatedA1c,
+      count: count,
+      hypoEvents: hypoEvents,
+      fastestRise: fastestRise,
+      fastestDrop: fastestDrop,
+      lastHypoMinutes: lastHypoMinutes,
+      missingIntervals: missingIntervals,
+      nightMin: nightValues.length ? Math.min.apply(null, nightValues) : null
+    };
+  }
+
   function ensureStyles() {
     if (document.getElementById('cgm-rate-overlay-style')) return;
     var style = document.createElement('style');
@@ -216,7 +326,12 @@
     style.textContent = [
       '#cgm-rate-overlay{position:absolute!important;z-index:9999!important;top:174px;left:50%;transform:translateX(-50%);display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:6px;width:min(98vw,860px);font-family:Arial,Helvetica,sans-serif;pointer-events:none;align-items:start}',
       '#cgm-rate-overlay.classic{grid-template-columns:repeat(5,minmax(110px,1fr));width:min(98vw,900px)}',
-      '#cgm-rate-overlay.all{grid-template-columns:repeat(10,minmax(72px,1fr));width:min(98vw,1160px)}',
+      '#cgm-rate-overlay.all{left:6px;transform:none;grid-template-columns:repeat(21,minmax(0,1fr));width:calc(100vw - 12px)}',
+      '#cgm-rate-overlay.all .rate-card{padding:2px 10px 2px 3px}',
+      '#cgm-rate-overlay.all .rate-window{font-size:6px}',
+      '#cgm-rate-overlay.all .rate-main{font-size:9px}',
+      '#cgm-rate-overlay.all .rate-sub{font-size:5px}',
+      '#cgm-rate-overlay.all .rate-arrow{right:2px;font-size:10px}',
       '#cgm-hypo-alert{position:absolute!important;z-index:10000!important;left:50%;transform:translateX(-50%);top:174px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;width:max-content;max-width:min(560px,86vw);min-width:210px;border:1px solid rgba(255,255,255,.24);border-radius:5px;padding:5px 10px;font-family:Arial,Helvetica,sans-serif;box-sizing:border-box;box-shadow:0 1px 8px rgba(0,0,0,.5)}',
       '#cgm-hypo-alert .hypo-line{display:flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap}',
       '#cgm-hypo-alert .hypo-title{font-size:11px;font-weight:900;line-height:1;text-transform:uppercase;white-space:nowrap}',
@@ -231,17 +346,25 @@
       '#cgm-point-rate-tooltip .pt-head{display:flex;justify-content:space-between;gap:12px;font-size:12px;font-weight:900;line-height:1.15;margin-bottom:4px}',
       '#cgm-point-rate-tooltip .pt-row{display:flex;justify-content:space-between;gap:12px;font-size:11px;font-weight:700;line-height:1.25;white-space:nowrap}',
       '#cgm-point-rate-tooltip .pt-rate{font-family:monospace;font-weight:900}',
+      '.cgm-estimated-glucose-line{pointer-events:none}',
+      '.cgm-estimated-glucose-line path{fill:none;stroke:#58a6ff;stroke-width:2.5;stroke-dasharray:5 5;stroke-linecap:round;stroke-linejoin:round;opacity:.9;filter:drop-shadow(0 1px 2px rgba(0,0,0,.55))}',
       '#cgm-current-average-rate{display:block!important;width:max-content;margin-top:4px;font-size:13px!important;line-height:1.2!important;padding:3px 7px!important;background:rgba(0,0,0,.72)!important;color:#f3f4f6!important;border:1px solid rgba(255,255,255,.2)!important;border-radius:5px!important;font-family:Arial,Helvetica,sans-serif!important;font-weight:900!important}',
+      '#cgm-stats-panel{position:absolute!important;z-index:9998!important;left:50%;transform:translateX(-50%);width:min(98vw,980px);display:grid;grid-template-columns:repeat(6,minmax(92px,1fr));gap:4px;padding:5px;border:1px solid rgba(255,255,255,.14);border-radius:5px;background:rgba(0,0,0,.76);color:#e5e7eb;font-family:Arial,Helvetica,sans-serif;box-sizing:border-box;box-shadow:0 1px 10px rgba(0,0,0,.45)}',
+      '#cgm-stats-panel .stats-title{grid-column:1/-1;font-size:10px;font-weight:900;text-transform:uppercase;color:#9ca3af;line-height:1}',
+      '#cgm-stats-panel .stat{min-width:0;border:1px solid rgba(255,255,255,.12);border-radius:4px;background:rgba(255,255,255,.06);padding:4px 5px;box-sizing:border-box}',
+      '#cgm-stats-panel .stat-label{display:block;font-size:9px;line-height:1;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+      '#cgm-stats-panel .stat-value{display:block;font-family:monospace;font-size:13px;font-weight:900;line-height:1.15;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+      '#cgm-stats-panel .low .stat-value{color:#fb7185}#cgm-stats-panel .range .stat-value{color:#4ade80}#cgm-stats-panel .high .stat-value{color:#c084fc}',
       '#cgm-rate-toggle{position:absolute!important;z-index:10000!important;left:50%;transform:translateX(-50%);top:174px;border:1px solid rgba(255,255,255,.25);border-radius:5px;background:rgba(0,0,0,.72);color:#ddd;font:700 11px Arial,Helvetica,sans-serif;padding:5px 8px;cursor:pointer}',
       '#cgm-rate-toggle:hover{background:rgba(30,30,30,.9);color:#fff}',
       '.primary,.bgStatus.current{overflow:visible!important}',
-      '#cgm-rate-overlay .rate-card{position:relative;border:1px solid rgba(255,255,255,.22);border-radius:5px;background:rgba(9,9,9,.82);color:#ddd;padding:5px 25px 5px 7px;text-align:left;box-shadow:0 -1px 6px rgba(0,0,0,.45);min-width:0;min-height:46px;box-sizing:border-box}',
+      '#cgm-rate-overlay .rate-card{position:relative;border:1px solid rgba(255,255,255,.22);border-radius:5px;background:rgba(9,9,9,.82);color:#ddd;padding:4px 25px 4px 7px;text-align:left;box-shadow:0 -1px 6px rgba(0,0,0,.45);min-width:0;box-sizing:border-box}',
       '#cgm-rate-overlay .rate-card.primary{border-width:1px;border-bottom-width:2px}',
       '#cgm-rate-overlay .rate-window{display:block;font-size:9px;line-height:1;text-transform:uppercase;opacity:.9;letter-spacing:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-      '#cgm-rate-overlay .rate-main{display:block;font-family:monospace;font-size:15px;font-weight:900;line-height:1.12;letter-spacing:0;margin-top:2px}',
+      '#cgm-rate-overlay .rate-main{display:block;font-family:monospace;font-size:15px;font-weight:900;line-height:1.05;letter-spacing:0;margin-top:1px}',
       '#cgm-rate-overlay .rate-card.primary .rate-main{font-size:15px}',
       '#cgm-rate-overlay .rate-arrow{position:absolute;right:7px;top:50%;transform:translateY(-50%);font-family:Arial,Helvetica,sans-serif;font-size:18px;font-weight:900;line-height:1}',
-      '#cgm-rate-overlay .rate-sub{display:block;font-size:9px;line-height:1.12;opacity:.92;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+      '#cgm-rate-overlay .rate-sub{display:block;font-size:9px;line-height:1.05;opacity:.92;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}',
       '#cgm-rate-overlay .very-fast-down{color:#fff7ed;border-color:#fb7185;background:linear-gradient(135deg,#f59e0b 0%,#e11d48 100%);text-shadow:0 1px 2px rgba(0,0,0,.45)}',
       '#cgm-rate-overlay .fast-down{color:#2f1600;border-color:#f59e0b;background:linear-gradient(135deg,#ffe08a 0%,#fb923c 100%)}',
       '#cgm-rate-overlay .down{color:#2f1600;border-color:#facc15;background:linear-gradient(135deg,#fff3a3 0%,#fbbf24 100%)}',
@@ -252,7 +375,7 @@
       '#cgm-rate-overlay .fast-up{color:#faf5ff;border-color:#a855f7;background:linear-gradient(135deg,#c084fc 0%,#9333ea 100%);text-shadow:0 1px 2px rgba(0,0,0,.42)}',
       '#cgm-rate-overlay .very-fast-up{color:#faf5ff;border-color:#7e22ce;background:linear-gradient(135deg,#9333ea 0%,#581c87 100%);text-shadow:0 1px 2px rgba(0,0,0,.52)}',
       '#cgm-rate-overlay .missing{color:#8a8a8a;border-color:rgba(255,255,255,.14);background:rgba(0,0,0,.28)}',
-      '@media(max-width:700px){#cgm-rate-overlay,#cgm-rate-overlay.all{grid-template-columns:repeat(4,minmax(72px,1fr));gap:3px;width:98vw}#cgm-hypo-alert{left:50%;right:auto;transform:translateX(-50%);max-width:94vw;min-width:0;gap:3px;padding:5px 7px}#cgm-hypo-alert .hypo-line{gap:5px}#cgm-hypo-alert .hypo-title,#cgm-hypo-alert .hypo-detail{font-size:10px}#cgm-hypo-alert .hypo-rate,#cgm-hypo-alert .hypo-average{font-size:9px}#cgm-rate-overlay .rate-card{padding:4px 19px 3px 5px;min-height:42px}#cgm-rate-overlay .rate-window{font-size:8px}#cgm-rate-overlay .rate-main,#cgm-rate-overlay .rate-card.primary .rate-main{font-size:13px}#cgm-rate-overlay .rate-arrow{right:5px;font-size:15px}#cgm-rate-overlay .rate-sub{font-size:7px}}'
+      '@media(max-width:700px){#cgm-rate-overlay,#cgm-rate-overlay.classic,#cgm-rate-overlay.all{grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;width:98vw;align-items:start}#cgm-hypo-alert{left:50%;right:auto;transform:translateX(-50%);max-width:94vw;min-width:0;gap:3px;padding:5px 7px}#cgm-hypo-alert .hypo-line{gap:5px}#cgm-hypo-alert .hypo-title,#cgm-hypo-alert .hypo-detail{font-size:10px}#cgm-hypo-alert .hypo-rate,#cgm-hypo-alert .hypo-average{font-size:9px}#cgm-rate-overlay .rate-card{padding:3px 16px 3px 5px;min-height:0}#cgm-rate-overlay .rate-window{font-size:8px;line-height:1}#cgm-rate-overlay .rate-main,#cgm-rate-overlay .rate-card.primary .rate-main{font-size:12px;line-height:1.02;margin-top:1px}#cgm-rate-overlay .rate-arrow{right:4px;font-size:14px}#cgm-rate-overlay .rate-sub{font-size:7px;line-height:1.02;margin-top:1px}#cgm-stats-panel{grid-template-columns:repeat(3,minmax(0,1fr));gap:3px;width:98vw;padding:4px}#cgm-stats-panel .stat{padding:3px 4px}#cgm-stats-panel .stat-label{font-size:8px}#cgm-stats-panel .stat-value{font-size:11px}}'
     ].join('');
     document.head.appendChild(style);
   }
@@ -386,6 +509,17 @@
     return tooltip;
   }
 
+  function ensureStatsPanel() {
+    var existing = document.getElementById('cgm-stats-panel');
+    if (existing) return existing;
+
+    var panel = document.createElement('div');
+    panel.id = 'cgm-stats-panel';
+    panel.setAttribute('aria-label', 'Glucose statistieken laatste 24 uur');
+    document.body.appendChild(panel);
+    return panel;
+  }
+
   function getMode() {
     var mode = localStorage.getItem(RATE_MODE_KEY);
     return mode === 'classic' || mode === 'all' || mode === 'off' ? mode : 'compact';
@@ -436,16 +570,51 @@
     var container = ensureContainer();
     var button = ensureToggle();
     var alert = ensureHypoAlert();
+    var statsPanel = ensureStatsPanel();
     var chart = document.querySelector('#chartContainer');
     if (!container || !chart) return;
 
     var chartTop = chart.getBoundingClientRect().top + window.scrollY;
+    var chartBottom = chart.getBoundingClientRect().bottom + window.scrollY;
     var buttonHeight = button.getBoundingClientRect().height || 24;
     var buttonTop = chartTop - buttonHeight - 6;
     var containerTop = chartTop + 4;
     button.style.top = Math.max(0, Math.round(buttonTop)) + 'px';
     alert.style.top = '8px';
     container.style.top = Math.max(0, Math.round(containerTop)) + 'px';
+    statsPanel.style.top = Math.max(0, Math.round(chartBottom + 8)) + 'px';
+  }
+
+  function renderStatsPanel(stats) {
+    var panel = ensureStatsPanel();
+    if (!stats) {
+      panel.style.display = 'none';
+      return;
+    }
+
+    panel.style.display = 'grid';
+    panel.innerHTML = [
+      '<div class="stats-title">Laatste 24 uur</div>',
+      '<div class="stat low"><span class="stat-label">Laag</span><span class="stat-value">', stats.lowPct, '%</span></div>',
+      '<div class="stat range"><span class="stat-label">In bereik</span><span class="stat-value">', stats.inRangePct, '%</span></div>',
+      '<div class="stat high"><span class="stat-label">Hoog</span><span class="stat-value">', stats.highPct, '%</span></div>',
+      '<div class="stat"><span class="stat-label">Gemiddelde</span><span class="stat-value">', stats.average.toFixed(1), ' mmol/L</span></div>',
+      '<div class="stat"><span class="stat-label">Min</span><span class="stat-value">', stats.min.toFixed(1), ' mmol/L</span></div>',
+      '<div class="stat"><span class="stat-label">Max</span><span class="stat-value">', stats.max.toFixed(1), ' mmol/L</span></div>',
+      '<div class="stat"><span class="stat-label">Std. afwijking</span><span class="stat-value">', stats.stdDev.toFixed(1), ' mmol/L</span></div>',
+      '<div class="stat"><span class="stat-label">CV</span><span class="stat-value">', Math.round(stats.cv), '% ', stats.stability, '</span></div>',
+      '<div class="stat"><span class="stat-label">Gesch. HbA1c</span><span class="stat-value">', stats.estimatedA1c.toFixed(1), '%</span></div>',
+      '<div class="stat range"><span class="stat-label">In bereik</span><span class="stat-value">', stats.inRangePct, '%</span></div>',
+      '<div class="stat"><span class="stat-label">Metingen</span><span class="stat-value">', stats.count, '</span></div>',
+      '<div class="stat low"><span class="stat-label">Onder 3.0</span><span class="stat-value">', stats.urgentLowPct, '%</span></div>',
+      '<div class="stat low"><span class="stat-label">Hypo events</span><span class="stat-value">', stats.hypoEvents, '</span></div>',
+      '<div class="stat"><span class="stat-label">Laatste hypo</span><span class="stat-value">', stats.lastHypoMinutes === null ? 'geen' : stats.lastHypoMinutes + 'm', '</span></div>',
+      '<div class="stat high"><span class="stat-label">Snelste stijging</span><span class="stat-value">', stats.fastestRise === null ? '--' : signed(stats.fastestRise, 3) + '/min', '</span></div>',
+      '<div class="stat low"><span class="stat-label">Snelste daling</span><span class="stat-value">', stats.fastestDrop === null ? '--' : signed(stats.fastestDrop, 3) + '/min', '</span></div>',
+      '<div class="stat"><span class="stat-label">Gemiste gaten</span><span class="stat-value">', stats.missingIntervals, '</span></div>',
+      '<div class="stat"><span class="stat-label">Nacht min</span><span class="stat-value">', stats.nightMin === null ? '--' : stats.nightMin.toFixed(1) + ' mmol/L', '</span></div>'
+    ].join('');
+    window.requestAnimationFrame(positionContainer);
   }
 
   function render(rows) {
@@ -537,6 +706,133 @@
     return offset + dotIndex;
   }
 
+  function estimateExpectedIntervalMs(points) {
+    var intervals = points.map(function (point, index) {
+      if (index === 0) return null;
+      return readingTime(point.entry) - readingTime(points[index - 1].entry);
+    }).filter(function (interval) {
+      return Number.isFinite(interval) && interval > 0;
+    }).sort(function (a, b) {
+      return a - b;
+    });
+
+    if (!intervals.length) return 60000;
+    return intervals[Math.floor(intervals.length / 2)];
+  }
+
+  function estimateExpectedPixelGap(points) {
+    var gaps = points.map(function (point, index) {
+      if (index === 0) return null;
+      return point.x - points[index - 1].x;
+    }).filter(function (gap) {
+      return Number.isFinite(gap) && gap > 0;
+    }).sort(function (a, b) {
+      return a - b;
+    });
+
+    if (!gaps.length) return 0;
+    return gaps[Math.floor(gaps.length / 2)];
+  }
+
+  function chartDotPoints() {
+    var dots = Array.prototype.slice.call(document.querySelectorAll('#chartContainer svg circle.entry-dot')).filter(function (el) {
+      return Number.isFinite(Number(el.getAttribute('cx'))) && Number.isFinite(Number(el.getAttribute('cy')));
+    }).sort(function (a, b) {
+      return Number(a.getAttribute('cx')) - Number(b.getAttribute('cx'));
+    });
+    if (!dots.length || !chartReadingsAsc.length) return [];
+
+    var offset = Math.max(0, chartReadingsAsc.length - dots.length);
+    return dots.map(function (dot, index) {
+      return {
+        dot: dot,
+        entry: chartReadingsAsc[offset + index],
+        x: Number(dot.getAttribute('cx')),
+        y: Number(dot.getAttribute('cy'))
+      };
+    }).filter(function (point) {
+      return point.entry && Number.isFinite(readingTime(point.entry)) && Number.isFinite(Number(point.entry.sgv));
+    });
+  }
+
+  function ensureEstimateLayer() {
+    var svg = document.querySelector('#chartContainer svg');
+    var focus = document.querySelector('#chartContainer svg .chart-focus');
+    if (!svg || !focus) return null;
+
+    var layer = svg.querySelector('.' + ESTIMATE_LINE_CLASS);
+    if (!layer) {
+      layer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      layer.setAttribute('class', ESTIMATE_LINE_CLASS);
+      focus.insertBefore(layer, focus.firstChild);
+    }
+    return layer;
+  }
+
+  function pathBetween(a, b) {
+    return 'M' + a.x.toFixed(1) + ',' + a.y.toFixed(1) + 'L' + b.x.toFixed(1) + ',' + b.y.toFixed(1);
+  }
+
+  function recentPixelSlope(points, latest) {
+    var latestTime = readingTime(latest.entry);
+    for (var i = points.length - 2; i >= 0; i -= 1) {
+      var point = points[i];
+      var dt = latestTime - readingTime(point.entry);
+      if (dt >= 240000 && latest.x !== point.x) {
+        return {
+          yPerMs: (latest.y - point.y) / dt,
+          xPerMs: (latest.x - point.x) / dt
+        };
+      }
+    }
+    return null;
+  }
+
+  function renderEstimatedGlucoseLine() {
+    var layer = ensureEstimateLayer();
+    if (!layer) return;
+
+    var points = chartDotPoints();
+    if (points.length < 2) {
+      layer.innerHTML = '';
+      return;
+    }
+
+    var expectedInterval = estimateExpectedIntervalMs(points);
+    var gapThreshold = Math.max(ESTIMATE_GAP_MIN_MS, expectedInterval * 2.5);
+    var expectedPixelGap = estimateExpectedPixelGap(points);
+    var pixelGapThreshold = Math.max(14, expectedPixelGap * 2.5);
+    var chart = document.querySelector('#chartContainer');
+    var chartWidth = chart ? chart.getBoundingClientRect().width : window.innerWidth;
+    var paths = [];
+
+    for (var i = 1; i < points.length; i += 1) {
+      var previous = points[i - 1];
+      var current = points[i];
+      var gapPx = current.x - previous.x;
+      var inView = current.x >= -20 && previous.x <= chartWidth + 20;
+      if (inView && gapPx > pixelGapThreshold) {
+        paths.push(pathBetween(previous, current));
+      }
+    }
+
+    var latest = points[points.length - 1];
+    var staleMs = Date.now() - readingTime(latest.entry);
+    if (staleMs > gapThreshold && staleMs <= ESTIMATE_OPEN_MAX_MS) {
+      var slope = recentPixelSlope(points, latest);
+      if (slope && slope.xPerMs > 0) {
+        paths.push(pathBetween(latest, {
+          x: Math.min(chartWidth + 20, latest.x + slope.xPerMs * staleMs),
+          y: latest.y + slope.yPerMs * staleMs
+        }));
+      }
+    }
+
+    layer.innerHTML = paths.map(function (d) {
+      return '<path d="' + d + '"></path>';
+    }).join('');
+  }
+
   function showPointTooltip(dot, event) {
     var index = pointIndexFromDot(dot);
     var entry = chartReadingsAsc[index];
@@ -605,9 +901,17 @@
         latestReading = readings[0] || null;
         renderCurrentGlucose(readings[0]);
         currentHypoRisk = calculateHypoRisk(readings, rows);
+        renderStatsPanel(calculateStats(readings));
         render(rows);
+        window.requestAnimationFrame(renderEstimatedGlucoseLine);
+        window.setTimeout(renderEstimatedGlucoseLine, 500);
+        window.setTimeout(renderEstimatedGlucoseLine, 1500);
       })
-      .catch(function () { render([]); });
+      .catch(function () {
+        renderStatsPanel(null);
+        render([]);
+        renderEstimatedGlucoseLine();
+      });
   }
 
   function start() {
@@ -617,8 +921,10 @@
     refresh();
     window.setInterval(refresh, POLL_MS);
     window.addEventListener('resize', positionContainer);
+    window.addEventListener('resize', renderEstimatedGlucoseLine);
     window.setTimeout(positionContainer, 1000);
     window.setTimeout(positionContainer, 3000);
+    window.setTimeout(renderEstimatedGlucoseLine, 3000);
   }
 
   if (document.readyState === 'loading') {
