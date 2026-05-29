@@ -345,6 +345,20 @@
     };
   }
 
+  function normalizeHypoRisk(risk, valueMmol, rateMmol) {
+    if (!risk || !Number.isFinite(valueMmol) || !Number.isFinite(rateMmol)) return risk;
+    if (risk.css !== 'urgent') return risk;
+    if (valueMmol < 3.0) return risk;
+    if (rateMmol < -0.01) return risk;
+
+    return {
+      css: valueMmol < 4.5 ? 'watch' : 'ok',
+      title: valueMmol < 4.5 ? 'LET OP LAAG' : 'HYPO OK',
+      detail: valueMmol.toFixed(2) + ' mmol/L',
+      rate: rateMmol
+    };
+  }
+
   function detectPeakDropSignal(readings) {
     if (!readings || readings.length < 2) return null;
     var latest = readings[0];
@@ -460,7 +474,7 @@
     var primaryRate = getPrimaryRate(currentRows);
     var rate = Number.isFinite(blendedRate) ? blendedRate : (primaryRate ? primaryRate.rateMmol : NaN);
     if (!Number.isFinite(rate)) return '';
-    if (latestDbPrediction && latestDbPrediction.predictedMmol) {
+    if (latestDbPrediction && latestDbPrediction.predictedMmol && latestDbPrediction.entryIdentifier === latestReading.identifier) {
       var db = latestDbPrediction.predictedMmol;
       var v10 = Number(db['10']);
       var v15 = Number(db['15']);
@@ -473,7 +487,7 @@
           ' · 30m ' + etaArrow(baseMmol, rate, 30) + v30.toFixed(1);
       }
     }
-    var corr = currentPatternCorrection ? currentPatternCorrection.correction : 0;
+    var corr = currentPatternCorrection && rate < -0.005 ? currentPatternCorrection.correction : 0;
     var calib = loadForecastCalibration();
     var horizons = [10, 15, 20, 30];
     var prev = null;
@@ -701,7 +715,7 @@
       '#cgm-rate-overlay .fast-up{color:#faf5ff;border-color:#a855f7;background:linear-gradient(135deg,#c084fc 0%,#9333ea 100%);text-shadow:0 1px 2px rgba(0,0,0,.42)}',
       '#cgm-rate-overlay .very-fast-up{color:#faf5ff;border-color:#7e22ce;background:linear-gradient(135deg,#9333ea 0%,#581c87 100%);text-shadow:0 1px 2px rgba(0,0,0,.52)}',
       '#cgm-rate-overlay .missing{color:#8a8a8a;border-color:rgba(255,255,255,.14);background:rgba(0,0,0,.28)}',
-      '@media(max-width:700px){#cgm-mobile-dock{display:block;width:100%;padding:8px 8px 0;box-sizing:border-box}#cgm-rate-overlay,#cgm-rate-overlay.classic,#cgm-rate-overlay.all{grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;width:100%!important;align-items:start}#cgm-hypo-alert{max-width:95vw;min-width:0;gap:2px;padding:5px 7px}#cgm-hypo-alert .hypo-line{gap:4px}#cgm-hypo-alert .hypo-title{font-size:11px}#cgm-hypo-alert .hypo-detail{font-size:16px}#cgm-hypo-alert .hypo-rate{font-size:12px}#cgm-hypo-alert .hypo-average{font-size:10px}#cgm-hypo-alert .hypo-predict{font-size:9px}#cgm-hypo-alert .hypo-drop{font-size:9px}#cgm-rate-toggle,#cgm-rate-view-toggle{min-width:58px;padding:4px 7px;font-size:10px}#cgm-rate-history-nav{font-size:10px;padding:2px 5px}#cgm-rate-overlay .rate-card{padding:3px 16px 3px 5px;min-height:0}#cgm-rate-overlay .rate-window{font-size:8px;line-height:1}#cgm-rate-overlay .rate-main,#cgm-rate-overlay .rate-card.primary .rate-main{font-size:12px;line-height:1.02;margin-top:1px}#cgm-rate-overlay .rate-arrow{right:4px;font-size:14px}#cgm-rate-overlay .rate-sub{font-size:7px;line-height:1.02;margin-top:1px}#cgm-stats-panel{display:none!important}}'
+      '@media(max-width:700px){#cgm-mobile-dock{display:flex!important;flex-direction:column!important;width:100%!important;padding:8px 8px 0!important;box-sizing:border-box!important;gap:6px!important;clear:both!important}#cgm-mobile-dock #cgm-hypo-alert,#cgm-mobile-dock #cgm-rate-overlay,#cgm-mobile-dock #cgm-rate-toggle,#cgm-mobile-dock #cgm-rate-view-toggle,#cgm-mobile-dock #cgm-rate-history-nav{position:static!important;left:auto!important;right:auto!important;top:auto!important;bottom:auto!important;transform:none!important;box-sizing:border-box!important}#cgm-mobile-dock #cgm-hypo-alert{width:100%!important;max-width:100%!important;min-width:0!important;margin:0!important;gap:2px;padding:5px 7px}#cgm-mobile-dock #cgm-rate-overlay,#cgm-mobile-dock #cgm-rate-overlay.classic,#cgm-mobile-dock #cgm-rate-overlay.all{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:3px!important;width:100%!important;align-items:start!important;margin:0!important}#cgm-mobile-dock #cgm-rate-toggle,#cgm-mobile-dock #cgm-rate-view-toggle{display:inline-block!important;width:max-content!important;min-width:58px!important;margin:0 6px 0 0!important;padding:4px 7px!important;font-size:10px!important}#cgm-mobile-dock #cgm-rate-history-nav{width:max-content!important;max-width:100%!important;margin:0!important;font-size:10px!important;padding:2px 5px!important}#cgm-mobile-dock #cgm-hypo-alert .hypo-line{gap:4px;white-space:normal!important;text-align:center}#cgm-mobile-dock #cgm-hypo-alert .hypo-title{font-size:11px}#cgm-mobile-dock #cgm-hypo-alert .hypo-detail{font-size:16px}#cgm-mobile-dock #cgm-hypo-alert .hypo-rate{font-size:12px}#cgm-mobile-dock #cgm-hypo-alert .hypo-average{font-size:10px}#cgm-mobile-dock #cgm-hypo-alert .hypo-predict{font-size:9px;white-space:normal!important}#cgm-mobile-dock #cgm-hypo-alert .hypo-drop{font-size:9px;white-space:normal!important}#cgm-mobile-dock #cgm-rate-overlay .rate-card{padding:3px 16px 3px 5px;min-height:0}#cgm-mobile-dock #cgm-rate-overlay .rate-window{font-size:8px;line-height:1}#cgm-mobile-dock #cgm-rate-overlay .rate-main,#cgm-mobile-dock #cgm-rate-overlay .rate-card.primary .rate-main{font-size:12px;line-height:1.02;margin-top:1px}#cgm-mobile-dock #cgm-rate-overlay .rate-arrow{right:4px;font-size:14px}#cgm-mobile-dock #cgm-rate-overlay .rate-sub{font-size:7px;line-height:1.02;margin-top:1px}#cgm-stats-panel{display:none!important}}'
     ].join('');
     document.head.appendChild(style);
   }
@@ -981,8 +995,12 @@
     alert.style.display = 'flex';
     alert.className = risk.css;
     var dropLine = dropFromPeakText(currentReadings);
+    var forecastRate = currentRows && currentRows.length ? getForecastRateMmol(currentRows) : null;
+    var patternCorrectionActive = currentPatternCorrection && Number.isFinite(forecastRate) && forecastRate < -0.005;
     var patternLine = currentPatternCorrection
-      ? ('patrooncorr: -' + currentPatternCorrection.correction.toFixed(1) + ' (n=' + currentPatternCorrection.episodes + ')')
+      ? (patternCorrectionActive
+        ? 'patrooncorr: -' + currentPatternCorrection.correction.toFixed(1) + ' (n=' + currentPatternCorrection.episodes + ')'
+        : 'patrooncorr: gepauzeerd, trend stijgt (n=' + currentPatternCorrection.episodes + ')')
       : '';
     alert.innerHTML = [
       '<div class="hypo-line primary">',
@@ -1039,31 +1057,36 @@
       dock.appendChild(container);
       if (nav.parentElement !== dock) dock.appendChild(nav);
 
-      alert.style.position = 'static';
-      alert.style.left = 'auto';
-      alert.style.top = 'auto';
-      alert.style.transform = 'none';
-      alert.style.width = Math.round(mobileWidth) + 'px';
-      alert.style.maxWidth = Math.round(mobileWidth) + 'px';
-      alert.style.minWidth = '0';
-      alert.style.margin = '0 0 6px 0';
-
-      button.style.position = 'static';
-      button.style.margin = '0 6px 6px 0';
-      button.style.transform = 'none';
-      viewButton.style.position = 'static';
-      viewButton.style.margin = '0 0 6px 0';
-      viewButton.style.transform = 'none';
-      nav.style.position = 'static';
-      nav.style.margin = '0 0 6px 0';
-
-      container.style.position = 'static';
-      container.style.left = 'auto';
-      container.style.top = 'auto';
-      container.style.transform = 'none';
-      container.style.width = Math.round(mobileWidth) + 'px';
-      container.style.margin = '0';
-      statsPanel.style.display = 'none';
+      [alert, button, viewButton, nav, container].forEach(function (el) {
+        el.style.setProperty('position', 'static', 'important');
+        el.style.setProperty('left', 'auto', 'important');
+        el.style.setProperty('top', 'auto', 'important');
+        el.style.setProperty('transform', 'none', 'important');
+        el.style.setProperty('box-sizing', 'border-box', 'important');
+      });
+      alert.style.setProperty('width', '100%', 'important');
+      alert.style.setProperty('max-width', Math.round(mobileWidth) + 'px', 'important');
+      alert.style.setProperty('min-width', '0', 'important');
+      alert.style.setProperty('margin', '0', 'important');
+      container.style.setProperty('width', '100%', 'important');
+      container.style.setProperty('margin', '0', 'important');
+      button.style.setProperty('margin', '0 6px 0 0', 'important');
+      viewButton.style.setProperty('margin', '0', 'important');
+      nav.style.setProperty('margin', '0', 'important');
+      statsPanel.style.setProperty('display', 'none', 'important');
+      var topElements = [
+        document.querySelector('.currentBG, #currentBG, [data-current-bg]'),
+        document.querySelector('.currentTime, #currentTime, [data-current-time]'),
+        document.querySelector('.currentDetails, .currentStatus, #currentDetails')
+      ].filter(Boolean);
+      var topBottom = topElements.reduce(function (bottom, el) {
+        return Math.max(bottom, el.getBoundingClientRect().bottom + window.scrollY);
+      }, window.scrollY + 72);
+      var dockTop = dock.getBoundingClientRect().top + window.scrollY;
+      dock.style.setProperty('margin-top', Math.max(8, topBottom - dockTop + 10) + 'px', 'important');
+      window.requestAnimationFrame(function () {
+        chart.style.setProperty('margin-top', Math.max(12, dock.getBoundingClientRect().height + 14) + 'px', 'important');
+      });
       return;
     } else {
       if (alert.parentElement !== document.body) document.body.appendChild(alert);
@@ -1071,6 +1094,12 @@
       if (viewButton.parentElement !== document.body) document.body.appendChild(viewButton);
       if (container.parentElement !== document.body) document.body.appendChild(container);
       if (nav.parentElement !== document.body) document.body.appendChild(nav);
+      [alert, button, viewButton, nav, container].forEach(function (el) {
+        el.style.removeProperty('position');
+        el.style.removeProperty('box-sizing');
+      });
+      chart.style.removeProperty('margin-top');
+      statsPanel.style.removeProperty('display');
       alert.style.width = '';
       alert.style.maxWidth = '';
       alert.style.left = '50%';
@@ -1533,6 +1562,9 @@
             currentHypoRisk.title = 'HYPO LET OP';
           }
         }
+        var finalRate = currentHypoRisk ? currentHypoRisk.rate : 0;
+        var finalMmol = mmol(Number((anchorEntry || readings[0]).sgv));
+        currentHypoRisk = normalizeHypoRisk(currentHypoRisk, finalMmol, finalRate);
         renderStatsPanel(calculateStats(readings));
         render(rows);
         observeChartChanges();
