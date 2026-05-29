@@ -350,6 +350,17 @@ function startServer() {
       return
     }
 
+    if (req.url === '/prediction/latest' && req.method === 'GET') {
+      try {
+        const latest = await getLatestPredictionSnapshot()
+        res.end(JSON.stringify({ ok: true, snapshot: latest }))
+      } catch (err) {
+        res.writeHead(500)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
     res.writeHead(404)
     res.end(JSON.stringify({ success: false, message: 'Niet gevonden.' }))
   })
@@ -357,6 +368,21 @@ function startServer() {
   httpServer.listen(port, '0.0.0.0', () => {
     console.log(`[libreview-sync] HTTP sync server luistert op ${port}`)
   })
+}
+
+async function getLatestPredictionSnapshot() {
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    return await client.db().collection('prediction_snapshots')
+      .find({}, { projection: { createdAt: 1, entryIdentifier: 1, predictedMmol: 1, probabilities: 1, modelVersion: 1, currentMmol: 1 } })
+      .sort({ createdAt: -1 })
+      .limit(1)
+      .next()
+  } finally {
+    if (client) await client.close().catch(() => undefined)
+  }
 }
 
 function toNightscoutEntry(pt) {

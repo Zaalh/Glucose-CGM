@@ -31,6 +31,7 @@
   var estimateRenderTimer = null;
   var chartObserver = null;
   var observedChart = null;
+  var latestDbPrediction = null;
 
   function mmol(valueMgdl) {
     return valueMgdl / MGDL_PER_MMOL;
@@ -459,6 +460,19 @@
     var primaryRate = getPrimaryRate(currentRows);
     var rate = Number.isFinite(blendedRate) ? blendedRate : (primaryRate ? primaryRate.rateMmol : NaN);
     if (!Number.isFinite(rate)) return '';
+    if (latestDbPrediction && latestDbPrediction.predictedMmol) {
+      var db = latestDbPrediction.predictedMmol;
+      var v10 = Number(db['10']);
+      var v15 = Number(db['15']);
+      var v20 = Number(db['20']);
+      var v30 = Number(db['30']);
+      if ([v10, v15, v20, v30].every(function (v) { return Number.isFinite(v); })) {
+        return '10m ' + etaArrow(baseMmol, rate, 10) + v10.toFixed(1) +
+          ' · 15m ' + etaArrow(baseMmol, rate, 15) + v15.toFixed(1) +
+          ' · 20m ' + etaArrow(baseMmol, rate, 20) + v20.toFixed(1) +
+          ' · 30m ' + etaArrow(baseMmol, rate, 30) + v30.toFixed(1);
+      }
+    }
     var corr = currentPatternCorrection ? currentPatternCorrection.correction : 0;
     var calib = loadForecastCalibration();
     var horizons = [10, 15, 20, 30];
@@ -668,6 +682,7 @@
       '#cgm-rate-history-nav button:hover:not(:disabled){background:rgba(60,60,60,.9);color:#fff}',
       '#cgm-rate-history-nav button:disabled{opacity:.45;cursor:not-allowed}',
       '#cgm-rate-history-nav .hist-time{min-width:40px;text-align:center}',
+      '#cgm-mobile-dock{display:none}',
       '.primary,.bgStatus.current{overflow:visible!important}',
       '#cgm-rate-overlay .rate-card{position:relative;border:1px solid rgba(255,255,255,.22);border-radius:5px;background:rgba(9,9,9,.82);color:#ddd;padding:4px 25px 4px 7px;text-align:left;box-shadow:0 -1px 6px rgba(0,0,0,.45);min-width:0;box-sizing:border-box}',
       '#cgm-rate-overlay .rate-card.primary{border-width:1px;border-bottom-width:2px}',
@@ -686,7 +701,7 @@
       '#cgm-rate-overlay .fast-up{color:#faf5ff;border-color:#a855f7;background:linear-gradient(135deg,#c084fc 0%,#9333ea 100%);text-shadow:0 1px 2px rgba(0,0,0,.42)}',
       '#cgm-rate-overlay .very-fast-up{color:#faf5ff;border-color:#7e22ce;background:linear-gradient(135deg,#9333ea 0%,#581c87 100%);text-shadow:0 1px 2px rgba(0,0,0,.52)}',
       '#cgm-rate-overlay .missing{color:#8a8a8a;border-color:rgba(255,255,255,.14);background:rgba(0,0,0,.28)}',
-      '@media(max-width:700px){#cgm-rate-overlay,#cgm-rate-overlay.classic,#cgm-rate-overlay.all{grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;width:98vw;align-items:start}#cgm-hypo-alert{left:50%;right:auto;transform:translateX(-50%);max-width:95vw;min-width:0;gap:2px;padding:5px 7px}#cgm-hypo-alert .hypo-line{gap:4px}#cgm-hypo-alert .hypo-title{font-size:11px}#cgm-hypo-alert .hypo-detail{font-size:16px}#cgm-hypo-alert .hypo-rate{font-size:12px}#cgm-hypo-alert .hypo-average{font-size:10px}#cgm-hypo-alert .hypo-predict{font-size:9px}#cgm-hypo-alert .hypo-drop{font-size:9px}#cgm-rate-toggle,#cgm-rate-view-toggle{min-width:58px;padding:4px 7px;font-size:10px}#cgm-rate-history-nav{font-size:10px;padding:2px 5px}#cgm-rate-overlay .rate-card{padding:3px 16px 3px 5px;min-height:0}#cgm-rate-overlay .rate-window{font-size:8px;line-height:1}#cgm-rate-overlay .rate-main,#cgm-rate-overlay .rate-card.primary .rate-main{font-size:12px;line-height:1.02;margin-top:1px}#cgm-rate-overlay .rate-arrow{right:4px;font-size:14px}#cgm-rate-overlay .rate-sub{font-size:7px;line-height:1.02;margin-top:1px}#cgm-stats-panel{grid-template-columns:repeat(3,minmax(0,1fr));gap:3px;width:98vw;padding:4px}#cgm-stats-panel .stat{padding:3px 4px}#cgm-stats-panel .stat-label{font-size:8px}#cgm-stats-panel .stat-value{font-size:11px}}'
+      '@media(max-width:700px){#cgm-mobile-dock{display:block;width:100%;padding:8px 8px 0;box-sizing:border-box}#cgm-rate-overlay,#cgm-rate-overlay.classic,#cgm-rate-overlay.all{grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;width:100%!important;align-items:start}#cgm-hypo-alert{max-width:95vw;min-width:0;gap:2px;padding:5px 7px}#cgm-hypo-alert .hypo-line{gap:4px}#cgm-hypo-alert .hypo-title{font-size:11px}#cgm-hypo-alert .hypo-detail{font-size:16px}#cgm-hypo-alert .hypo-rate{font-size:12px}#cgm-hypo-alert .hypo-average{font-size:10px}#cgm-hypo-alert .hypo-predict{font-size:9px}#cgm-hypo-alert .hypo-drop{font-size:9px}#cgm-rate-toggle,#cgm-rate-view-toggle{min-width:58px;padding:4px 7px;font-size:10px}#cgm-rate-history-nav{font-size:10px;padding:2px 5px}#cgm-rate-overlay .rate-card{padding:3px 16px 3px 5px;min-height:0}#cgm-rate-overlay .rate-window{font-size:8px;line-height:1}#cgm-rate-overlay .rate-main,#cgm-rate-overlay .rate-card.primary .rate-main{font-size:12px;line-height:1.02;margin-top:1px}#cgm-rate-overlay .rate-arrow{right:4px;font-size:14px}#cgm-rate-overlay .rate-sub{font-size:7px;line-height:1.02;margin-top:1px}#cgm-stats-panel{display:none!important}}'
     ].join('');
     document.head.appendChild(style);
   }
@@ -880,6 +895,17 @@
     return panel;
   }
 
+  function ensureMobileDock(chart) {
+    var existing = document.getElementById('cgm-mobile-dock');
+    if (existing) return existing;
+    var dock = document.createElement('div');
+    dock.id = 'cgm-mobile-dock';
+    dock.setAttribute('aria-label', 'Mobiele glucose overlay');
+    var parent = chart && chart.parentElement ? chart.parentElement : document.body;
+    parent.insertBefore(dock, chart || parent.firstChild);
+    return dock;
+  }
+
   function getMode() {
     var mode = localStorage.getItem(RATE_MODE_KEY);
     if (mode === 'off') {
@@ -989,6 +1015,7 @@
     var buttonTop = chartTop - buttonHeight - 6;
     var containerTop = chartTop + 28;
     var alertTop = chartTop + 4;
+    var nav = ensureHistoryNav();
     if (bgValue && clock) {
       var bgRect = bgValue.getBoundingClientRect();
       var clockRect = clock.getBoundingClientRect();
@@ -1004,31 +1031,46 @@
     buttonTop = alertBottom + 4;
 
     if (window.innerWidth <= 700) {
-      var mobileLeft = window.scrollX + 8;
+      var dock = ensureMobileDock(chart);
       var mobileWidth = Math.max(260, window.innerWidth - 16);
-      var mobileBaseTop = window.scrollY + 88;
-      alertTop = mobileBaseTop;
-      buttonTop = mobileBaseTop + 124;
-      containerTop = mobileBaseTop + 158;
+      dock.appendChild(alert);
+      dock.appendChild(button);
+      dock.appendChild(viewButton);
+      dock.appendChild(container);
+      if (nav.parentElement !== dock) dock.appendChild(nav);
 
-      alert.style.left = Math.round(mobileLeft + mobileWidth / 2) + 'px';
-      alert.style.transform = 'translateX(-50%)';
+      alert.style.position = 'static';
+      alert.style.left = 'auto';
+      alert.style.top = 'auto';
+      alert.style.transform = 'none';
       alert.style.width = Math.round(mobileWidth) + 'px';
       alert.style.maxWidth = Math.round(mobileWidth) + 'px';
       alert.style.minWidth = '0';
+      alert.style.margin = '0 0 6px 0';
 
-      button.style.top = Math.max(0, Math.round(buttonTop)) + 'px';
-      button.style.left = Math.max(0, Math.round(mobileLeft)) + 'px';
+      button.style.position = 'static';
+      button.style.margin = '0 6px 6px 0';
       button.style.transform = 'none';
-      viewButton.style.top = Math.max(0, Math.round(buttonTop)) + 'px';
-      viewButton.style.left = Math.max(0, Math.round(mobileLeft + (button.getBoundingClientRect().width || 58) + 6)) + 'px';
+      viewButton.style.position = 'static';
+      viewButton.style.margin = '0 0 6px 0';
       viewButton.style.transform = 'none';
+      nav.style.position = 'static';
+      nav.style.margin = '0 0 6px 0';
 
-      container.style.left = Math.round(mobileLeft) + 'px';
+      container.style.position = 'static';
+      container.style.left = 'auto';
+      container.style.top = 'auto';
       container.style.transform = 'none';
       container.style.width = Math.round(mobileWidth) + 'px';
-      statsPanel.style.top = Math.max(0, Math.round(chartBottom + 16)) + 'px';
+      container.style.margin = '0';
+      statsPanel.style.display = 'none';
+      return;
     } else {
+      if (alert.parentElement !== document.body) document.body.appendChild(alert);
+      if (button.parentElement !== document.body) document.body.appendChild(button);
+      if (viewButton.parentElement !== document.body) document.body.appendChild(viewButton);
+      if (container.parentElement !== document.body) document.body.appendChild(container);
+      if (nav.parentElement !== document.body) document.body.appendChild(nav);
       alert.style.width = '';
       alert.style.maxWidth = '';
       alert.style.left = '50%';
@@ -1046,7 +1088,6 @@
       viewButton.style.left = Math.round(window.scrollX + btnRect.left - viewWidth - 8) + 'px';
       viewButton.style.transform = 'none';
     }
-    var nav = ensureHistoryNav();
     var buttonRect = button.getBoundingClientRect();
     nav.style.top = Math.max(0, Math.round(buttonTop)) + 'px';
     nav.style.left = Math.round(window.scrollX + buttonRect.right + 8) + 'px';
@@ -1506,13 +1547,28 @@
       });
   }
 
+  function fetchLatestDbPrediction() {
+    var proto = window.location.protocol === 'https:' ? 'https://' : 'http://';
+    var url = proto + window.location.hostname + ':8787/prediction/latest';
+    fetch(url, { cache: 'no-store' })
+      .then(function (response) { return response.ok ? response.json() : null; })
+      .then(function (json) {
+        latestDbPrediction = json && json.snapshot ? json.snapshot : null;
+      })
+      .catch(function () {
+        latestDbPrediction = null;
+      });
+  }
+
   function start() {
     installSoundDefaultOff();
     installPointTooltip();
     installChartRangeListeners();
     observeCurrentGlucose();
     observeChartChanges();
+    fetchLatestDbPrediction();
     refresh();
+    window.setInterval(fetchLatestDbPrediction, Math.max(POLL_MS, 60000));
     window.setInterval(refresh, POLL_MS);
     window.addEventListener('resize', positionContainer);
     window.addEventListener('resize', scheduleEstimatedGlucoseLine);
