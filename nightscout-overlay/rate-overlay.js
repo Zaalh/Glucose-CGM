@@ -21,6 +21,7 @@
   var selectedReadingTime = null;
   var currentHypoRisk = null;
   var currentPatternCorrection = null;
+  var FORECAST_CALIBRATION_KEY = 'cgm-forecast-calibration-v1';
   var PEAK_DROP_THRESHOLDS = {
     watch: { minDrop: 1.4, minRate: 0.05, maxMinutes: 75 },
     high: { minDrop: 1.9, minRate: 0.07, maxMinutes: 60 },
@@ -198,6 +199,84 @@
       rate = median + (rate > median ? 0.06 : -0.06);
     }
     return rate;
+  }
+
+  function loadForecastCalibration() {
+    try {
+      var raw = localStorage.getItem(FORECAST_CALIBRATION_KEY);
+      if (!raw) return { biasPerMin: 0, corrScale: 1, samples: 0 };
+      var parsed = JSON.parse(raw);
+      return {
+        biasPerMin: Number.isFinite(parsed.biasPerMin) ? parsed.biasPerMin : 0,
+        corrScale: Number.isFinite(parsed.corrScale) ? parsed.corrScale : 1,
+        samples: Number.isFinite(parsed.samples) ? parsed.samples : 0
+      };
+    } catch (_err) {
+      return { biasPerMin: 0, corrScale: 1, samples: 0 };
+    }
+  }
+
+  function saveForecastCalibration(data) {
+    try { localStorage.setItem(FORECAST_CALIBRATION_KEY, JSON.stringify(data)); } catch (_err) {}
+  }
+
+  function calibrateFromHistory(readings) {
+    if (!readings || readings.length < 200) return;
+    var points = readings.slice().sort(function (a, b) { return readingTime(a) - readingTime(b); });
+    var start = Math.max(0, points.length - 1200);
+    var horizons = [10, 15, 20, 30];
+    var biasErrSum = 0;
+    var biasWeight = 0;
+    var corrScaleEstimates = [];
+
+    for (var i = start; i < points.length; i++) {
+      var anchor = points[i];
+      var anchorTime = readingTime(anchor);
+      if (!Number.isFinite(anchorTime)) continue;
+      var contextDesc = points.slice(0, i + 1).reverse();
+      var rows = calculateRows(contextDesc, anchor);
+      var rate = getForecastRateMmol(rows);
+      if (!Number.isFinite(rate)) continue;
+      var signal = detectPeakDropSignal(contextDesc);
+      var corrObj = computePatternCorrection(contextDesc, signal);
+      var corr = corrObj ? corrObj.correction : 0;
+      var base = mmol(Number(anchor.sgv));
+      if (!Number.isFinite(base)) continue;
+
+      horizons.forEach(function (h) {
+        var target = points.find(function (p) {
+          var t = readingTime(p);
+          return Number.isFinite(t) && t >= anchorTime + h * 60000 - 45000 && t <= anchorTime + h * 60000 + 45000;
+        });
+        if (!target) return;
+        var actual = mmol(Number(target.sgv));
+        if (!Number.isFinite(actual)) return;
+        var w = Math.min(1, h / 20);
+        var trendOnly = base + rate * h;
+        var predicted = Math.max(1.5, Math.min(33, trendOnly - corr * w));
+        var err = actual - predicted;
+        biasErrSum += err;
+        biasWeight += h;
+
+        if (corr > 0.05) {
+          var implied = (trendOnly - actual) / (corr * w);
+          if (Number.isFinite(implied) && implied >= 0 && implied <= 2.5) corrScaleEstimates.push(implied);
+        }
+      });
+    }
+
+    if (biasWeight <= 0) return;
+    var biasPerMin = (biasErrSum / biasWeight);
+    var corrScale = 1;
+    if (corrScaleEstimates.length >= 20) {
+      corrScaleEstimates.sort(function (a, b) { return a - b; });
+      corrScale = corrScaleEstimates[Math.floor(corrScaleEstimates.length / 2)];
+    }
+    saveForecastCalibration({
+      biasPerMin: Math.max(-0.03, Math.min(0.03, biasPerMin)),
+      corrScale: Math.max(0.6, Math.min(1.6, corrScale)),
+      samples: biasWeight
+    });
   }
 
   function calculateHypoRisk(readings, rows) {
@@ -381,14 +460,16 @@
     var rate = Number.isFinite(blendedRate) ? blendedRate : (primaryRate ? primaryRate.rateMmol : NaN);
     if (!Number.isFinite(rate)) return '';
     var corr = currentPatternCorrection ? currentPatternCorrection.correction : 0;
+    var calib = loadForecastCalibration();
     var horizons = [10, 15, 20, 30];
     var prev = null;
     var parts = horizons.map(function (minutes) {
       // Apply pattern correction progressively by horizon:
       // conservative at 10m, full effect by 20m+.
       var corrWeight = Math.min(1, minutes / 20);
+      var effectiveCorr = corr * calib.corrScale;
       var raw = baseMmol + rate * minutes;
-      var adjusted = raw - (corr * corrWeight);
+      var adjusted = raw - (effectiveCorr * corrWeight) + calib.biasPerMin * minutes;
       adjusted = Math.max(1.5, Math.min(33, adjusted));
 
       // Keep projections monotonic in trend direction to avoid impossible ordering.
@@ -1373,6 +1454,7 @@
         var readings = sortedReadings(entries);
         currentReadings = readings;
         chartReadingsAsc = readings.slice().reverse();
+        calibrateFromHistory(readings);
         var anchorEntry = null;
         if (getViewMode() === 'history' && selectedReadingTime !== null) {
           anchorEntry = readings.find(function (entry) {
@@ -1391,7 +1473,15 @@
         var peakSignal = detectPeakDropSignal(readings);
         currentPatternCorrection = computePatternCorrection(readings, peakSignal);
         if (peakSignal && currentHypoRisk) {
-          if (peakSignal.severity === 'urgent') {
+          var trendRate = getForecastRateMmol(rows);
+          if (!Number.isFinite(trendRate)) {
+            var fallbackPrimary = getPrimaryRate(rows);
+            trendRate = fallbackPrimary ? fallbackPrimary.rateMmol : 0;
+          }
+          var nowMmol = mmol(Number((anchorEntry || readings[0]).sgv));
+          // Never escalate to URGENT from peak pattern when trend is rising/flat.
+          var canEscalateUrgent = Number.isFinite(trendRate) && trendRate < -0.01 && Number.isFinite(nowMmol) && nowMmol <= 5.2;
+          if (peakSignal.severity === 'urgent' && canEscalateUrgent) {
             currentHypoRisk.css = 'urgent';
             currentHypoRisk.title = 'HYPO URGENT';
           } else if (peakSignal.severity === 'high' && currentHypoRisk.css !== 'urgent') {

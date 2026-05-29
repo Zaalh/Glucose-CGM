@@ -30,6 +30,30 @@ function evaluateRisk(input){
   var risk = score>=7 ? 'urgent' : score>=5 ? 'high' : score>=3 ? 'watch' : 'low';
   return {score:score,risk:risk,reasons:reasons};
 }
+function blendRate(rate5m, rate10m, rate15m){
+  var r5 = Number.isFinite(rate5m) ? rate5m : null;
+  var r10 = Number.isFinite(rate10m) ? rate10m : null;
+  var r15 = Number.isFinite(rate15m) ? rate15m : null;
+  var num = (r5||0)*0.5 + (r10||0)*0.33 + (r15||0)*0.17;
+  var den = (r5===null?0:0.5) + (r10===null?0:0.33) + (r15===null?0:0.17);
+  return den>0 ? num/den : 0;
+}
+function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+function probBelow(value, threshold){
+  var d = threshold - value;
+  var p = 1/(1+Math.exp(-d*2.4));
+  return Math.round(clamp(p,0,1)*1000)/1000;
+}
+function buildForecast(currentMmol, rate5m, rate10m, rate15m){
+  var horizons=[10,15,20,30], out={}, probs={};
+  var rate = blendRate(rate5m, rate10m, rate15m);
+  horizons.forEach(function(h){
+    var v = clamp(currentMmol + rate*h, 1.5, 33);
+    out[String(h)] = Math.round(v*1000)/1000;
+    probs[String(h)] = { lt45: probBelow(v,4.5), lt40: probBelow(v,4.0) };
+  });
+  return { predictedMmol: out, probabilities: probs };
+}
 var timeline = db.entries.find({type:'sgv'},{_id:1,identifier:1,date:1,dateString:1,sgv:1}).sort({date:1}).limit(180).toArray();
 if (!timeline.length) { printjson({ok:false,message:'no entries'}); quit(0); }
 var i = timeline.length-1;
@@ -40,10 +64,12 @@ for (var j=i;j>=0;j--){ if (timeline[j].date < windowStart) break; if (timeline[
 var current=mmol(e), peakM=mmol(peak), drop=peakM-current;
 var dropPct = peakM>0 ? (drop/peakM)*100 : 0;
 var minsSincePeak=(e.date-peak.date)/MS_PER_MIN;
-var risk=evaluateRisk({ currentMmol: current, rate5m: rateOver(timeline,i,5), rate10m: rateOver(timeline,i,10), rate15m: rateOver(timeline,i,15), peakMmol: peakM, minutesSincePeak: minsSincePeak, dropFromPeakMmol: drop, dropFromPeakPercent: dropPct });
+var rate5=rateOver(timeline,i,5), rate10=rateOver(timeline,i,10), rate15=rateOver(timeline,i,15);
+var risk=evaluateRisk({ currentMmol: current, rate5m: rate5, rate10m: rate10, rate15m: rate15, peakMmol: peakM, minutesSincePeak: minsSincePeak, dropFromPeakMmol: drop, dropFromPeakPercent: dropPct });
+var fc=buildForecast(current, rate5, rate10, rate15);
 var exists = db.prediction_snapshots.findOne({ entryId: e._id });
 if (exists) { printjson({ok:true,inserted:false,reason:'exists',entryId:e._id}); quit(0); }
-db.prediction_snapshots.insertOne({ createdAt: e.dateString || new Date(e.date).toISOString(), entryId: e._id, entryIdentifier: e.identifier || null, currentMmol: Math.round(current*1000)/1000, risk: risk.risk, riskScore: risk.score, reasons: risk.reasons, modelVersion: 'rules-v1', outcomeEvaluated: false });
+db.prediction_snapshots.insertOne({ createdAt: e.dateString || new Date(e.date).toISOString(), entryId: e._id, entryIdentifier: e.identifier || null, currentMmol: Math.round(current*1000)/1000, risk: risk.risk, riskScore: risk.score, reasons: risk.reasons, predictedMmol: fc.predictedMmol, probabilities: fc.probabilities, modelVersion: 'rules-v1', outcomeEvaluated: false });
 printjson({ok:true,inserted:true,entryId:e._id,risk:risk.risk,riskScore:risk.score});
 `;
 

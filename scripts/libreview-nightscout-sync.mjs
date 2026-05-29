@@ -93,6 +93,7 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
     .filter((entry) => Number.isFinite(Number(entry.sgv)) && Number.isFinite(Number(entry.date)))
     .sort((a, b) => a.date - b.date)
 
+  const episodes = await loadPatternEpisodes()
   const snapshots = entries.map((entry) => {
     const idx = timeline.findIndex((candidate) => candidate.identifier === entry.identifier)
     if (idx < 0) return null
@@ -124,6 +125,16 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
       dropFromPeakMmol,
       dropFromPeakPercent,
     })
+    const forecast = buildForecast({
+      currentMmol,
+      rate5m,
+      rate10m,
+      rate15m,
+      peakMmol,
+      minutesSincePeak,
+      dropFromPeakMmol,
+      episodes,
+    })
 
     return {
       createdAt: entry.dateString ?? new Date(entry.date).toISOString(),
@@ -132,6 +143,8 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
       risk: risk.risk,
       riskScore: risk.score,
       reasons: risk.reasons,
+      predictedMmol: forecast.predictedMmol,
+      probabilities: forecast.probabilities,
       modelVersion: 'rules-v1',
       outcomeEvaluated: false,
     }
@@ -153,6 +166,8 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
             risk: snapshot.risk,
             riskScore: snapshot.riskScore,
             reasons: snapshot.reasons,
+            predictedMmol: snapshot.predictedMmol,
+            probabilities: snapshot.probabilities,
             modelVersion: snapshot.modelVersion,
             outcomeEvaluated: false,
             updatedAt: new Date().toISOString(),
@@ -169,6 +184,72 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
   } finally {
     if (client) await client.close().catch(() => undefined)
   }
+}
+
+async function loadPatternEpisodes() {
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    const events = await client.db().collection('pattern_events')
+      .find({}, { projection: { startMmol: 1, endMmol: 1, peakMmol: 1, minutesPeakToUnder45: 1, minutesPeakToUnder40: 1 } })
+      .limit(2000)
+      .toArray()
+    return events
+  } catch {
+    return []
+  } finally {
+    if (client) await client.close().catch(() => undefined)
+  }
+}
+
+function buildForecast(input) {
+  const horizons = [10, 15, 20, 30]
+  const baseRate = blendRate(input.rate5m, input.rate10m, input.rate15m)
+  const corr = patternCorrection(input, input.episodes || [])
+  const predictedMmol = {}
+  const probabilities = {}
+  for (const h of horizons) {
+    const w = Math.min(1, h / 20)
+    const v = clamp(input.currentMmol + baseRate * h - corr * w, 1.5, 33)
+    predictedMmol[String(h)] = round(v, 3)
+    probabilities[String(h)] = {
+      lt45: probBelow(v, 4.5),
+      lt40: probBelow(v, 4.0),
+    }
+  }
+  return { predictedMmol, probabilities }
+}
+
+function blendRate(rate5m, rate10m, rate15m) {
+  const r5 = Number.isFinite(rate5m) ? rate5m : null
+  const r10 = Number.isFinite(rate10m) ? rate10m : null
+  const r15 = Number.isFinite(rate15m) ? rate15m : null
+  const num = (r5 ?? 0) * 0.5 + (r10 ?? 0) * 0.33 + (r15 ?? 0) * 0.17
+  const den = (r5 === null ? 0 : 0.5) + (r10 === null ? 0 : 0.33) + (r15 === null ? 0 : 0.17)
+  return den > 0 ? num / den : 0
+}
+
+function patternCorrection(input, episodes) {
+  if (!episodes.length) return 0
+  const similar = episodes
+    .filter((e) => Number.isFinite(e.peakMmol) && Number.isFinite(e.startMmol))
+    .filter((e) => Math.abs(e.peakMmol - input.peakMmol) <= 1.2)
+    .map((e) => Number(e.peakMmol) - Number(e.endMmol))
+    .filter((x) => Number.isFinite(x) && x > 0)
+  if (similar.length < 3) return 0
+  similar.sort((a, b) => a - b)
+  return Math.max(0, similar[Math.floor(similar.length / 2)] * 0.18)
+}
+
+function probBelow(value, threshold) {
+  const d = threshold - value
+  const p = 1 / (1 + Math.exp(-d * 2.4))
+  return round(clamp(p, 0, 1), 3)
+}
+
+function clamp(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, v))
 }
 
 function calcRateFromTimeline(timeline, latestIndex, minutesBack) {
