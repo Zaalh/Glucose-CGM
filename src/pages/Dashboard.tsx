@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import type { GlucoseReading } from '../types'
 import { getGlucoseStatus, trendArrow } from '../types'
@@ -15,6 +15,7 @@ export default function Dashboard() {
   const [range, setRange] = useState<number>(6)
   const [syncing, setSyncing] = useState(false)
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
+  const hasLoadedOnceRef = useRef(false)
 
   useEffect(() => {
     fetchReadings()
@@ -43,7 +44,7 @@ export default function Dashboard() {
   }
 
   async function fetchReadings() {
-    setLoading(true)
+    if (!hasLoadedOnceRef.current) setLoading(true)
     const since = new Date(Date.now() - range * 60 * 60 * 1000).toISOString()
     const { data, error } = await supabase
       .from('glucose_readings')
@@ -51,7 +52,10 @@ export default function Dashboard() {
       .order('timestamp', { ascending: true })
     console.log('fetchReadings', { since, count: data?.length, error })
     setReadings((data as GlucoseReading[]) ?? [])
-    setLoading(false)
+    if (!hasLoadedOnceRef.current) {
+      setLoading(false)
+      hasLoadedOnceRef.current = true
+    }
   }
 
   const latest = readings.at(-1) ?? null

@@ -57,9 +57,10 @@ export default function Nightscout() {
   const [predictedIn20, setPredictedIn20] = useState<number | null>(null)
   const [predConfidence, setPredConfidence] = useState<'high' | 'medium' | 'low'>('low')
   const lastAlarmKey = useRef<string | null>(null)
+  const hasLoadedOnceRef = useRef(false)
 
   const fetchReadings = useCallback(async () => {
-    setLoading(true)
+    if (!hasLoadedOnceRef.current) setLoading(true)
     const { data: latestRow } = await supabase
       .from('glucose_readings')
       .select('timestamp')
@@ -80,7 +81,10 @@ export default function Nightscout() {
     }
     setReadings(readings)
     setLastUpdated(new Date())
-    setLoading(false)
+    if (!hasLoadedOnceRef.current) {
+      setLoading(false)
+      hasLoadedOnceRef.current = true
+    }
     setCountdown(60)
 
     // Compute personalized rates from full history (background learning)
