@@ -1587,11 +1587,13 @@
         scheduleEstimatedGlucoseLine(0);
         window.setTimeout(scheduleEstimatedGlucoseLine, 500);
         window.setTimeout(scheduleEstimatedGlucoseLine, 1500);
+        if (window.console && window.console.log) window.console.log('[CGM Overlay] Refreshed at ' + new Date().toLocaleTimeString());
       })
-      .catch(function () {
+      .catch(function (err) {
         renderStatsPanel(null);
         render([]);
         renderEstimatedGlucoseLine();
+        if (window.console && window.console.error) window.console.error('[CGM Overlay] Refresh error:', err);
       });
   }
 
