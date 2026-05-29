@@ -422,6 +422,199 @@ Backtest-uitvoer:
 - Analysecollections kunnen opnieuw worden opgebouwd uit `entries`.
 - Bij twijfel moet de app zeggen: "sensorwaarde bevestigen bij klachten".
 
+## AI-laag
+
+Later kan er een AI of LLM aan gekoppeld worden. Die AI moet niet de primaire realtime alarmbeslissing nemen. De live waarschuwing moet snel, voorspelbaar en lokaal blijven. De AI krijgt een andere rol: context begrijpen, verklaren, vragen stellen, weekpatronen vinden en het model helpen beter te worden.
+
+Rolverdeling:
+
+```text
+CGM entries
+  -> feature extractor
+  -> pattern_events + prediction_snapshots
+  -> deterministisch risicomodel voor live alarm
+  -> AI-laag voor uitleg, context, feedback en patroonanalyse
+```
+
+De AI mag lezen:
+
+- `entries`: alleen als samengevatte vensters, niet standaard alle ruwe punten.
+- `pattern_events`.
+- `prediction_snapshots`.
+- `model_state`.
+- `user_feedback`.
+- Dag- en weekstatistieken.
+
+De AI mag schrijven:
+
+- `ai_observations`: hypotheses en samenvattingen.
+- `ai_questions`: vragen aan jou, bijvoorbeeld "Was dit na eten?"
+- `user_feedback`: alleen na jouw antwoord.
+- Geen directe alarmdrempels zonder evaluatie.
+
+### Collection: `ai_observations`
+
+Velden:
+
+- `createdAt`.
+- `scope`: `episode`, `day`, `week`, `model_review`.
+- `relatedEventIds`.
+- `summary`.
+- `hypothesis`.
+- `confidence`: `low`, `medium`, `high`.
+- `needsUserConfirmation`: boolean.
+- `acceptedByUser`: boolean of null.
+
+Voorbeeld:
+
+```json
+{
+  "scope": "episode",
+  "summary": "Snelle post-hyper drop na vermoedelijke maaltijd.",
+  "hypothesis": "Deze curve lijkt op eerdere snelle reactieve hypo's binnen 20-25 minuten na piek.",
+  "confidence": "medium",
+  "needsUserConfirmation": true
+}
+```
+
+### Collection: `ai_questions`
+
+Velden:
+
+- `createdAt`.
+- `question`.
+- `reason`.
+- `relatedEntryId`.
+- `relatedEventId`.
+- `answeredAt`.
+- `answer`.
+
+Voorbeelden:
+
+- "Had je net gegeten?"
+- "Was dit snelle koolhydraten?"
+- "Voelde je hypo-klachten?"
+- "Heb je dit bevestigd met vingerprik?"
+
+## Geavanceerde meal-state machine
+
+De app moet voorbereid zijn zodra hij merkt dat je waarschijnlijk hebt gegeten. Dat betekent: niet wachten tot je al laag bent, maar een interne toestand activeren.
+
+States:
+
+- `idle`: geen bijzonder patroon.
+- `possible_meal`: glucose stijgt sneller dan normaal.
+- `meal_spike`: duidelijke maaltijdachtige piek.
+- `peak_watch`: piek is bereikt of lijkt dichtbij.
+- `drop_watch`: daling na piek begint.
+- `fast_drop_risk`: daling lijkt op jouw snelle hypo-patroon.
+- `near_hypo`: onder 4.5 of snel richting 4.5.
+- `hypo`: onder 4.0.
+- `recovery`: waarde stijgt weer na hypo.
+
+Overgangen:
+
+```text
+idle
+  -> possible_meal       bij stijging over 5-15 min
+  -> meal_spike          bij piek boven 8.5/9/10
+  -> peak_watch          bij afvlakkende stijging
+  -> drop_watch          bij eerste negatieve rate na piek
+  -> fast_drop_risk      bij snelle daling die lijkt op eerdere crashes
+  -> near_hypo           bij <4.5 of voorspeld <4.5
+  -> hypo                bij <4.0
+  -> recovery            bij stijging na laag
+```
+
+Wat "voorbereid zijn" betekent:
+
+- Kortere predictiehorizon activeren: 10, 15, 20, 30 min.
+- Vaker evalueren of de sync nieuwe data heeft.
+- Strengere alarmregels gebruiken tijdens `peak_watch` en `drop_watch`.
+- Vergelijkbare historische episodes zoeken.
+- UI alvast tonen: "Maaltijdpiek gezien, let op daling".
+- Eventueel zachtere pre-alert voordat het echte alarm nodig is.
+
+Voor jouw snelle patroon is vooral deze overgang belangrijk:
+
+```text
+meal_spike -> peak_watch -> drop_watch -> fast_drop_risk
+```
+
+Als de piek boven 10 was en de daling binnen 5-10 minuten hard inzet, moet de app al in `fast_drop_risk` komen. Hij moet dan niet wachten tot je onder 5.0 bent.
+
+## Wat kan dit systeem uiteindelijk allemaal?
+
+### Realtime waarschuwingen
+
+- Vroege waarschuwing bij snelle post-meal drop.
+- Apart alarm voor `near_hypo` onder 4.5.
+- Urgent alarm als onder 4.0 waarschijnlijk wordt.
+- Alarmen met reden, niet alleen een getal.
+- Snooze die slim blijft: snooze dempt geluid, maar blijft visueel risico tonen.
+
+### Persoonlijke patroonherkenning
+
+- Herkennen welke piekhoogtes bij jou gevaarlijk zijn.
+- Leren of 8.5, 9.0 of 10.0 de beste startdrempel is.
+- Leren welke dalingssnelheid bij jou meestal fout gaat.
+- Onderscheid maken tussen snelle en vertraagde reactieve hypo's.
+- Herkennen of bepaalde tijdstippen riskanter zijn.
+
+### Maaltijdcontext
+
+- Automatisch vermoedelijke maaltijd detecteren.
+- Handmatig "ik eet nu" toevoegen.
+- Later maaltijdtype leren: snelle koolhydraten, gemengd, vet/proteine.
+- Leren of bepaalde maaltijdtypes een latere of snellere crash geven.
+- Vragen stellen als context ontbreekt.
+
+### Zelfevaluatie
+
+- Elke voorspelling achteraf beoordelen.
+- Missers opslaan.
+- Valse alarmen opslaan.
+- Lead time meten.
+- Modelversies vergelijken.
+- Alleen verbeteringen activeren die backtests beter maken.
+
+### AI-assistent
+
+- Dagrapport maken.
+- Weekrapport maken.
+- Uitleggen waarom een alarm kwam.
+- Vragen welke context ontbrak.
+- Voorbereid overzicht maken voor arts of dietist.
+- Hypotheses maken zoals: "snelle piek + snelle daling na lunch geeft hoogste risico".
+
+### Simulatie
+
+- Historische dag opnieuw afspelen.
+- Nieuwe drempels testen zonder live risico.
+- Vergelijken: oude modelversie vs nieuwe modelversie.
+- Uitzoeken hoeveel minuten eerder een alarm had kunnen komen.
+
+## Minimale geavanceerde versie
+
+De eerste serieuze versie moet minimaal dit kunnen:
+
+1. Live meal-state bepalen.
+2. Snelle post-hyper drop herkennen.
+3. Voorspelling voor 10, 15, 20 en 30 minuten maken.
+4. Prediction snapshot opslaan.
+5. Snapshot later evalueren.
+6. Events opslaan in `pattern_events`.
+7. Feedbackknoppen opslaan.
+8. Dagelijkse model-metrics berekenen.
+9. Risico uitleggen in normale taal.
+
+Daarna pas:
+
+10. AI-vragen en AI-samenvattingen.
+11. Persoonlijk getraind model.
+12. Meal-type leren.
+13. Weekrapporten en arts/export-weergave.
+
 ## App-ontwerp
 
 Voeg een kleine "Hypo-risico" kaart toe:
