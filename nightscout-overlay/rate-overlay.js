@@ -20,6 +20,12 @@
   var currentReadings = [];
   var selectedReadingTime = null;
   var currentHypoRisk = null;
+  var currentPatternCorrection = null;
+  var PEAK_DROP_THRESHOLDS = {
+    watch: { minDrop: 1.4, minRate: 0.05, maxMinutes: 75 },
+    high: { minDrop: 1.9, minRate: 0.07, maxMinutes: 60 },
+    urgent: { minDrop: 2.6, minRate: 0.09, maxMinutes: 45 }
+  };
   var chartReadingsAsc = [];
   var estimateRenderTimer = null;
   var chartObserver = null;
@@ -64,10 +70,10 @@
   }
 
   function trendArrow(rateMgdlPerMin) {
-    if (rateMgdlPerMin <= -3) return '⇊';
+    if (rateMgdlPerMin <= -3) return '↓↓';
     if (rateMgdlPerMin <= -1) return '↓';
     if (rateMgdlPerMin < -0.5) return '↘';
-    if (rateMgdlPerMin >= 3) return '⇈';
+    if (rateMgdlPerMin >= 3) return '↑↑';
     if (rateMgdlPerMin >= 1) return '↑';
     if (rateMgdlPerMin > 0.5) return '↗';
     return '→';
@@ -166,13 +172,42 @@
     })[0] || null;
   }
 
+  function getForecastRateMmol(rows) {
+    var candidates = rows.filter(function (row) {
+      return row && !row.missing && Number.isFinite(row.rateMmol) && row.actualMinutes <= 20;
+    });
+    if (!candidates.length) return null;
+
+    var weighted = candidates.map(function (row) {
+      var w;
+      if (row.actualMinutes <= 5) w = 0.45;
+      else if (row.actualMinutes <= 10) w = 0.30;
+      else if (row.actualMinutes <= 15) w = 0.17;
+      else w = 0.08;
+      return { rate: row.rateMmol, weight: w };
+    });
+
+    var totalW = weighted.reduce(function (s, x) { return s + x.weight; }, 0);
+    if (totalW <= 0) return null;
+    var rate = weighted.reduce(function (s, x) { return s + x.rate * x.weight; }, 0) / totalW;
+
+    // Guardrail against single-window spikes.
+    var sorted = candidates.map(function (r) { return r.rateMmol; }).sort(function (a, b) { return a - b; });
+    var median = sorted[Math.floor(sorted.length / 2)];
+    if (Math.abs(rate - median) > 0.06) {
+      rate = median + (rate > median ? 0.06 : -0.06);
+    }
+    return rate;
+  }
+
   function calculateHypoRisk(readings, rows) {
     var latest = readings[0];
     if (!latest || !Number.isFinite(Number(latest.sgv))) return null;
 
     var valueMmol = mmol(Number(latest.sgv));
+    var blendedRate = getForecastRateMmol(rows);
     var primaryRate = getPrimaryRate(rows);
-    var rateMmol = primaryRate ? primaryRate.rateMmol : 0;
+    var rateMmol = Number.isFinite(blendedRate) ? blendedRate : (primaryRate ? primaryRate.rateMmol : 0);
     var minutesToHypo = rateMmol < -0.01 ? (valueMmol - 3.9) / Math.abs(rateMmol) : null;
     var minutesToLow = rateMmol < -0.01 ? (valueMmol - 3.8) / Math.abs(rateMmol) : null;
     var minutesToUrgent = rateMmol < -0.01 ? (valueMmol - 3.0) / Math.abs(rateMmol) : null;
@@ -228,6 +263,179 @@
       detail: valueMmol.toFixed(2) + ' mmol/L',
       rate: rateMmol
     };
+  }
+
+  function detectPeakDropSignal(readings) {
+    if (!readings || readings.length < 2) return null;
+    var latest = readings[0];
+    var latestTime = readingTime(latest);
+    var latestMmol = mmol(Number(latest.sgv));
+    if (!Number.isFinite(latestTime) || !Number.isFinite(latestMmol)) return null;
+
+    var recent = readings.filter(function (entry) {
+      var time = readingTime(entry);
+      var value = mmol(Number(entry.sgv));
+      return Number.isFinite(time) && Number.isFinite(value) && time <= latestTime && time >= latestTime - 120 * 60000;
+    });
+    if (!recent.length) return null;
+
+    var peak = recent.reduce(function (best, entry) {
+      return Number(entry.sgv) > Number(best.sgv) ? entry : best;
+    }, recent[0]);
+    var peakMmol = mmol(Number(peak.sgv));
+    var peakTime = readingTime(peak);
+    if (!Number.isFinite(peakMmol) || !Number.isFinite(peakTime) || peakTime >= latestTime) return null;
+
+    var drop = peakMmol - latestMmol;
+    var minutes = (latestTime - peakTime) / 60000;
+    if (!Number.isFinite(drop) || !Number.isFinite(minutes) || minutes <= 0) return null;
+    var dropRate = drop / minutes;
+
+    var tier = peakMmol >= 10 ? '10+' : peakMmol >= 9 ? '9+' : peakMmol >= 8.5 ? '8.5+' : null;
+    if (!tier) return null;
+
+    var severity = null;
+    if ((tier === '10+' && drop >= PEAK_DROP_THRESHOLDS.urgent.minDrop && minutes <= PEAK_DROP_THRESHOLDS.urgent.maxMinutes) || dropRate >= PEAK_DROP_THRESHOLDS.urgent.minRate || (latestMmol <= 5.0 && drop >= 2.4)) {
+      severity = 'urgent';
+    } else if ((tier === '10+' && drop >= PEAK_DROP_THRESHOLDS.high.minDrop && minutes <= PEAK_DROP_THRESHOLDS.high.maxMinutes) || (tier === '9+' && drop >= 1.8 && minutes <= PEAK_DROP_THRESHOLDS.high.maxMinutes) || dropRate >= PEAK_DROP_THRESHOLDS.high.minRate) {
+      severity = 'high';
+    } else if ((tier === '8.5+' && drop >= PEAK_DROP_THRESHOLDS.watch.minDrop && minutes <= PEAK_DROP_THRESHOLDS.watch.maxMinutes) || dropRate >= PEAK_DROP_THRESHOLDS.watch.minRate) {
+      severity = 'watch';
+    }
+    if (!severity) return null;
+
+    return {
+      tier: tier,
+      peak: peakMmol,
+      current: latestMmol,
+      drop: drop,
+      minutes: minutes,
+      dropRate: dropRate,
+      severity: severity
+    };
+  }
+
+  function computePatternCorrection(readings, signal) {
+    if (!readings || !signal) return null;
+    var latestTime = readingTime(readings[0]);
+    var episodes = [];
+
+    readings.forEach(function (entry, index) {
+      var peakValue = mmol(Number(entry.sgv));
+      var peakTime = readingTime(entry);
+      if (!Number.isFinite(peakValue) || !Number.isFinite(peakTime)) return;
+      if (peakTime >= latestTime - 30 * 60000) return;
+      if (peakValue < 8.5) return;
+
+      var ageMin = (latestTime - peakTime) / 60000;
+      if (ageMin > 12 * 60) return;
+      var tier = peakValue >= 10 ? '10+' : peakValue >= 9 ? '9+' : '8.5+';
+      if (tier !== signal.tier) return;
+
+      var lookAhead = readings.slice(0, index).filter(function (candidate) {
+        var t = readingTime(candidate);
+        return Number.isFinite(t) && t > peakTime && t <= peakTime + 30 * 60000;
+      });
+      if (!lookAhead.length) return;
+
+      var trough = lookAhead.reduce(function (minEntry, candidate) {
+        return Number(candidate.sgv) < Number(minEntry.sgv) ? candidate : minEntry;
+      }, lookAhead[0]);
+      var troughMmol = mmol(Number(trough.sgv));
+      if (!Number.isFinite(troughMmol)) return;
+      episodes.push(peakValue - troughMmol);
+    });
+
+    if (episodes.length < 2) return null;
+    episodes.sort(function (a, b) { return a - b; });
+    var medianDrop = episodes[Math.floor(episodes.length / 2)];
+    var correction = Math.max(0, medianDrop * 0.18);
+    return {
+      episodes: episodes.length,
+      medianDrop: medianDrop,
+      correction: correction
+    };
+  }
+
+  function formatEtaValue(baseMmol, rateMmol, minutes) {
+    if (!Number.isFinite(baseMmol) || !Number.isFinite(rateMmol)) return '--';
+    var projected = Math.max(1.5, Math.min(33, baseMmol + rateMmol * minutes));
+    return projected.toFixed(1);
+  }
+
+  function etaArrow(baseMmol, rateMmol, minutes) {
+    if (!Number.isFinite(baseMmol) || !Number.isFinite(rateMmol)) return '→';
+    var projected = baseMmol + rateMmol * minutes;
+    var delta = projected - baseMmol;
+    if (delta >= 0.35) return '↑';
+    if (delta <= -0.35) return '↓';
+    return '→';
+  }
+
+  function horizonPredictionText() {
+    if (!latestReading || !currentRows || !currentRows.length) return '';
+    var baseMmol = mmol(Number(latestReading.sgv));
+    if (!Number.isFinite(baseMmol)) return '';
+    var blendedRate = getForecastRateMmol(currentRows);
+    var primaryRate = getPrimaryRate(currentRows);
+    var rate = Number.isFinite(blendedRate) ? blendedRate : (primaryRate ? primaryRate.rateMmol : NaN);
+    if (!Number.isFinite(rate)) return '';
+    var corr = currentPatternCorrection ? currentPatternCorrection.correction : 0;
+    var horizons = [10, 15, 20, 30];
+    var prev = null;
+    var parts = horizons.map(function (minutes) {
+      // Apply pattern correction progressively by horizon:
+      // conservative at 10m, full effect by 20m+.
+      var corrWeight = Math.min(1, minutes / 20);
+      var raw = baseMmol + rate * minutes;
+      var adjusted = raw - (corr * corrWeight);
+      adjusted = Math.max(1.5, Math.min(33, adjusted));
+
+      // Keep projections monotonic in trend direction to avoid impossible ordering.
+      if (prev !== null) {
+        if (rate < 0 && adjusted > prev) adjusted = prev;
+        if (rate > 0 && adjusted < prev) adjusted = prev;
+      }
+      prev = adjusted;
+
+      return minutes + 'm ' + etaArrow(baseMmol, rate, minutes) + adjusted.toFixed(1);
+    });
+    return parts.join(' · ');
+  }
+
+  function dropFromPeakText(readings) {
+    if (!readings || readings.length < 2) return '';
+    var latest = readings[0];
+    var latestTime = readingTime(latest);
+    var latestMmol = mmol(Number(latest.sgv));
+    if (!Number.isFinite(latestTime) || !Number.isFinite(latestMmol)) return '';
+
+    var windowMs = 120 * 60000;
+    var candidates = readings.filter(function (entry) {
+      var time = readingTime(entry);
+      var value = mmol(Number(entry.sgv));
+      return Number.isFinite(time) && Number.isFinite(value) && time <= latestTime && time >= latestTime - windowMs;
+    });
+    if (!candidates.length) return '';
+
+    var peak = candidates.reduce(function (best, entry) {
+      return Number(entry.sgv) > Number(best.sgv) ? entry : best;
+    }, candidates[0]);
+    var peakMmol = mmol(Number(peak.sgv));
+    var peakTime = readingTime(peak);
+    if (!Number.isFinite(peakMmol) || !Number.isFinite(peakTime) || peakTime >= latestTime) return '';
+
+    var drop = peakMmol - latestMmol;
+    var minutes = (latestTime - peakTime) / 60000;
+    if (!Number.isFinite(drop) || !Number.isFinite(minutes) || minutes <= 0) return '';
+
+    var dropRate = drop / minutes;
+    var meaningfulPeak = peakMmol >= 8.5;
+    var meaningfulDrop = drop >= 1.5 || dropRate >= 0.06;
+    if (!meaningfulPeak || !meaningfulDrop) return '';
+
+    return 'HYPO patroon: piek ' + peakMmol.toFixed(1) + ' → nu ' + latestMmol.toFixed(1) +
+      ' (Δ-' + drop.toFixed(1) + ' in ' + Math.round(minutes) + 'm, ' + dropRate.toFixed(3) + '/min)';
   }
 
   function calculateStats(readings) {
@@ -340,13 +548,15 @@
       '#cgm-rate-overlay.all .rate-card.primary .rate-main{font-size:11px;line-height:1.03}',
       '#cgm-rate-overlay.all .rate-sub{font-size:6px}',
       '#cgm-rate-overlay.all .rate-arrow{right:2px;font-size:12px}',
-      '#cgm-hypo-alert{position:absolute!important;z-index:10000!important;left:50%;transform:translateX(-50%);top:174px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;width:max-content;max-width:min(560px,86vw);min-width:210px;border:1px solid rgba(255,255,255,.24);border-radius:5px;padding:5px 10px;font-family:Arial,Helvetica,sans-serif;box-sizing:border-box;box-shadow:0 1px 8px rgba(0,0,0,.5)}',
+      '#cgm-hypo-alert{position:absolute!important;z-index:10000!important;left:50%;transform:translateX(-50%);top:174px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;width:max-content;max-width:min(700px,90vw);min-width:320px;border:1px solid rgba(255,255,255,.24);border-radius:7px;padding:8px 14px;font-family:Arial,Helvetica,sans-serif;box-sizing:border-box;box-shadow:0 1px 8px rgba(0,0,0,.5)}',
       '#cgm-hypo-alert .hypo-line{display:flex;align-items:center;justify-content:center;gap:10px;white-space:nowrap}',
       '#cgm-hypo-alert .hypo-line.primary{display:flex;flex-direction:column;gap:2px;align-items:center;justify-content:center}',
       '#cgm-hypo-alert .hypo-title{font-size:15px;font-weight:900;line-height:1;text-transform:uppercase;white-space:nowrap}',
       '#cgm-hypo-alert .hypo-detail{font-size:24px;font-weight:900;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
       '#cgm-hypo-alert .hypo-rate{font-family:monospace;font-size:19px;font-weight:900;line-height:1;white-space:nowrap;opacity:.95}',
       '#cgm-hypo-alert .hypo-average{font-family:monospace;font-size:14px;font-weight:900;line-height:1.1;white-space:nowrap;opacity:.95}',
+      '#cgm-hypo-alert .hypo-predict{font-family:monospace;font-size:13px;font-weight:800;line-height:1.15;white-space:nowrap;opacity:.95}',
+      '#cgm-hypo-alert .hypo-drop{font-family:monospace;font-size:12px;font-weight:800;line-height:1.15;white-space:nowrap;opacity:.95}',
       '#cgm-hypo-alert.ok{color:#063b1d;border-color:#4ade80;background:linear-gradient(135deg,#bbf7d0 0%,#4ade80 100%)}',
       '#cgm-hypo-alert.watch{color:#2f1600;border-color:#facc15;background:linear-gradient(135deg,#fff3a3 0%,#fbbf24 100%)}',
       '#cgm-hypo-alert.warning{color:#2f1600;border-color:#f59e0b;background:linear-gradient(135deg,#ffe08a 0%,#fb923c 100%)}',
@@ -368,11 +578,11 @@
       '#cgm-stats-panel .stat-label{display:block;font-size:9px;line-height:1;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
       '#cgm-stats-panel .stat-value{display:block;font-family:monospace;font-size:13px;font-weight:900;line-height:1.15;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
       '#cgm-stats-panel .low .stat-value{color:#fb7185}#cgm-stats-panel .range .stat-value{color:#4ade80}#cgm-stats-panel .high .stat-value{color:#c084fc}',
-      '#cgm-rate-toggle,#cgm-rate-view-toggle{position:absolute!important;z-index:10000!important;border:1px solid rgba(255,255,255,.25);border-radius:5px;background:rgba(0,0,0,.72);color:#ddd;font:700 11px Arial,Helvetica,sans-serif;padding:5px 8px;cursor:pointer}',
+      '#cgm-rate-toggle,#cgm-rate-view-toggle{position:absolute!important;z-index:10003!important;border:1px solid rgba(255,255,255,.25);border-radius:5px;background:rgba(0,0,0,.72);color:#ddd;font:700 11px Arial,Helvetica,sans-serif;padding:5px 8px;cursor:pointer;min-width:64px;text-align:center}',
       '#cgm-rate-toggle{left:50%;transform:translateX(-50%);top:174px}',
       '#cgm-rate-view-toggle{top:174px}',
       '#cgm-rate-toggle:hover,#cgm-rate-view-toggle:hover{background:rgba(30,30,30,.9);color:#fff}',
-      '#cgm-rate-history-nav{position:absolute!important;z-index:10000!important;display:none;align-items:center;gap:6px;border:1px solid rgba(255,255,255,.25);border-radius:5px;background:rgba(0,0,0,.72);padding:3px 6px;color:#ddd;font:700 11px Arial,Helvetica,sans-serif}',
+      '#cgm-rate-history-nav{position:absolute!important;z-index:10003!important;display:none;align-items:center;gap:6px;border:1px solid rgba(255,255,255,.25);border-radius:5px;background:rgba(0,0,0,.72);padding:3px 6px;color:#ddd;font:700 11px Arial,Helvetica,sans-serif;white-space:nowrap}',
       '#cgm-rate-history-nav button{border:1px solid rgba(255,255,255,.25);background:rgba(30,30,30,.6);color:#ddd;border-radius:4px;padding:2px 6px;font:700 11px Arial,Helvetica,sans-serif;cursor:pointer}',
       '#cgm-rate-history-nav button:hover:not(:disabled){background:rgba(60,60,60,.9);color:#fff}',
       '#cgm-rate-history-nav button:disabled{opacity:.45;cursor:not-allowed}',
@@ -395,7 +605,7 @@
       '#cgm-rate-overlay .fast-up{color:#faf5ff;border-color:#a855f7;background:linear-gradient(135deg,#c084fc 0%,#9333ea 100%);text-shadow:0 1px 2px rgba(0,0,0,.42)}',
       '#cgm-rate-overlay .very-fast-up{color:#faf5ff;border-color:#7e22ce;background:linear-gradient(135deg,#9333ea 0%,#581c87 100%);text-shadow:0 1px 2px rgba(0,0,0,.52)}',
       '#cgm-rate-overlay .missing{color:#8a8a8a;border-color:rgba(255,255,255,.14);background:rgba(0,0,0,.28)}',
-      '@media(max-width:700px){#cgm-rate-overlay,#cgm-rate-overlay.classic,#cgm-rate-overlay.all{grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;width:98vw;align-items:start}#cgm-hypo-alert{left:50%;right:auto;transform:translateX(-50%);max-width:94vw;min-width:0;gap:3px;padding:5px 7px}#cgm-hypo-alert .hypo-line{gap:5px}#cgm-hypo-alert .hypo-title{font-size:12px}#cgm-hypo-alert .hypo-detail{font-size:18px}#cgm-hypo-alert .hypo-rate{font-size:14px}#cgm-hypo-alert .hypo-average{font-size:11px}#cgm-rate-overlay .rate-card{padding:3px 16px 3px 5px;min-height:0}#cgm-rate-overlay .rate-window{font-size:8px;line-height:1}#cgm-rate-overlay .rate-main,#cgm-rate-overlay .rate-card.primary .rate-main{font-size:12px;line-height:1.02;margin-top:1px}#cgm-rate-overlay .rate-arrow{right:4px;font-size:14px}#cgm-rate-overlay .rate-sub{font-size:7px;line-height:1.02;margin-top:1px}#cgm-stats-panel{grid-template-columns:repeat(3,minmax(0,1fr));gap:3px;width:98vw;padding:4px}#cgm-stats-panel .stat{padding:3px 4px}#cgm-stats-panel .stat-label{font-size:8px}#cgm-stats-panel .stat-value{font-size:11px}}'
+      '@media(max-width:700px){#cgm-rate-overlay,#cgm-rate-overlay.classic,#cgm-rate-overlay.all{grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;width:98vw;align-items:start}#cgm-hypo-alert{left:50%;right:auto;transform:translateX(-50%);max-width:95vw;min-width:0;gap:2px;padding:5px 7px}#cgm-hypo-alert .hypo-line{gap:4px}#cgm-hypo-alert .hypo-title{font-size:11px}#cgm-hypo-alert .hypo-detail{font-size:16px}#cgm-hypo-alert .hypo-rate{font-size:12px}#cgm-hypo-alert .hypo-average{font-size:10px}#cgm-hypo-alert .hypo-predict{font-size:9px}#cgm-hypo-alert .hypo-drop{font-size:9px}#cgm-rate-toggle,#cgm-rate-view-toggle{min-width:58px;padding:4px 7px;font-size:10px}#cgm-rate-history-nav{font-size:10px;padding:2px 5px}#cgm-rate-overlay .rate-card{padding:3px 16px 3px 5px;min-height:0}#cgm-rate-overlay .rate-window{font-size:8px;line-height:1}#cgm-rate-overlay .rate-main,#cgm-rate-overlay .rate-card.primary .rate-main{font-size:12px;line-height:1.02;margin-top:1px}#cgm-rate-overlay .rate-arrow{right:4px;font-size:14px}#cgm-rate-overlay .rate-sub{font-size:7px;line-height:1.02;margin-top:1px}#cgm-stats-panel{grid-template-columns:repeat(3,minmax(0,1fr));gap:3px;width:98vw;padding:4px}#cgm-stats-panel .stat{padding:3px 4px}#cgm-stats-panel .stat-label{font-size:8px}#cgm-stats-panel .stat-value{font-size:11px}}'
     ].join('');
     document.head.appendChild(style);
   }
@@ -591,7 +801,11 @@
 
   function getMode() {
     var mode = localStorage.getItem(RATE_MODE_KEY);
-    return mode === 'classic' || mode === 'all' || mode === 'off' ? mode : 'compact';
+    if (mode === 'off') {
+      localStorage.setItem(RATE_MODE_KEY, 'compact');
+      return 'compact';
+    }
+    return mode === 'classic' || mode === 'all' ? mode : 'compact';
   }
 
   function getViewMode() {
@@ -659,13 +873,20 @@
 
     alert.style.display = 'flex';
     alert.className = risk.css;
+    var dropLine = dropFromPeakText(currentReadings);
+    var patternLine = currentPatternCorrection
+      ? ('patrooncorr: -' + currentPatternCorrection.correction.toFixed(1) + ' (n=' + currentPatternCorrection.episodes + ')')
+      : '';
     alert.innerHTML = [
       '<div class="hypo-line primary">',
       '<span class="hypo-title">', risk.title, '</span>',
       '<span class="hypo-detail">', risk.detail, '</span>',
       '</div>',
       '<div class="hypo-line"><span class="hypo-rate">', signed(risk.rate, 3), '/min</span></div>',
-      '<div class="hypo-line"><span class="hypo-average">', averageRateText(true), '</span></div>'
+      '<div class="hypo-line"><span class="hypo-average">', averageRateText(true), '</span></div>',
+      '<div class="hypo-line"><span class="hypo-predict">verwacht: ', horizonPredictionText(), ' mmol/L</span></div>',
+      dropLine ? '<div class="hypo-line"><span class="hypo-drop">' + dropLine + '</span></div>' : '',
+      patternLine ? '<div class="hypo-line"><span class="hypo-drop">' + patternLine + '</span></div>' : ''
     ].join('');
   }
 
@@ -680,20 +901,79 @@
 
     var chartTop = chart.getBoundingClientRect().top + window.scrollY;
     var chartBottom = chart.getBoundingClientRect().bottom + window.scrollY;
+    var bgValue = document.querySelector('.currentBG, #currentBG, [data-current-bg]');
+    var clock = document.querySelector('.currentTime, #currentTime, [data-current-time]');
+    var statusLine = document.querySelector('.currentDetails, .currentStatus, #currentDetails');
     var buttonHeight = button.getBoundingClientRect().height || 24;
     var buttonTop = chartTop - buttonHeight - 6;
-    var containerTop = chartTop + 4;
-    button.style.top = Math.max(0, Math.round(buttonTop)) + 'px';
-    viewButton.style.top = Math.max(0, Math.round(buttonTop)) + 'px';
-    var buttonRect = button.getBoundingClientRect();
-    var viewWidth = viewButton.getBoundingClientRect().width || 56;
-    viewButton.style.left = Math.round(window.scrollX + buttonRect.left - viewWidth - 8) + 'px';
+    var containerTop = chartTop + 28;
+    var alertTop = chartTop + 4;
+    if (bgValue && clock) {
+      var bgRect = bgValue.getBoundingClientRect();
+      var clockRect = clock.getBoundingClientRect();
+      var midY = ((bgRect.bottom + clockRect.top) / 2) + window.scrollY;
+      alertTop = midY - 70;
+    } else if (bgValue && statusLine) {
+      var bgOnlyRect = bgValue.getBoundingClientRect();
+      var statusRect = statusLine.getBoundingClientRect();
+      alertTop = ((bgOnlyRect.bottom + statusRect.top) / 2 + window.scrollY) - 70;
+    }
+    var alertRect = alert.getBoundingClientRect();
+    var alertBottom = window.scrollY + alertRect.bottom;
+    buttonTop = alertBottom + 4;
+
+    if (window.innerWidth <= 700) {
+      var mobileLeft = window.scrollX + 8;
+      var mobileWidth = Math.max(260, window.innerWidth - 16);
+      var mobileBaseTop = window.scrollY + 88;
+      alertTop = mobileBaseTop;
+      buttonTop = mobileBaseTop + 124;
+      containerTop = mobileBaseTop + 158;
+
+      alert.style.left = Math.round(mobileLeft + mobileWidth / 2) + 'px';
+      alert.style.transform = 'translateX(-50%)';
+      alert.style.width = Math.round(mobileWidth) + 'px';
+      alert.style.maxWidth = Math.round(mobileWidth) + 'px';
+      alert.style.minWidth = '0';
+
+      button.style.top = Math.max(0, Math.round(buttonTop)) + 'px';
+      button.style.left = Math.max(0, Math.round(mobileLeft)) + 'px';
+      button.style.transform = 'none';
+      viewButton.style.top = Math.max(0, Math.round(buttonTop)) + 'px';
+      viewButton.style.left = Math.max(0, Math.round(mobileLeft + (button.getBoundingClientRect().width || 58) + 6)) + 'px';
+      viewButton.style.transform = 'none';
+
+      container.style.left = Math.round(mobileLeft) + 'px';
+      container.style.transform = 'none';
+      container.style.width = Math.round(mobileWidth) + 'px';
+      statsPanel.style.top = Math.max(0, Math.round(chartBottom + 16)) + 'px';
+    } else {
+      alert.style.width = '';
+      alert.style.maxWidth = '';
+      alert.style.left = '50%';
+      alert.style.transform = 'translateX(-50%)';
+      container.style.left = '50%';
+      container.style.transform = 'translateX(-50%)';
+      container.style.width = '';
+      statsPanel.style.top = Math.max(0, Math.round(chartBottom + 8)) + 'px';
+      button.style.top = Math.max(0, Math.round(buttonTop)) + 'px';
+      button.style.left = Math.round(window.scrollX + window.innerWidth / 2) + 'px';
+      button.style.transform = 'translateX(-50%)';
+      viewButton.style.top = Math.max(0, Math.round(buttonTop)) + 'px';
+      var viewWidth = viewButton.getBoundingClientRect().width || 56;
+      var btnRect = button.getBoundingClientRect();
+      viewButton.style.left = Math.round(window.scrollX + btnRect.left - viewWidth - 8) + 'px';
+      viewButton.style.transform = 'none';
+    }
     var nav = ensureHistoryNav();
+    var buttonRect = button.getBoundingClientRect();
     nav.style.top = Math.max(0, Math.round(buttonTop)) + 'px';
     nav.style.left = Math.round(window.scrollX + buttonRect.right + 8) + 'px';
-    alert.style.top = '8px';
+    alert.style.top = Math.max(0, Math.round(alertTop)) + 'px';
     container.style.top = Math.max(0, Math.round(containerTop)) + 'px';
-    statsPanel.style.top = Math.max(0, Math.round(chartBottom + 8)) + 'px';
+    if (window.innerWidth > 700) {
+      statsPanel.style.top = Math.max(0, Math.round(chartBottom + 8)) + 'px';
+    }
   }
 
   function renderStatsPanel(stats) {
@@ -1108,6 +1388,20 @@
         latestReading = readings[0] || null;
         renderCurrentGlucose(anchorEntry || readings[0]);
         currentHypoRisk = calculateHypoRisk(readings, rows);
+        var peakSignal = detectPeakDropSignal(readings);
+        currentPatternCorrection = computePatternCorrection(readings, peakSignal);
+        if (peakSignal && currentHypoRisk) {
+          if (peakSignal.severity === 'urgent') {
+            currentHypoRisk.css = 'urgent';
+            currentHypoRisk.title = 'HYPO URGENT';
+          } else if (peakSignal.severity === 'high' && currentHypoRisk.css !== 'urgent') {
+            currentHypoRisk.css = 'warning';
+            currentHypoRisk.title = currentHypoRisk.title === 'HYPO OK' ? 'HYPO RISICO' : currentHypoRisk.title;
+          } else if (peakSignal.severity === 'watch' && currentHypoRisk.css === 'ok') {
+            currentHypoRisk.css = 'watch';
+            currentHypoRisk.title = 'HYPO LET OP';
+          }
+        }
         renderStatsPanel(calculateStats(readings));
         render(rows);
         observeChartChanges();
