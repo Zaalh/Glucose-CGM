@@ -23,6 +23,7 @@
   var currentHypoRisk = null;
   var currentPatternCorrection = null;
   var FORECAST_CALIBRATION_KEY = 'cgm-forecast-calibration-v1';
+  var refreshTimer = null;
   var PEAK_DROP_THRESHOLDS = {
     watch: { minDrop: 1.4, minRate: 0.05, maxMinutes: 75 },
     high: { minDrop: 1.9, minRate: 0.07, maxMinutes: 60 },
@@ -1430,6 +1431,7 @@
     chartObserver = new MutationObserver(function (mutations) {
       if (isOnlyEstimateLayerMutation(mutations)) return;
       scheduleEstimatedGlucoseLine();
+      scheduleRefresh(1500);
     });
     chartObserver.observe(chart, {
       childList: true,
@@ -1525,6 +1527,7 @@
     var observer = new MutationObserver(function () {
       if (updatingCurrentGlucose) return;
       renderCurrentGlucose(latestReading);
+      scheduleRefresh(1500);
     });
 
     observer.observe(document.body, {
@@ -1532,6 +1535,14 @@
       characterData: true,
       subtree: true
     });
+  }
+
+  function scheduleRefresh(delay) {
+    if (refreshTimer) window.clearTimeout(refreshTimer);
+    refreshTimer = window.setTimeout(function () {
+      refreshTimer = null;
+      refresh();
+    }, delay || 1000);
   }
 
   function overlayServiceUrl(path) {
