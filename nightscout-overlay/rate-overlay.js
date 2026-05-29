@@ -2,10 +2,11 @@
   'use strict';
 
   var MGDL_PER_MMOL = 18.0182;
-  var WINDOWS_MINUTES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 20, 30, 45, 60, 90, 120];
+  var WINDOWS_MINUTES = Array.from({ length: 60 }, function (_, index) { return index + 1; }).concat([90, 120]);
   var MAX_BASELINE_DIFF_MS = 45000;
   var POLL_MS = 30000;
   var COMPACT_WINDOWS_MINUTES = [1, 2, 3, 4, 5, 10, 15, 30];
+  var CLASSIC_WINDOWS_MINUTES = [1, 2, 3, 4, 5, 10, 15, 20, 30, 45, 60, 90, 120];
   var RATE_MODE_KEY = 'cgm-rate-overlay-mode';
   var SOUND_OFF_KEY = 'cgm-nightscout-sound-off';
   var latestReading = null;
@@ -214,7 +215,8 @@
     style.id = 'cgm-rate-overlay-style';
     style.textContent = [
       '#cgm-rate-overlay{position:absolute!important;z-index:9999!important;top:174px;left:50%;transform:translateX(-50%);display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:6px;width:min(98vw,860px);font-family:Arial,Helvetica,sans-serif;pointer-events:none;align-items:start}',
-      '#cgm-rate-overlay.all{grid-template-columns:repeat(7,minmax(72px,1fr));width:min(98vw,1040px)}',
+      '#cgm-rate-overlay.classic{grid-template-columns:repeat(5,minmax(110px,1fr));width:min(98vw,900px)}',
+      '#cgm-rate-overlay.all{grid-template-columns:repeat(10,minmax(72px,1fr));width:min(98vw,1160px)}',
       '#cgm-hypo-alert{position:absolute!important;z-index:10000!important;left:50%;transform:translateX(-50%);top:174px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;width:max-content;max-width:min(560px,86vw);min-width:210px;border:1px solid rgba(255,255,255,.24);border-radius:5px;padding:5px 10px;font-family:Arial,Helvetica,sans-serif;box-sizing:border-box;box-shadow:0 1px 8px rgba(0,0,0,.5)}',
       '#cgm-hypo-alert .hypo-line{display:flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap}',
       '#cgm-hypo-alert .hypo-title{font-size:11px;font-weight:900;line-height:1;text-transform:uppercase;white-space:nowrap}',
@@ -353,7 +355,8 @@
     button.id = 'cgm-rate-toggle';
     button.type = 'button';
     button.addEventListener('click', function () {
-      var nextMode = getMode() === 'compact' ? 'all' : getMode() === 'all' ? 'off' : 'compact';
+      var mode = getMode();
+      var nextMode = mode === 'compact' ? 'classic' : mode === 'classic' ? 'all' : mode === 'all' ? 'off' : 'compact';
       localStorage.setItem(RATE_MODE_KEY, nextMode);
       render(currentRows);
     });
@@ -385,11 +388,18 @@
 
   function getMode() {
     var mode = localStorage.getItem(RATE_MODE_KEY);
-    return mode === 'all' || mode === 'off' ? mode : 'compact';
+    return mode === 'classic' || mode === 'all' || mode === 'off' ? mode : 'compact';
   }
 
   function visibleRows(rows) {
     if (getMode() === 'all') return rows;
+    if (getMode() === 'classic') {
+      return rows.filter(function (row) {
+        var minutes = Number.parseInt(row.label, 10);
+        return CLASSIC_WINDOWS_MINUTES.indexOf(minutes) !== -1;
+      });
+    }
+
     return rows.filter(function (row) {
       var minutes = Number.parseInt(row.label, 10);
       return COMPACT_WINDOWS_MINUTES.indexOf(minutes) !== -1;
@@ -399,7 +409,7 @@
   function updateToggleLabel() {
     var button = ensureToggle();
     var mode = getMode();
-    button.textContent = mode === 'compact' ? 'compact' : mode === 'all' ? 'alles' : 'uit';
+    button.textContent = mode === 'compact' ? 'compact' : mode === 'classic' ? 'klassiek' : mode === 'all' ? 'alles' : 'uit';
   }
 
   function renderHypoAlert(risk) {
@@ -454,6 +464,7 @@
     }
 
     container.style.display = 'grid';
+    container.classList.toggle('classic', getMode() === 'classic');
     container.classList.toggle('all', getMode() === 'all');
     rows = visibleRows(rows);
 
