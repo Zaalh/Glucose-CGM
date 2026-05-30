@@ -15,6 +15,7 @@
   var ESTIMATE_GAP_MIN_MS = 150000;
   var ESTIMATE_OPEN_MAX_MS = 1200000;
   var ESTIMATE_PIXEL_GAP_MIN = 3;
+  var MIN_REFRESH_MS = 12000;
   var latestReading = null;
   var updatingCurrentGlucose = false;
   var currentRows = [];
@@ -34,6 +35,10 @@
   var chartObserver = null;
   var observedChart = null;
   var latestDbPrediction = null;
+  var refreshInFlight = false;
+  var pendingRefresh = false;
+  var lastRefreshStartedAt = 0;
+  var lastObservedCurrentText = null;
 
   function mmol(valueMgdl) {
     return valueMgdl / MGDL_PER_MMOL;
@@ -1431,7 +1436,6 @@
     chartObserver = new MutationObserver(function (mutations) {
       if (isOnlyEstimateLayerMutation(mutations)) return;
       scheduleEstimatedGlucoseLine();
-      scheduleRefresh(1500);
     });
     chartObserver.observe(chart, {
       childList: true,
@@ -1523,11 +1527,34 @@
     }, true);
   }
 
+  function isOverlayMutation(mutation) {
+    var target = mutation.target;
+    if (!target || !target.closest) return false;
+    return Boolean(target.closest(
+      '#cgm-rate-overlay, #cgm-hypo-alert, #cgm-rate-toggle, #cgm-rate-view-toggle, #cgm-rate-history-nav, #cgm-stats-panel, #cgm-point-rate-tooltip'
+    ));
+  }
+
+  function isNightscoutLiveMutation(mutation) {
+    var target = mutation.target;
+    if (!target || !target.closest) return false;
+    return Boolean(target.closest(
+      '.currentBG, #currentBG, [data-current-bg], .currentTime, #currentTime, [data-current-time], #chartContainer'
+    ));
+  }
+
   function observeCurrentGlucose() {
-    var observer = new MutationObserver(function () {
+    var observer = new MutationObserver(function (mutations) {
       if (updatingCurrentGlucose) return;
-      renderCurrentGlucose(latestReading);
-      scheduleRefresh(1500);
+      var nightscoutMutations = mutations.filter(function (mutation) { return !isOverlayMutation(mutation); });
+      if (!nightscoutMutations.some(isNightscoutLiveMutation)) return;
+
+      var current = document.querySelector('.currentBG, #currentBG, [data-current-bg]');
+      var currentText = current ? current.textContent.replace(/\s+/g, ' ').trim() : '';
+      if (!currentText || currentText === lastObservedCurrentText) return;
+
+      lastObservedCurrentText = currentText;
+      scheduleRefresh(250, true);
     });
 
     observer.observe(document.body, {
@@ -1537,31 +1564,38 @@
     });
   }
 
-  function scheduleRefresh(delay) {
-    if (refreshTimer) window.clearTimeout(refreshTimer);
+  function scheduleRefresh(delay, force) {
+    if (refreshTimer) {
+      if (force) {
+        window.clearTimeout(refreshTimer);
+        refreshTimer = null;
+      } else {
+        return;
+      }
+    }
+    var elapsed = Date.now() - lastRefreshStartedAt;
+    var wait = force ? (delay || 0) : Math.max(delay || 1000, Math.max(0, MIN_REFRESH_MS - elapsed));
     refreshTimer = window.setTimeout(function () {
       refreshTimer = null;
-      refresh();
-    }, delay || 1000);
-  }
-
-  function overlayServiceUrl(path) {
-    var proto = window.location.protocol === 'https:' ? 'https://' : 'http://';
-    return proto + window.location.hostname + ':8787' + path;
+      refresh(force);
+    }, wait);
   }
 
   function fetchOverlayEntries() {
-    return fetch(overlayServiceUrl('/overlay/entries?count=' + OVERLAY_ENTRY_COUNT), { cache: 'no-store' })
+    return fetch('/_overlay/entries?count=' + OVERLAY_ENTRY_COUNT, { cache: 'no-store' })
       .then(function (response) {
         if (!response.ok) throw new Error('Overlay entries gaf HTTP ' + response.status);
         return response.json();
       })
       .then(function (json) {
-        if (!json || !Array.isArray(json.entries)) throw new Error('Overlay entries response mist entries');
-        return json.entries;
+        if (Array.isArray(json)) return json;
+        if (json && Array.isArray(json.entries)) return json.entries;
+        throw new Error('Overlay entries gaf geen entries terug');
       })
       .catch(function (error) {
-        if (window.console && window.console.warn) window.console.warn('[CGM Overlay] Lightweight refresh fallback:', error);
+        if (window.console && window.console.warn) {
+          window.console.warn('[CGM Overlay] Lichte endpoint faalde, val terug op Nightscout:', error);
+        }
         return fetch('/api/v1/entries/sgv.json?count=' + OVERLAY_ENTRY_COUNT, { cache: 'no-store' })
           .then(function (response) {
             if (!response.ok) throw new Error('Nightscout entries gaf HTTP ' + response.status);
@@ -1570,7 +1604,13 @@
       });
   }
 
-  function refresh() {
+  function refresh(force) {
+    if (refreshInFlight) {
+      pendingRefresh = true;
+      return;
+    }
+    refreshInFlight = true;
+    lastRefreshStartedAt = Date.now();
     fetchOverlayEntries()
       .then(function (entries) {
         var readings = sortedReadings(entries);
@@ -1635,11 +1675,18 @@
           renderEstimatedGlucoseLine();
         }
         if (window.console && window.console.error) window.console.error('[CGM Overlay] Refresh error:', err);
+      })
+      .then(function () {
+        refreshInFlight = false;
+        if (pendingRefresh) {
+          pendingRefresh = false;
+          scheduleRefresh(250, true);
+        }
       });
   }
 
   function fetchLatestDbPrediction() {
-    fetch(overlayServiceUrl('/prediction/latest'), { cache: 'no-store' })
+    fetch('/_prediction/latest', { cache: 'no-store' })
       .then(function (response) { return response.ok ? response.json() : null; })
       .then(function (json) {
         latestDbPrediction = json && json.snapshot ? json.snapshot : null;
@@ -1656,9 +1703,9 @@
     observeCurrentGlucose();
     observeChartChanges();
     fetchLatestDbPrediction();
-    refresh();
+    refresh(true);
     window.setInterval(fetchLatestDbPrediction, Math.max(POLL_MS, 60000));
-    window.setInterval(refresh, POLL_MS);
+    window.setInterval(function () { scheduleRefresh(0, false); }, POLL_MS);
     window.addEventListener('resize', positionContainer);
     window.addEventListener('resize', scheduleEstimatedGlucoseLine);
     window.setTimeout(positionContainer, 1000);
