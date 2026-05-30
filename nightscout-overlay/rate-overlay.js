@@ -5,6 +5,7 @@
   var WINDOWS_MINUTES = Array.from({ length: 60 }, function (_, index) { return index + 1; }).concat([90, 120]);
   var MAX_BASELINE_DIFF_MS = 45000;
   var POLL_MS = 30000;
+  var OVERLAY_ENTRY_COUNT = 1600;
   var COMPACT_WINDOWS_MINUTES = [1, 2, 3, 4, 5, 10, 15, 30];
   var CLASSIC_WINDOWS_MINUTES = [1, 2, 3, 4, 5, 10, 15, 20, 30, 45, 60, 90, 120];
   var RATE_MODE_KEY = 'cgm-rate-overlay-mode';
@@ -14,6 +15,7 @@
   var ESTIMATE_GAP_MIN_MS = 150000;
   var ESTIMATE_OPEN_MAX_MS = 1200000;
   var ESTIMATE_PIXEL_GAP_MIN = 3;
+  var MIN_REFRESH_MS = 5000;
   var latestReading = null;
   var updatingCurrentGlucose = false;
   var currentRows = [];
@@ -22,6 +24,7 @@
   var currentHypoRisk = null;
   var currentPatternCorrection = null;
   var FORECAST_CALIBRATION_KEY = 'cgm-forecast-calibration-v1';
+  var refreshTimer = null;
   var PEAK_DROP_THRESHOLDS = {
     watch: { minDrop: 1.4, minRate: 0.05, maxMinutes: 75 },
     high: { minDrop: 1.9, minRate: 0.07, maxMinutes: 60 },
@@ -32,6 +35,10 @@
   var chartObserver = null;
   var observedChart = null;
   var latestDbPrediction = null;
+  var refreshInFlight = false;
+  var pendingRefresh = false;
+  var lastRefreshStartedAt = 0;
+  var lastObservedCurrentText = null;
 
   function mmol(valueMgdl) {
     return valueMgdl / MGDL_PER_MMOL;
@@ -529,9 +536,8 @@
     var horizons = [10, 15, 20, 30];
     var prev = null;
     var parts = horizons.map(function (minutes) {
-      // Apply pattern correction progressively by horizon:
-      // conservative at 10m, full effect by 20m+.
-      var corrWeight = Math.min(1, minutes / 20);
+      // Apply pattern correction progressively by horizon smoothly up to 30m
+      var corrWeight = minutes / 30;
       var effectiveCorr = corr * calib.corrScale;
       var raw = baseMmol + rate * minutes;
       var adjusted = raw - (effectiveCorr * corrWeight) + calib.biasPerMin * minutes;
@@ -958,11 +964,18 @@
 
   function ensureMobileDock(chart) {
     var existing = document.getElementById('cgm-mobile-dock');
-    if (existing) return existing;
+    var parent = chart && chart.parentElement ? chart.parentElement : document.body;
+    
+    if (existing) {
+        if (!document.body.contains(existing)) {
+            parent.insertBefore(existing, chart || parent.firstChild);
+        }
+        return existing;
+    }
+    
     var dock = document.createElement('div');
     dock.id = 'cgm-mobile-dock';
     dock.setAttribute('aria-label', 'Mobiele glucose overlay');
-    var parent = chart && chart.parentElement ? chart.parentElement : document.body;
     parent.insertBefore(dock, chart || parent.firstChild);
     return dock;
   }
@@ -1034,31 +1047,30 @@
   function renderHypoAlert(risk) {
     var alert = ensureHypoAlert();
     currentHypoRisk = risk;
-    if (!risk) {
+    var patternLine = currentPatternCorrection
+      ? 'patrooncorr: -' + currentPatternCorrection.correction.toFixed(1) + ' (n=' + currentPatternCorrection.episodes + ')'
+      : '';
+      
+    if (!risk && !patternLine) {
       alert.style.display = 'none';
       return;
     }
 
     alert.style.display = 'flex';
-    alert.className = risk.css;
+    var safeRisk = risk || { css: 'ok', title: 'HYPO OK', detail: 'Patroon actief', rate: (currentRows && currentRows.length ? getPrimaryRate(currentRows).rateMmol : 0) };
+    alert.className = safeRisk.css;
     var dropLine = dropFromPeakText(currentReadings);
-    var forecastRate = currentRows && currentRows.length ? getForecastRateMmol(currentRows) : null;
-    var patternCorrectionActive = currentPatternCorrection && Number.isFinite(forecastRate) && forecastRate < -0.005;
-    var patternLine = currentPatternCorrection
-      ? (patternCorrectionActive
-        ? 'patrooncorr: -' + currentPatternCorrection.correction.toFixed(1) + ' (n=' + currentPatternCorrection.episodes + ')'
-        : 'patrooncorr: gepauzeerd, trend stijgt (n=' + currentPatternCorrection.episodes + ')')
-      : '';
+    
     alert.innerHTML = [
       '<div class="hypo-line primary">',
-      '<span class="hypo-title">', risk.title, '</span>',
-      '<span class="hypo-detail">', risk.detail, '</span>',
+      '<span class="hypo-title">', safeRisk.title, '</span>',
+      '<span class="hypo-detail">', safeRisk.detail || '', '</span>',
       '</div>',
-      '<div class="hypo-line"><span class="hypo-rate">', signed(risk.rate, 3), '/min</span></div>',
+      '<div class="hypo-line"><span class="hypo-rate">', signed(safeRisk.rate, 3), '/min</span></div>',
       '<div class="hypo-line"><span class="hypo-average">', averageRateText(true), '</span></div>',
       '<div class="hypo-line"><span class="hypo-predict">verwacht: ', horizonPredictionText(), ' mmol/L</span></div>',
       dropLine ? '<div class="hypo-line"><span class="hypo-drop">' + dropLine + '</span></div>' : '',
-      patternLine ? '<div class="hypo-line"><span class="hypo-drop">' + patternLine + '</span></div>' : '',
+      patternLine ? '<div class="hypo-line"><span class="hypo-drop" style="color: #ff9800; font-weight: bold;">' + patternLine + '</span></div>' : '',
       '<div class="hypo-feedback">',
       '<button type="button" data-feedback="confirmed">Klopt</button>',
       '<button type="button" data-feedback="false_alarm">Vals alarm</button>',
@@ -1071,15 +1083,14 @@
 
   function sendFeedback(type, btn) {
     if (!type) return;
-    var proto = window.location.protocol === 'https:' ? 'https://' : 'http://';
-    var url = proto + window.location.hostname + ':8787/feedback';
     var payload = { type: type };
     if (latestReading && latestReading.identifier) payload.entryIdentifier = latestReading.identifier;
     if (btn) btn.disabled = true;
-    fetch(url, {
+    fetch('/_feedback', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      cache: 'no-store'
     }).then(function (res) { return res.json(); })
       .then(function () { if (btn) btn.textContent = '✓'; })
       .catch(function () { if (btn) btn.disabled = false; });
@@ -1154,14 +1165,13 @@
       }, window.scrollY + 72);
       var dockTop = dock.getBoundingClientRect().top + window.scrollY;
       dock.style.setProperty('margin-top', Math.max(8, topBottom - dockTop + 10) + 'px', 'important');
-      window.requestAnimationFrame(function () {
-        chart.style.setProperty('margin-top', Math.max(12, dock.getBoundingClientRect().height + 14) + 'px', 'important');
-        statsPanel.style.setProperty('position', 'absolute', 'important');
-        statsPanel.style.setProperty('display', 'grid', 'important');
-        statsPanel.style.setProperty('top', Math.round(chart.getBoundingClientRect().bottom + window.scrollY + 16) + 'px', 'important');
-        statsPanel.style.setProperty('left', '50%', 'important');
-        statsPanel.style.setProperty('transform', 'translateX(-50%)', 'important');
-      });
+      // Direct apply without RAF for mobile
+      chart.style.setProperty('margin-top', Math.max(12, dock.getBoundingClientRect().height + 14) + 'px', 'important');
+      statsPanel.style.setProperty('position', 'absolute', 'important');
+      statsPanel.style.setProperty('display', 'grid', 'important');
+      statsPanel.style.setProperty('top', Math.round(chart.getBoundingClientRect().bottom + window.scrollY + 16) + 'px', 'important');
+      statsPanel.style.setProperty('left', '50%', 'important');
+      statsPanel.style.setProperty('transform', 'translateX(-50%)', 'important');
       return;
     } else {
       if (alert.parentElement !== document.body) document.body.appendChild(alert);
@@ -1211,7 +1221,7 @@
 
     panel.style.display = 'grid';
     panel.innerHTML = [
-      '<div class="stats-title">Laatste 24 uur</div>',
+      '<div class="stats-title">Laatste 24 uur (update: ' + new Date().toLocaleTimeString() + ')</div>',
       '<div class="stat low"><span class="stat-label">Laag</span><span class="stat-value">', stats.lowPct, '%</span></div>',
       '<div class="stat range"><span class="stat-label">In bereik</span><span class="stat-value">', stats.inRangePct, '%</span></div>',
       '<div class="stat high"><span class="stat-label">Hoog</span><span class="stat-value">', stats.highPct, '%</span></div>',
@@ -1231,10 +1241,11 @@
       '<div class="stat"><span class="stat-label">Gemiste gaten</span><span class="stat-value">', stats.missingIntervals, '</span></div>',
       '<div class="stat"><span class="stat-label">Nacht min</span><span class="stat-value">', stats.nightMin === null ? '--' : stats.nightMin.toFixed(1) + ' mmol/L', '</span></div>'
     ].join('');
-    window.requestAnimationFrame(positionContainer);
+    positionContainer();
   }
 
   function render(rows) {
+    if (window.console) console.log('[CGM Overlay] Render called, rows=', rows.length);
     ensureStyles();
     var container = ensureContainer();
     if (!container) return;
@@ -1280,7 +1291,10 @@
         '</div>'
       ].join('');
     }).join('');
-    window.requestAnimationFrame(positionContainer);
+    positionContainer();
+    // Force a CSS repaint specifically for mobile browsers
+    var dock = document.getElementById('cgm-mobile-dock');
+    if (dock) { dock.style.display = 'none'; dock.offsetHeight; dock.style.display = ''; }
   }
 
   function renderCurrentGlucose(entry) {
@@ -1607,25 +1621,79 @@
     }, true);
   }
 
-  function observeCurrentGlucose() {
-    var observer = new MutationObserver(function () {
-      if (updatingCurrentGlucose) return;
-      renderCurrentGlucose(latestReading);
-      renderCurrentDelta();
-    });
-
-    observer.observe(document.body, {
-      childList: true,
-      characterData: true,
-      subtree: true
-    });
+  function isOverlayMutation(mutation) {
+    var target = mutation.target;
+    if (!target || !target.closest) return false;
+    return Boolean(target.closest(
+      '#cgm-rate-overlay, #cgm-hypo-alert, #cgm-rate-toggle, #cgm-rate-view-toggle, #cgm-rate-history-nav, #cgm-stats-panel, #cgm-point-rate-tooltip'
+    ));
   }
 
-  function refresh() {
-    fetch('/api/v1/entries/sgv.json?count=2000', { cache: 'no-store' })
-      .then(function (response) { return response.json(); })
+  function isNightscoutLiveMutation(mutation) {
+    var target = mutation.target;
+    if (!target || !target.closest) return false;
+    return Boolean(target.closest(
+      '.currentBG, #currentBG, [data-current-bg], .currentTime, #currentTime, [data-current-time], #chartContainer'
+    ));
+  }
+
+  function observeCurrentGlucose() {
+    // Disabled MutationObserver. We will rely purely on aggressive polling.
+  }
+
+  function scheduleRefresh(delay, force) {
+    if (refreshTimer) {
+      if (force) {
+        window.clearTimeout(refreshTimer);
+        refreshTimer = null;
+      } else {
+        return;
+      }
+    }
+    var elapsed = Date.now() - lastRefreshStartedAt;
+    var wait = force ? (delay || 0) : Math.max(delay || 1000, Math.max(0, MIN_REFRESH_MS - elapsed));
+    refreshTimer = window.setTimeout(function () {
+      refreshTimer = null;
+      refresh(force);
+    }, wait);
+  }
+
+  function fetchOverlayEntries() {
+    var ts = Date.now();
+    if (window.console) console.log('[CGM Overlay] Fetching data... ts=' + ts);
+    return fetch('/_overlay/entries?count=' + OVERLAY_ENTRY_COUNT + '&ts=' + ts, { cache: 'no-store' })
+      .then(function (response) {
+        if (!response.ok) throw new Error('Overlay entries gaf HTTP ' + response.status);
+        return response.json();
+      })
+      .then(function (json) {
+        if (Array.isArray(json)) return json;
+        if (json && Array.isArray(json.entries)) return json.entries;
+        throw new Error('Overlay entries gaf geen entries terug');
+      })
+      .catch(function (error) {
+        if (window.console && window.console.warn) {
+          window.console.warn('[CGM Overlay] Lichte endpoint faalde, val terug op Nightscout:', error);
+        }
+        return fetch('/api/v1/entries/sgv.json?count=' + OVERLAY_ENTRY_COUNT + '&ts=' + ts, { cache: 'no-store' })
+          .then(function (response) {
+            if (!response.ok) throw new Error('Nightscout entries gaf HTTP ' + response.status);
+            return response.json();
+          });
+      });
+  }
+
+  function refresh(force) {
+    if (refreshInFlight) {
+      pendingRefresh = true;
+      return;
+    }
+    refreshInFlight = true;
+    lastRefreshStartedAt = Date.now();
+    fetchOverlayEntries()
       .then(function (entries) {
         var readings = sortedReadings(entries);
+        if (!readings.length) throw new Error('Geen bruikbare SGV entries ontvangen');
         currentReadings = readings;
         chartReadingsAsc = readings.slice().reverse();
         calibrateFromHistory(readings);
@@ -1676,20 +1744,29 @@
         scheduleEstimatedGlucoseLine(0);
         window.setTimeout(scheduleEstimatedGlucoseLine, 500);
         window.setTimeout(scheduleEstimatedGlucoseLine, 1500);
-        if (window.console && window.console.log) window.console.log('[CGM Overlay] Refreshed at ' + new Date().toLocaleTimeString());
+        if (window.console && window.console.log) {
+          window.console.log('[CGM Overlay] Refreshed ' + readings.length + ' entries at ' + new Date().toLocaleTimeString());
+        }
       })
       .catch(function (err) {
-        renderStatsPanel(null);
-        render([]);
-        renderEstimatedGlucoseLine();
+        if (!currentReadings.length) {
+          renderStatsPanel(null);
+          render([]);
+          renderEstimatedGlucoseLine();
+        }
         if (window.console && window.console.error) window.console.error('[CGM Overlay] Refresh error:', err);
+      })
+      .then(function () {
+        refreshInFlight = false;
+        if (pendingRefresh) {
+          pendingRefresh = false;
+          scheduleRefresh(250, true);
+        }
       });
   }
 
   function fetchLatestDbPrediction() {
-    var proto = window.location.protocol === 'https:' ? 'https://' : 'http://';
-    var url = proto + window.location.hostname + ':8787/prediction/latest';
-    fetch(url, { cache: 'no-store' })
+    fetch('/_prediction/latest', { cache: 'no-store' })
       .then(function (response) { return response.ok ? response.json() : null; })
       .then(function (json) {
         latestDbPrediction = json && json.snapshot ? json.snapshot : null;
@@ -1699,16 +1776,24 @@
       });
   }
 
-  function start() {
+    function start() {
+    console.log('--- NIEUWE SCRIPT VERSIE GELADEN ---');
     installSoundDefaultOff();
     installPointTooltip();
     installChartRangeListeners();
     observeCurrentGlucose();
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'visible') {
+      if (window.console) console.log('[CGM Overlay] Woke up on mobile, forcing refresh');
+      scheduleRefresh(10, true);
+    }
+  });
+
     observeChartChanges();
     fetchLatestDbPrediction();
-    refresh();
+    refresh(true);
     window.setInterval(fetchLatestDbPrediction, Math.max(POLL_MS, 60000));
-    window.setInterval(refresh, POLL_MS);
+    window.setInterval(function () { scheduleRefresh(0, false); }, POLL_MS);
     window.addEventListener('resize', positionContainer);
     window.addEventListener('resize', scheduleEstimatedGlucoseLine);
     window.setTimeout(positionContainer, 1000);
