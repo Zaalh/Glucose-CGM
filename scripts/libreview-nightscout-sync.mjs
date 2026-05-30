@@ -45,15 +45,6 @@ const LLU_BASE_HEADERS = {
   connection: 'Keep-Alive',
 }
 
-const LSL_BASE_HEADERS = {
-  'Content-Type': 'application/json',
-  Domain: 'Libreview',
-  GatewayType: 'LinkUp.Android',
-  'Accept-Encoding': 'gzip',
-  'cache-control': 'no-cache',
-  connection: 'Keep-Alive',
-}
-
 const args = new Set(process.argv.slice(2))
 const loop = args.has('--loop')
 const server = args.has('--server')
@@ -78,8 +69,8 @@ async function runForever() {
 
 async function syncOnce() {
   config = readConfig(true)
-  const { lluToken, lslToken, baseUrl, accountId, userId } = await libreLogin(config.email, config.password)
-  const { readings, debugInfo } = await collectReadings(lluToken, lslToken, accountId, baseUrl, userId)
+  const { lluToken, baseUrl, accountId } = await libreLogin(config.email, config.password)
+  const { readings, debugInfo } = await collectReadings(lluToken, accountId, baseUrl)
   const knownIdentifiers = await getKnownNightscoutIdentifiers()
   const previousEntries = await getRecentNightscoutEntries()
   const entries = readings
@@ -672,27 +663,17 @@ async function libreLogin(email, password) {
   const lluToken = json.data.authTicket.token
   const accountId = sha256hex(userId)
 
-  const lslRes = await fetchWithRetry(`${baseUrl}/lsl/api/nisperson/getauthenticateduser`, {
-    method: 'POST',
-    headers: { ...LSL_BASE_HEADERS, Authorization: `Bearer ${lluToken}` },
-    body: JSON.stringify({ email, password }),
-  }, 'lsl_login')
-  const lslText = await lslRes.text()
-  let lslJson = {}
-  try {
-    lslJson = JSON.parse(lslText)
-  } catch {
-    lslJson = {}
-  }
-
-  const lslToken = lslJson.data?.authToken ?? lluToken
-  return { lluToken, lslToken, baseUrl, accountId, userId }
+  return { lluToken, baseUrl, accountId }
 }
 
-async function collectReadings(lluToken, lslToken, accountId, baseUrl, userId) {
+async function collectReadings(lluToken, accountId, baseUrl) {
   const debug = []
   const readings = []
 
+  // De /llu/connections/<patientId>/graph endpoint levert de huidige meting plus de
+  // recente historie (~12u) — genoeg voor dedup en backfill van late minuten. De oude
+  // LSL-history/measurements en de self-graph gaven voor dit account altijd 400/403/404,
+  // dus die zijn verwijderd (puur verspilde calls + rate-limit-druk).
   const connRes = await lluGet(lluToken, accountId, baseUrl, '/llu/connections')
   debug.push(`llu_conn=${connRes.status}`)
 
@@ -706,31 +687,6 @@ async function collectReadings(lluToken, lslToken, accountId, baseUrl, userId) {
       debug.push(`llu_graph_points=${pts.length}`)
       readings.push(...pts)
     }
-  }
-
-  const historyPeriods = Math.max(1, Math.ceil(config.graceWindowMinutes / HISTORY_PERIOD_MINUTES))
-  const histRes = await lslGet(lslToken, baseUrl, `/glucoseHistory?numPeriods=${historyPeriods}&period=${HISTORY_PERIOD_MINUTES}`)
-  debug.push(`lsl_hist=${histRes.status}`)
-  if (histRes.ok) {
-    const pts = extractReadings(histRes.json)
-    debug.push(`lsl_hist_points=${pts.length}`)
-    readings.push(...pts)
-  }
-
-  const measRes = await lslGet(lslToken, baseUrl, `/lsl/api/measurements/GetPatientGlucoseMeasurements?patientId=${userId}`)
-  debug.push(`lsl_meas=${measRes.status}`)
-  if (measRes.ok) {
-    const pts = extractReadings(measRes.json)
-    debug.push(`lsl_meas_points=${pts.length}`)
-    readings.push(...pts)
-  }
-
-  const selfGraphRes = await lluGet(lluToken, accountId, baseUrl, `/llu/users/${userId}/graph`)
-  debug.push(`llu_self=${selfGraphRes.status}`)
-  if (selfGraphRes.ok) {
-    const pts = extractReadings(selfGraphRes.json)
-    debug.push(`llu_self_points=${pts.length}`)
-    readings.push(...pts)
   }
 
   if (readings.length > 0) {
@@ -748,13 +704,6 @@ async function lluGet(token, accountId, baseUrl, path) {
   const res = await fetchWithRetry(`${baseUrl}${path}`, {
     headers: { ...LLU_BASE_HEADERS, Authorization: `Bearer ${token}`, 'account-id': accountId },
   }, `llu:${path}`)
-  return responseJson(res)
-}
-
-async function lslGet(token, baseUrl, path) {
-  const res = await fetchWithRetry(`${baseUrl}${path}`, {
-    headers: { ...LSL_BASE_HEADERS, Authorization: `Bearer ${token}` },
-  }, `lsl:${path}`)
   return responseJson(res)
 }
 
