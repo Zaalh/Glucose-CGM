@@ -11,20 +11,20 @@ Nederlands.
 
 ## Huidige basis (af)
 
-- React 19 + Vite + TypeScript frontend (`src/`) — pagina's `Nightscout.tsx`, `Dashboard.tsx`,
-  `Settings.tsx`.
+- UI: de **Nightscout-webinterface met nginx-overlay** (`nightscout-overlay/rate-overlay.js`) —
+  dit is wat live op poort 1337 draait.
 - **Nightscout + MongoDB** als API- en opslaglaag (de live flow). LibreView →
-  `scripts/libreview-nightscout-sync.mjs` → Nightscout → MongoDB → frontend leest
-  `/api/v1/entries/sgv.json` via `src/lib/nightscout.ts`.
-- Docker-stack: `nightscout-mongo`, `nightscout`, `libreview-sync` (+ nginx-overlay).
-- Alarmen (`src/lib/alarms.ts`): actuele en voorspellende triggers, snooze, geluid, stale-data.
-- Voorspelling (`src/lib/prediction.ts`): weighted linear regression (geen quadratic).
+  `scripts/libreview-nightscout-sync.mjs` → Nightscout → MongoDB → overlay leest
+  `/api/v1/entries/sgv.json` en de sync-endpoints.
+- Docker-stack: `nightscout-mongo`, `nightscout`, `libreview-sync`, `nightscout-ui` (nginx-overlay).
+- Alarmen/hypo-risico: de overlay rendert de hypo-kaart; drempels uit `scripts/risk-model-state.json`.
+- Voorspelling: weighted linear regression (geen quadratic), in de sync en overlay.
 - Predictie-pipeline (`scripts/`): `entry_features` → `pattern_events` → `prediction_snapshots`
-  → evaluatie → modeltraining → export naar `src/lib/risk-model-state.json`.
+  → evaluatie → modeltraining → export naar `scripts/risk-model-state.json`.
 - `episode_vectors` + live similarity-correctie en `user_feedback`-knoppen in de overlay-hypokaart.
 
-> Supabase-bestanden (`supabase/`, `src/lib/supabase.ts`) staan nog in de repo als oudere/
-> alternatieve basis, maar zijn **niet** de live flow. Geen nieuwe features op Supabase bouwen.
+> De oude React/Vite-frontend (`src/`) en Supabase-laag (`supabase/`) zijn verwijderd. Niet
+> opnieuw introduceren; bouw op de Nightscout/MongoDB-flow.
 
 ## Nog open (bewust)
 
@@ -32,10 +32,9 @@ Nederlands.
    bovenop de voorspelling. Komt later en neemt **nooit** de live alarmbeslissing.
 2. Fine-tuning van thresholds/policies op een langere dataperiode (optioneel).
 3. `episode_vectors`-similarity ook tonen in de UI-redenen.
-4. Repo-/mappenopschoning.
 
 ## Werkwijze
 
 - Houd wijzigingen gericht op de Nightscout/MongoDB-flow.
-- Draai `npm run build` na codewijzigingen.
+- Geen build-stap; check scripts met `node --check scripts/<file>.mjs`.
 - Pipeline-scripts draaien tegen de live MongoDB op de iMac (zie deployment-notities).

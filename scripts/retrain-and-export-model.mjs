@@ -22,5 +22,5 @@ const out = {
   metrics: model.metrics,
 }
 
-writeFileSync('src/lib/risk-model-state.json', JSON.stringify(out, null, 2) + '\n', 'utf8')
-console.log(`Exported ${out.modelVersion} to src/lib/risk-model-state.json`)
+writeFileSync('scripts/risk-model-state.json', JSON.stringify(out, null, 2) + '\n', 'utf8')
+console.log(`Exported ${out.modelVersion} to scripts/risk-model-state.json`)

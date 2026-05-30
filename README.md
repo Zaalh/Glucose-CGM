@@ -1,13 +1,13 @@
 # Glucose CGM
 
-Lokale CGM-monitor voor LibreView/LibreLink data met Nightscout en MongoDB. De app toont live glucose, grafieken, time-in-range, alarmen en voorspellingen op basis van de metingen die Nightscout opslaat.
+Lokale CGM-monitor voor LibreView/LibreLink data met Nightscout en MongoDB. De Nightscout-UI met een eigen nginx-overlay toont live glucose, grafiek, time-in-range, alarmen en voorspellingen op basis van de metingen die Nightscout opslaat.
 
 ## In het Kort
 
-- Frontend: React 19, Vite en TypeScript.
-- Grafieken: Recharts.
+- UI: Nightscout-webinterface met een geïnjecteerde nginx-overlay (`nightscout-overlay/`).
 - CGM-opslag: Nightscout + MongoDB.
 - Lokale sync: LibreView naar Nightscout via Docker.
+- Predictie: offline Node-scripts (`scripts/`) op MongoDB.
 
 ## Snel Starten
 
@@ -37,36 +37,9 @@ Lokale CGM-monitor voor LibreView/LibreLink data met Nightscout en MongoDB. De a
    npm run nightscout:libre
    ```
 
-5. Start de app:
-
-   ```bash
-   npm run dev
-   ```
-
-Open daarna:
-
-- App: `http://localhost:5173`
-- Nightscout: `http://localhost:1337`
+Open daarna de UI met overlay op `http://localhost:1337`.
 
 ## Belangrijke Commands
-
-```bash
-npm run dev
-```
-
-Start de Vite development server.
-
-```bash
-npm run build
-```
-
-Draait TypeScript checks en bouwt de productieversie.
-
-```bash
-npm run preview
-```
-
-Preview van de productiebuild.
 
 ```bash
 npm run nightscout:up
@@ -124,7 +97,7 @@ Stop de Docker-services.
 npm run model:retrain
 ```
 
-Trained het persoonlijke risicomodel op `prediction_snapshots` in MongoDB en exporteert de actieve drempels naar `src/lib/risk-model-state.json` voor gebruik in de app.
+Trained het persoonlijke risicomodel op `prediction_snapshots` in MongoDB en exporteert de actieve drempels naar `scripts/risk-model-state.json`.
 
 ```bash
 npm run snapshots:live
@@ -223,7 +196,7 @@ Lokale LibreView credentials. Dit bestand wordt niet gecommit.
 ```env
 LIBREVIEW_EMAIL=mail@example.com
 LIBREVIEW_PASSWORD=your-libreview-password
-LIBREVIEW_TZ_OFFSET=120
+LIBREVIEW_TZ=Europe/Amsterdam
 LIBREVIEW_INTERVAL_SECONDS=60
 LIBREVIEW_GRACE_WINDOW_MINUTES=30
 LIBREVIEW_RETRY_ATTEMPTS=6
@@ -233,7 +206,7 @@ LIBREVIEW_HTTP_TIMEOUT_MS=15000
 LIBREVIEW_RETRY_JITTER_MS=400
 ```
 
-`LIBREVIEW_TZ_OFFSET=120` is UTC+2 in minuten, geschikt voor Amsterdam in de zomer. Pas dit aan als timestamps verschuiven.
+`LIBREVIEW_TZ` (IANA-zone, default `Europe/Amsterdam`) zet timestamps **DST-bewust** om, dus zomer- én wintertijd kloppen vanzelf. Alleen als je een vaste offset wilt forceren zet je `LIBREVIEW_TZ_OFFSET` (minuten); leeg laten = automatisch.
 
 ## Data Flow
 
@@ -242,12 +215,12 @@ LibreView/LibreLink
   -> lokale libreview-sync Docker service
   -> Nightscout API
   -> MongoDB
-  -> React app analyse, grafieken, alarmen en voorspelling
+  -> Nightscout-UI + nginx-overlay: grafiek, alarmen en voorspelling
 ```
 
 De sync draait elke 60 seconden. Elke meting krijgt een vaste Nightscout `identifier`, waardoor vertraagde minuutmetingen alsnog worden opgeslagen zonder dubbele records.
 
-Dashboard en Nightscout hebben een `Sync Libre` knop. Die roept lokaal `http://localhost:8787/sync` aan, wacht op de sync en leest daarna opnieuw uit Nightscout.
+De sync-service biedt op poort 8787 `POST /sync` om handmatig dezelfde sync te starten.
 
 ## Documentatie
 

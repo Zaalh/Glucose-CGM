@@ -2,7 +2,7 @@
 
 ## Project
 
-Glucose CGM is een lokale React/Vite applicatie voor continue glucosemonitoring. De app gebruikt Nightscout als API-laag en MongoDB als opslag voor CGM-metingen.
+Glucose CGM is een lokale, self-hosted glucosemonitor. De UI is de Nightscout-webinterface met een eigen nginx-overlay; Nightscout is de API-laag en MongoDB de opslag voor CGM-metingen.
 
 Belangrijkste doel:
 
@@ -12,34 +12,16 @@ Belangrijkste doel:
 
 ## Stack
 
-- Frontend: React 19, Vite, TypeScript.
-- Grafieken: Recharts.
+- UI: Nightscout-webinterface + geïnjecteerde nginx-overlay (`nightscout-overlay/rate-overlay.js`).
 - CGM opslag: MongoDB via Nightscout.
 - CGM API/UI backend: `nightscout/cgm-remote-monitor`.
 - Lokale Libre sync: `scripts/libreview-nightscout-sync.mjs`.
-- Docker services: `nightscout-mongo`, `nightscout`, `libreview-sync`.
+- Predictie: offline Node-scripts in `scripts/`.
+- Docker services: `nightscout-mongo`, `nightscout`, `libreview-sync`, `nightscout-ui` (nginx).
 
-Supabase-bestanden staan nog in de repo als oudere/alternatieve basis, maar de actuele lokale flow voor glucosemetingen gebruikt Nightscout en MongoDB.
+De oude React/Vite-frontend (`src/`) en de Supabase-laag (`supabase/`) zijn verwijderd; bouw nieuwe features op de Nightscout/MongoDB-flow.
 
 ## Commands
-
-```bash
-npm run dev
-```
-
-Start de Vite development server.
-
-```bash
-npm run build
-```
-
-Draait TypeScript checks en bouwt de productieversie. Gebruik dit na codewijzigingen.
-
-```bash
-npm run preview
-```
-
-Preview van de productiebuild.
 
 ```bash
 npm run nightscout:up
@@ -75,7 +57,7 @@ Controleert of de lokale LibreView sync-service draait en geconfigureerd is.
 curl -X POST http://localhost:8787/sync
 ```
 
-Start handmatig dezelfde sync die de `Sync Libre` knop in Dashboard en Nightscout gebruikt.
+Start handmatig dezelfde sync die de overlay periodiek aanroept.
 
 ```bash
 npm run nightscout:down
@@ -89,7 +71,7 @@ npm run model:retrain:balanced
 npm run model:retrain:precision
 ```
 
-Trained het persoonlijke risicomodel op `prediction_snapshots` en exporteert actieve thresholds naar `src/lib/risk-model-state.json`.
+Trained het persoonlijke risicomodel op `prediction_snapshots` en exporteert actieve thresholds naar `scripts/risk-model-state.json`.
 
 ```bash
 npm run summaries:build
@@ -122,14 +104,14 @@ Lokale LibreView credentials. Dit bestand wordt niet gecommit.
 ```env
 LIBREVIEW_EMAIL=mail@example.com
 LIBREVIEW_PASSWORD=your-libreview-password
-LIBREVIEW_TZ_OFFSET=120
+LIBREVIEW_TZ=Europe/Amsterdam
 LIBREVIEW_INTERVAL_SECONDS=60
 LIBREVIEW_GRACE_WINDOW_MINUTES=30
 LIBREVIEW_RETRY_ATTEMPTS=3
 LIBREVIEW_RETRY_BASE_DELAY_MS=750
 ```
 
-`LIBREVIEW_TZ_OFFSET=120` is UTC+2 in minuten, geschikt voor Amsterdam zomertijd. Pas dit aan als timestamps verschuiven.
+`LIBREVIEW_TZ` (IANA-zone, default `Europe/Amsterdam`) zet timestamps DST-bewust om, dus zomer- én wintertijd kloppen vanzelf. `LIBREVIEW_TZ_OFFSET` (minuten) is alleen een optionele vaste-offset override; leeg laten = automatisch.
 `LIBREVIEW_GRACE_WINDOW_MINUTES` bepaalt hoeveel recente LibreView-historie elke sync opnieuw ophaalt, zodat late meetpunten alsnog opgeslagen kunnen worden.
 `LIBREVIEW_RETRY_ATTEMPTS` en `LIBREVIEW_RETRY_BASE_DELAY_MS` bepalen hoeveel korte herpogingen de sync doet bij tijdelijke netwerkfouten, timeouts, rate limits of serverfouten.
 
@@ -143,10 +125,10 @@ LIBREVIEW_RETRY_BASE_DELAY_MS=750
 6. De sync haalt steeds een recente grace window opnieuw op, zodat late meetpunten alsnog naar Nightscout kunnen.
 7. Nightscout schrijft entries naar MongoDB.
 8. De `libreview-sync` service schrijft bij nieuwe entries direct `prediction_snapshots` naar MongoDB.
-9. De React app leest historie uit `/api/v1/entries/sgv.json`.
+9. De nginx-overlay leest historie uit `/api/v1/entries/sgv.json` plus de sync-endpoints.
 10. Analyse, time-in-range, alarmen en voorspelling gebruiken deze Nightscout/MongoDB data.
 
-Dashboard en Nightscout hebben een `Sync Libre` knop. Die roept lokaal `http://localhost:8787/sync` aan, wacht op de LibreView sync, en leest daarna opnieuw uit Nightscout/MongoDB.
+De sync-service biedt op poort 8787 `POST /sync` om dezelfde LibreView-sync handmatig te starten.
 
 ## Important Files
 
@@ -158,22 +140,20 @@ Dashboard en Nightscout hebben een `Sync Libre` knop. Die roept lokaal `http://l
 - `scripts/evaluate-predictions.mjs`: Evaluatie van snapshot-uitkomsten.
 - `scripts/summarize-days.mjs`: Dagelijkse aggregaties in `daily_summaries`.
 - `scripts/train-risk-model.mjs`: Training en calibratie van model_state.
-- `scripts/retrain-and-export-model.mjs`: Train + export naar frontend model-state JSON.
-- `src/lib/nightscout.ts`: Frontend adapter van Nightscout entries naar `GlucoseReading`.
-- `src/pages/Nightscout.tsx`: Hoofdmonitor met live waarde, voorspelling, alarmen, TIR en statistiek.
-- `src/pages/Dashboard.tsx`: Compacte grafiekweergave.
-- `src/lib/prediction.ts`: Glucosevoorspelling.
-- `src/lib/alarms.ts`: Alarmdrempels, snooze, geluid en notificaties.
+- `scripts/retrain-and-export-model.mjs`: Train + export naar `scripts/risk-model-state.json`.
+- `scripts/risk-model-state.json`: Geëxporteerde, actieve risico-drempels.
+- `nightscout-overlay/rate-overlay.js`: De live overlay — hoofdmonitor met waarde, grafiek, voorspelling en hypo-kaart.
+- `nightscout-overlay/nginx.conf`: Injecteert de overlay en proxyt de sync-endpoints.
 
 ## Prediction
 
-De voorspelling gebruikt weighted linear regression op recente metingen. Recente waarden krijgen meer gewicht. Als er weinig data is, valt de code terug op persoonlijke trendrates uit localStorage of vaste defaults.
+De voorspelling gebruikt weighted linear regression op recente metingen. Recente waarden krijgen meer gewicht. De overlay en de sync delen deze aanpak; de risico-drempels komen uit `scripts/risk-model-state.json`.
 
 Geen quadratic regression gebruiken voor glucosevoorspelling. Bij minuutdata geeft dat te snel overfit en wilde extrapolaties.
 
 ## Alarms
 
-Alarmdrempels worden lokaal opgeslagen in localStorage. Standaardwaarden:
+De overlay rendert de hypo-kaart op basis van de volgende standaarddrempels:
 
 - Urgent laag: 3.0 mmol/L
 - Laag: 3.9 mmol/L
@@ -216,5 +196,5 @@ curl 'http://localhost:1337/api/v1/entries/sgv.json?count=5'
 - UI-tekst is Nederlands.
 - De app is single-user opgezet.
 - Houd nieuwe wijzigingen gericht op de Nightscout/Mongo flow.
-- Draai `npm run build` na codewijzigingen.
+- Geen build-stap; check scripts met `node --check scripts/<file>.mjs`.
 - Gebruik `.env.*.example` voor documentatie en echte `.env.*` bestanden voor lokale secrets.

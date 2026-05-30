@@ -25,9 +25,9 @@ Dit plan is deels gebouwd. Onderstaand overzicht houdt bij wat af is en wat nog 
 - **`prediction_snapshots`**: per nieuwe entry een snapshot (upsert op `entryIdentifier`). Bevat `risk`, `riskScore`, `reasons`, `predictedMmol`, `probabilities` (`lt45`/`lt40`), `modelVersion: 'rules-v1'`. Backfill via `scripts/backfill-prediction-snapshots.mjs`, evaluatie via `scripts/evaluate-predictions.mjs`.
 - **`pattern_events`**: episodedetectie via `scripts/analyze-patterns.mjs`; door de sync gebruikt voor patrooncorrectie.
 - **`entry_features`**: backfill via `scripts/build-entry-features.mjs`.
-- **`model_state`**: training via `scripts/train-risk-model.mjs` (policies: recall-first/balanced/precision-first), export naar `src/lib/risk-model-state.json` via `scripts/retrain-and-export-model.mjs`.
+- **`model_state`**: training via `scripts/train-risk-model.mjs` (policies: recall-first/balanced/precision-first), export naar `scripts/risk-model-state.json` via `scripts/retrain-and-export-model.mjs`.
 - **`daily_summaries`**: aggregatie via `scripts/summarize-days.mjs`.
-- **Regelgebaseerde risicoscore (uitlegbaar)**: `src/lib/riskModel.ts` (frontend) en `evaluateRiskRuleV1` in de sync. Niveaus low/watch/high/urgent, met drempels uit `model_state`.
+- **Regelgebaseerde risicoscore (uitlegbaar)**: `evaluateRiskRuleV1` in de sync (`scripts/libreview-nightscout-sync.mjs`). Niveaus low/watch/high/urgent, met drempels uit `model_state` / `scripts/risk-model-state.json`.
 - **Live UI**: nginx-overlay `nightscout-overlay/rate-overlay.js` toont rates, forecast-lijn, hypo-risico (peak-drop watch/high/urgent) en forecast-calibratie op poort 1337.
 
 ### Recent afgemaakt (2026-05-30)
@@ -1379,16 +1379,17 @@ Zelfs simpele maaltijdmarkeringen maken het model sneller beter, maar ze zijn ni
 
 ## Implementatiestappen
 
-1. Maak `src/lib/patterns.ts`.
-2. Voeg functies toe:
+> Historische planstap — inmiddels uitgevoerd in `scripts/` (pattern-/risk-logica) en de
+> nginx-overlay (`nightscout-overlay/rate-overlay.js`), niet in een React-module.
+
+1. Rate-/patroon-/risicofuncties:
    - `calculateRates(readings)`
    - `detectSpikes(readings)`
    - `detectPostHyperDrops(readings)`
    - `scoreReactiveHypoRisk(readings, currentReading)`
    - `predictReactiveHypo(readings, currentReading)`
-3. Maak unit tests met kleine synthetische curves.
-4. Draai analyse op Nightscout/MongoDB-data en print episodes.
-5. Toon risicokaart in `Nightscout.tsx`.
+2. Analyse op Nightscout/MongoDB-data, episodes detecteren.
+3. Risicokaart tonen in de nginx-overlay.
 6. Gebruik risicoscore ook in alarmen, naast de bestaande 20-minuten voorspelling.
 7. Voeg later maaltijdmarkeringen toe.
 
