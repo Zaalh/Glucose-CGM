@@ -1306,7 +1306,6 @@
 
     updatingCurrentGlucose = true;
     currentBg.textContent = value;
-    lastObservedCurrentText = value;
     updatingCurrentGlucose = false;
   }
 
@@ -1639,25 +1638,7 @@
   }
 
   function observeCurrentGlucose() {
-    // Nightscout's eigen client herschrijft .currentBG periodiek met 1 decimaal
-    // (bijv. "5.4"), terwijl wij er 2 decimalen ("5.43") van maken. Zonder observer
-    // zie je tussen Nightscout's herschrijving en onze volgende poll kortstondig
-    // 1 decimaal — vandaar "soms 1, soms 2 decimalen". Deze observer zet onze
-    // laatst gerenderde waarde meteen terug zodra Nightscout het overschrijft.
-    var currentBg = document.querySelector('.currentBG');
-    if (!currentBg) {
-      window.setTimeout(observeCurrentGlucose, 1000);
-      return;
-    }
-    var observer = new MutationObserver(function () {
-      if (updatingCurrentGlucose) return;
-      if (lastObservedCurrentText === null) return;
-      if (currentBg.textContent === lastObservedCurrentText) return;
-      updatingCurrentGlucose = true;
-      currentBg.textContent = lastObservedCurrentText;
-      updatingCurrentGlucose = false;
-    });
-    observer.observe(currentBg, { childList: true, characterData: true, subtree: true });
+    // Disabled MutationObserver. We will rely purely on aggressive polling.
   }
 
   function scheduleRefresh(delay, force) {
