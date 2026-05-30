@@ -18,6 +18,23 @@ const FORECAST_HORIZONS = [10, 15, 20, 30, 60, 120, 180]
 // Vanaf >30 min satureert het rate-effect: glucose keert terug naar baseline,
 // dus 120/180 min mag niet puur lineair doorlopen (anders altijd in de clamp).
 const RATE_DECAY_TAU = 45
+// Similarity-dimensies die offline (episode_vectors) en live identiek zijn.
+// maxFallRate bewust weggelaten: offline uit 1-min diffs (ruizig), live uit
+// gladde 5/10/15-min rates -> niet vergelijkbaar.
+const SIM_SCALES = { peakMmol: 4, dropFromPeakMmol: 3, minutesSincePeak: 30 }
+const SIM_MAX_DIST = 1.5
+const SIM_K = 8
+const FEEDBACK_TYPES = new Set([
+  'confirmed',
+  'false_alarm',
+  'feels_hypo',
+  'ate_now',
+  'fingerstick_confirmed',
+])
+
+// NB: deze module heeft een top-level `await runForever()` die nooit terugkeert.
+// Alle module-scope const/let MOET hierboven staan, anders blijven ze in de
+// temporal dead zone (TDZ) en falen runtime-toegangen.
 
 const LLU_BASE_HEADERS = {
   'Content-Type': 'application/json',
@@ -238,13 +255,6 @@ async function loadEpisodeVectors() {
     if (client) await client.close().catch(() => undefined)
   }
 }
-
-// Alleen dimensies die offline (episode_vectors) en live identiek gedefinieerd
-// zijn. maxFallRate is bewust weggelaten: offline uit 1-min diffs (ruizig),
-// live uit gladde 5/10/15-min rates -> niet vergelijkbaar.
-const SIM_SCALES = { peakMmol: 4, dropFromPeakMmol: 3, minutesSincePeak: 30 }
-const SIM_MAX_DIST = 1.5
-const SIM_K = 8
 
 function sq(x) { return x * x }
 
@@ -504,14 +514,6 @@ function readJsonBody(req) {
     req.on('error', reject)
   })
 }
-
-const FEEDBACK_TYPES = new Set([
-  'confirmed',
-  'false_alarm',
-  'feels_hypo',
-  'ate_now',
-  'fingerstick_confirmed',
-])
 
 async function writeUserFeedback(body) {
   const type = String((body && body.type) || '').trim()
