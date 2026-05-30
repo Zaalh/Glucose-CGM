@@ -1126,7 +1126,7 @@
     var statusLine = document.querySelector('.currentDetails, .currentStatus, #currentDetails');
     var buttonHeight = button.getBoundingClientRect().height || 24;
     var buttonTop = chartTop - buttonHeight - 6;
-    var containerTop = chartTop + 28;
+    var containerTop = chartTop - 12;
     var alertTop = chartTop + 4;
     var nav = ensureHistoryNav();
     if (bgValue && clock) {
