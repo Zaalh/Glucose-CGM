@@ -60,6 +60,11 @@ services:
       NIGHTSCOUT_URL: http://nightscout:1337
       MONGODB_URI: mongodb://nightscout-mongo:27017/nightscout
       LIBREVIEW_SYNC_PORT: 8787
+      # Poll-interval: 60s i.p.v. 30s. LLU levert maar ~1 waarde/min, dus 2x/min
+      # pollen was puur verspilling (54% lege cycli) + trigger voor 430 rate-limits.
+      # Staat hier (niet in .env.libreview) zodat het via git deployt; environment
+      # overschrijft env_file, dus dit wint van een eventuele oude waarde daar.
+      LIBREVIEW_INTERVAL_SECONDS: 60
     working_dir: /app
     volumes:
       - ./:/app
