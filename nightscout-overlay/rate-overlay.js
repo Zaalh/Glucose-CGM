@@ -342,7 +342,7 @@
       return {
         css: 'hypo',
         title: 'HYPO NU',
-        detail: predictedUrgentSoon ? valueMmol.toFixed(2) + ' mmol/L · 3.0 ' + urgentEta : valueMmol.toFixed(2) + ' mmol/L',
+        detail: predictedUrgentSoon ? valueMmol.toFixed(2) + ' mmol/L · 3.8 ' + lowEta + ' · 3.0 ' + urgentEta : valueMmol.toFixed(2) + ' mmol/L',
         rate: rateMmol
       };
     }
@@ -351,7 +351,7 @@
       return {
         css: 'urgent',
         title: 'URGENT RISICO',
-        detail: valueMmol.toFixed(2) + ' mmol/L · 3.0 ' + urgentEta,
+        detail: valueMmol.toFixed(2) + ' mmol/L · 3.8 ' + lowEta + ' · 3.0 ' + urgentEta,
         rate: rateMmol
       };
     }
