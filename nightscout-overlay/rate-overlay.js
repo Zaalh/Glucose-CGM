@@ -1060,7 +1060,21 @@
     var safeRisk = risk || { css: 'ok', title: 'HYPO OK', detail: 'Patroon actief', rate: (currentRows && currentRows.length ? getPrimaryRate(currentRows).rateMmol : 0) };
     alert.className = safeRisk.css;
     var dropLine = dropFromPeakText(currentReadings);
-    
+
+    // Bij lows leest de armsensor te hoog/te traag (interstitieel loopt achter en
+    // onderschat ernstige lows — bloed kan onder 2.0 zitten terwijl de sensor 2.4 toont).
+    // Een precies voorspeld getal is daar misleidend; toon risico + onzekerheid i.p.v. een cijfer.
+    var nowMmol = latestReading ? mmol(Number(latestReading.sgv)) : NaN;
+    var blendedRateNow = getForecastRateMmol(currentRows);
+    var primaryNow = getPrimaryRate(currentRows);
+    var rateNow = Number.isFinite(blendedRateNow) ? blendedRateNow : (primaryNow ? primaryNow.rateMmol : 0);
+    var proj20 = Number.isFinite(nowMmol) ? nowMmol + rateNow * 20 : NaN;
+    var lowUnreliable = (Number.isFinite(nowMmol) && nowMmol <= 3.9) ||
+                        (Number.isFinite(proj20) && proj20 <= 3.9 && rateNow < -0.04);
+    var predictHtml = lowUnreliable
+      ? '<div class="hypo-line"><span class="hypo-predict">verwacht: laag — kan lager zijn dan gemeten</span></div>'
+      : '<div class="hypo-line"><span class="hypo-predict">verwacht: ' + horizonPredictionText() + ' mmol/L</span></div>';
+
     alert.innerHTML = [
       '<div class="hypo-line primary">',
       '<span class="hypo-title">', safeRisk.title, '</span>',
@@ -1068,7 +1082,7 @@
       '</div>',
       '<div class="hypo-line"><span class="hypo-rate">', signed(safeRisk.rate, 3), '/min</span></div>',
       '<div class="hypo-line"><span class="hypo-average">', averageRateText(true), '</span></div>',
-      '<div class="hypo-line"><span class="hypo-predict">verwacht: ', horizonPredictionText(), ' mmol/L</span></div>',
+      predictHtml,
       dropLine ? '<div class="hypo-line"><span class="hypo-drop">' + dropLine + '</span></div>' : '',
       patternLine ? '<div class="hypo-line"><span class="hypo-drop" style="color: #ff9800; font-weight: bold;">' + patternLine + '</span></div>' : '',
       '<div class="hypo-feedback">',
