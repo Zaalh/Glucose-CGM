@@ -2,7 +2,7 @@
   'use strict';
 
   var MGDL_PER_MMOL = 18.0182;
-  var WINDOWS_MINUTES = Array.from({ length: 60 }, function (_, index) { return index + 1; }).concat([90, 120]);
+  var WINDOWS_MINUTES = Array.from({ length: 60 }, function (_, index) { return index + 1; }).concat([65, 70, 75, 80, 85, 90, 120]);
   var MAX_BASELINE_DIFF_MS = 45000;
   var POLL_MS = 30000;
   var OVERLAY_ENTRY_COUNT = 1600;
