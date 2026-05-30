@@ -53,13 +53,19 @@
     return num.toFixed(2);
   }
 
-  // Reformat Nightscout's mmol delta (e.g. "+0.4mmol/L") to 2 decimals,
-  // preserving the sign and any unit suffix. Only touches decimal (mmol)
-  // deltas, so mg/dL integer deltas are left untouched.
-  function formatDisplayedDelta(text) {
-    var match = /^\s*([+-])?(\d+\.\d+)(.*)$/.exec(text || '');
-    if (!match) return null;
-    return (match[1] || '') + parseFloat(match[2]).toFixed(2) + match[3];
+  // Our own precise delta, computed from raw sgv values over a ~5-minute
+  // window (the reading closest to 5 min before the latest). Returns mmol
+  // as a number, or null when no matching baseline exists. This is the
+  // exact change from raw data — not a re-padding of Nightscout's rounded
+  // header delta.
+  function computePreciseDelta() {
+    var readings = currentReadings;
+    if (!readings || readings.length < 2) return null;
+    var latest = readings[0];
+    if (!latest || !Number.isFinite(Number(latest.sgv))) return null;
+    var baseline = findBaseline(readings, readingTime(latest), 5);
+    if (!baseline) return null;
+    return mmol(Number(latest.sgv) - Number(baseline.sgv));
   }
 
   function signed(value, digits) {
@@ -1289,13 +1295,30 @@
     updatingCurrentGlucose = false;
   }
 
+  // Leave Nightscout's own header delta untouched and show our precise
+  // 2-decimal 5-min delta alongside it, so both are visible for comparison.
   function renderCurrentDelta() {
     var deltaEl = document.querySelector('.bgdelta, #bgdelta, .currentDelta, [data-delta]');
     if (!deltaEl) return;
-    var value = formatDisplayedDelta(deltaEl.textContent);
-    if (!value || deltaEl.textContent === value) return;
+    var delta = computePreciseDelta();
+    var ours = document.getElementById('cgm-precise-delta');
+
+    if (delta === null) {
+      if (ours) { updatingCurrentGlucose = true; ours.remove(); updatingCurrentGlucose = false; }
+      return;
+    }
+
     updatingCurrentGlucose = true;
-    deltaEl.textContent = value;
+    if (!ours) {
+      ours = document.createElement('span');
+      ours.id = 'cgm-precise-delta';
+      ours.style.cssText = 'margin-left:6px;opacity:0.7;font-size:0.62em;font-weight:600;vertical-align:middle;';
+    }
+    if (ours.previousElementSibling !== deltaEl) {
+      deltaEl.insertAdjacentElement('afterend', ours);
+    }
+    var text = signed(delta, 2) + ' (5m)';
+    if (ours.textContent !== text) ours.textContent = text;
     updatingCurrentGlucose = false;
   }
 
