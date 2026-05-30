@@ -923,6 +923,15 @@
     refresh();
   }
 
+  // Lichte re-anchor zonder data opnieuw te laden: zet de vakjes op een historisch punt.
+  // Gebruikt voor scrubben (muis over de grafiek) in history-modus.
+  function applyHistoryAnchor(anchorTime) {
+    if (!currentReadings.length) return;
+    selectedReadingTime = anchorTime;
+    var anchorEntry = currentReadings.find(function (entry) { return readingTime(entry) === anchorTime; }) || null;
+    render(calculateRows(currentReadings, anchorEntry));
+  }
+
   function ensureHypoAlert() {
     var existing = document.getElementById('cgm-hypo-alert');
     if (existing) return existing;
@@ -1632,6 +1641,26 @@
       }
       refresh();
       showPointTooltip(dot, event);
+    }, true);
+
+    // History-scrub: in history-modus volgen de vakjes het meetpunt onder de muis.
+    // Vegen over de grafiek i.p.v. stap-voor-stap bladeren. rAF-throttle tegen jank.
+    var scrubRaf = null;
+    var pendingScrubTime = null;
+    document.addEventListener('mousemove', function (event) {
+      if (getViewMode() !== 'history') return;
+      var dot = event.target && event.target.closest ? event.target.closest('circle.entry-dot') : null;
+      if (!dot) return;
+      var entry = chartReadingsAsc[pointIndexFromDot(dot)];
+      if (!entry) return;
+      var t = readingTime(entry);
+      if (t === selectedReadingTime) return;
+      pendingScrubTime = t;
+      if (scrubRaf) return;
+      scrubRaf = window.requestAnimationFrame(function () {
+        scrubRaf = null;
+        if (pendingScrubTime !== null) applyHistoryAnchor(pendingScrubTime);
+      });
     }, true);
   }
 
