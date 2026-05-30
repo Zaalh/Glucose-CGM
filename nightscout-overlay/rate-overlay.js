@@ -15,7 +15,7 @@
   var ESTIMATE_GAP_MIN_MS = 150000;
   var ESTIMATE_OPEN_MAX_MS = 1200000;
   var ESTIMATE_PIXEL_GAP_MIN = 3;
-  var MIN_REFRESH_MS = 12000;
+  var MIN_REFRESH_MS = 5000;
   var latestReading = null;
   var updatingCurrentGlucose = false;
   var currentRows = [];
@@ -510,9 +510,8 @@
     var horizons = [10, 15, 20, 30];
     var prev = null;
     var parts = horizons.map(function (minutes) {
-      // Apply pattern correction progressively by horizon:
-      // conservative at 10m, full effect by 20m+.
-      var corrWeight = Math.min(1, minutes / 20);
+      // Apply pattern correction progressively by horizon smoothly up to 30m
+      var corrWeight = minutes / 30;
       var effectiveCorr = corr * calib.corrScale;
       var raw = baseMmol + rate * minutes;
       var adjusted = raw - (effectiveCorr * corrWeight) + calib.biasPerMin * minutes;
@@ -929,11 +928,18 @@
 
   function ensureMobileDock(chart) {
     var existing = document.getElementById('cgm-mobile-dock');
-    if (existing) return existing;
+    var parent = chart && chart.parentElement ? chart.parentElement : document.body;
+    
+    if (existing) {
+        if (!document.body.contains(existing)) {
+            parent.insertBefore(existing, chart || parent.firstChild);
+        }
+        return existing;
+    }
+    
     var dock = document.createElement('div');
     dock.id = 'cgm-mobile-dock';
     dock.setAttribute('aria-label', 'Mobiele glucose overlay');
-    var parent = chart && chart.parentElement ? chart.parentElement : document.body;
     parent.insertBefore(dock, chart || parent.firstChild);
     return dock;
   }
@@ -1005,31 +1011,30 @@
   function renderHypoAlert(risk) {
     var alert = ensureHypoAlert();
     currentHypoRisk = risk;
-    if (!risk) {
+    var patternLine = currentPatternCorrection
+      ? 'patrooncorr: -' + currentPatternCorrection.correction.toFixed(1) + ' (n=' + currentPatternCorrection.episodes + ')'
+      : '';
+      
+    if (!risk && !patternLine) {
       alert.style.display = 'none';
       return;
     }
 
     alert.style.display = 'flex';
-    alert.className = risk.css;
+    var safeRisk = risk || { css: 'ok', title: 'HYPO OK', detail: 'Patroon actief', rate: (currentRows && currentRows.length ? getPrimaryRate(currentRows).rateMmol : 0) };
+    alert.className = safeRisk.css;
     var dropLine = dropFromPeakText(currentReadings);
-    var forecastRate = currentRows && currentRows.length ? getForecastRateMmol(currentRows) : null;
-    var patternCorrectionActive = currentPatternCorrection && Number.isFinite(forecastRate) && forecastRate < -0.005;
-    var patternLine = currentPatternCorrection
-      ? (patternCorrectionActive
-        ? 'patrooncorr: -' + currentPatternCorrection.correction.toFixed(1) + ' (n=' + currentPatternCorrection.episodes + ')'
-        : 'patrooncorr: gepauzeerd, trend stijgt (n=' + currentPatternCorrection.episodes + ')')
-      : '';
+    
     alert.innerHTML = [
       '<div class="hypo-line primary">',
-      '<span class="hypo-title">', risk.title, '</span>',
-      '<span class="hypo-detail">', risk.detail, '</span>',
+      '<span class="hypo-title">', safeRisk.title, '</span>',
+      '<span class="hypo-detail">', safeRisk.detail || '', '</span>',
       '</div>',
-      '<div class="hypo-line"><span class="hypo-rate">', signed(risk.rate, 3), '/min</span></div>',
+      '<div class="hypo-line"><span class="hypo-rate">', signed(safeRisk.rate, 3), '/min</span></div>',
       '<div class="hypo-line"><span class="hypo-average">', averageRateText(true), '</span></div>',
       '<div class="hypo-line"><span class="hypo-predict">verwacht: ', horizonPredictionText(), ' mmol/L</span></div>',
       dropLine ? '<div class="hypo-line"><span class="hypo-drop">' + dropLine + '</span></div>' : '',
-      patternLine ? '<div class="hypo-line"><span class="hypo-drop">' + patternLine + '</span></div>' : ''
+      patternLine ? '<div class="hypo-line"><span class="hypo-drop" style="color: #ff9800; font-weight: bold;">' + patternLine + '</span></div>' : ''
     ].join('');
   }
 
@@ -1102,14 +1107,13 @@
       }, window.scrollY + 72);
       var dockTop = dock.getBoundingClientRect().top + window.scrollY;
       dock.style.setProperty('margin-top', Math.max(8, topBottom - dockTop + 10) + 'px', 'important');
-      window.requestAnimationFrame(function () {
-        chart.style.setProperty('margin-top', Math.max(12, dock.getBoundingClientRect().height + 14) + 'px', 'important');
-        statsPanel.style.setProperty('position', 'absolute', 'important');
-        statsPanel.style.setProperty('display', 'grid', 'important');
-        statsPanel.style.setProperty('top', Math.round(chart.getBoundingClientRect().bottom + window.scrollY + 16) + 'px', 'important');
-        statsPanel.style.setProperty('left', '50%', 'important');
-        statsPanel.style.setProperty('transform', 'translateX(-50%)', 'important');
-      });
+      // Direct apply without RAF for mobile
+      chart.style.setProperty('margin-top', Math.max(12, dock.getBoundingClientRect().height + 14) + 'px', 'important');
+      statsPanel.style.setProperty('position', 'absolute', 'important');
+      statsPanel.style.setProperty('display', 'grid', 'important');
+      statsPanel.style.setProperty('top', Math.round(chart.getBoundingClientRect().bottom + window.scrollY + 16) + 'px', 'important');
+      statsPanel.style.setProperty('left', '50%', 'important');
+      statsPanel.style.setProperty('transform', 'translateX(-50%)', 'important');
       return;
     } else {
       if (alert.parentElement !== document.body) document.body.appendChild(alert);
@@ -1159,7 +1163,7 @@
 
     panel.style.display = 'grid';
     panel.innerHTML = [
-      '<div class="stats-title">Laatste 24 uur</div>',
+      '<div class="stats-title">Laatste 24 uur (update: ' + new Date().toLocaleTimeString() + ')</div>',
       '<div class="stat low"><span class="stat-label">Laag</span><span class="stat-value">', stats.lowPct, '%</span></div>',
       '<div class="stat range"><span class="stat-label">In bereik</span><span class="stat-value">', stats.inRangePct, '%</span></div>',
       '<div class="stat high"><span class="stat-label">Hoog</span><span class="stat-value">', stats.highPct, '%</span></div>',
@@ -1179,10 +1183,11 @@
       '<div class="stat"><span class="stat-label">Gemiste gaten</span><span class="stat-value">', stats.missingIntervals, '</span></div>',
       '<div class="stat"><span class="stat-label">Nacht min</span><span class="stat-value">', stats.nightMin === null ? '--' : stats.nightMin.toFixed(1) + ' mmol/L', '</span></div>'
     ].join('');
-    window.requestAnimationFrame(positionContainer);
+    positionContainer();
   }
 
   function render(rows) {
+    if (window.console) console.log('[CGM Overlay] Render called, rows=', rows.length);
     ensureStyles();
     var container = ensureContainer();
     if (!container) return;
@@ -1228,7 +1233,10 @@
         '</div>'
       ].join('');
     }).join('');
-    window.requestAnimationFrame(positionContainer);
+    positionContainer();
+    // Force a CSS repaint specifically for mobile browsers
+    var dock = document.getElementById('cgm-mobile-dock');
+    if (dock) { dock.style.display = 'none'; dock.offsetHeight; dock.style.display = ''; }
   }
 
   function renderCurrentGlucose(entry) {
@@ -1544,24 +1552,7 @@
   }
 
   function observeCurrentGlucose() {
-    var observer = new MutationObserver(function (mutations) {
-      if (updatingCurrentGlucose) return;
-      var nightscoutMutations = mutations.filter(function (mutation) { return !isOverlayMutation(mutation); });
-      if (!nightscoutMutations.some(isNightscoutLiveMutation)) return;
-
-      var current = document.querySelector('.currentBG, #currentBG, [data-current-bg]');
-      var currentText = current ? current.textContent.replace(/\s+/g, ' ').trim() : '';
-      if (!currentText || currentText === lastObservedCurrentText) return;
-
-      lastObservedCurrentText = currentText;
-      scheduleRefresh(250, true);
-    });
-
-    observer.observe(document.body, {
-      childList: true,
-      characterData: true,
-      subtree: true
-    });
+    // Disabled MutationObserver. We will rely purely on aggressive polling.
   }
 
   function scheduleRefresh(delay, force) {
@@ -1582,7 +1573,9 @@
   }
 
   function fetchOverlayEntries() {
-    return fetch('/_overlay/entries?count=' + OVERLAY_ENTRY_COUNT, { cache: 'no-store' })
+    var ts = Date.now();
+    if (window.console) console.log('[CGM Overlay] Fetching data... ts=' + ts);
+    return fetch('/_overlay/entries?count=' + OVERLAY_ENTRY_COUNT + '&ts=' + ts, { cache: 'no-store' })
       .then(function (response) {
         if (!response.ok) throw new Error('Overlay entries gaf HTTP ' + response.status);
         return response.json();
@@ -1596,7 +1589,7 @@
         if (window.console && window.console.warn) {
           window.console.warn('[CGM Overlay] Lichte endpoint faalde, val terug op Nightscout:', error);
         }
-        return fetch('/api/v1/entries/sgv.json?count=' + OVERLAY_ENTRY_COUNT, { cache: 'no-store' })
+        return fetch('/api/v1/entries/sgv.json?count=' + OVERLAY_ENTRY_COUNT + '&ts=' + ts, { cache: 'no-store' })
           .then(function (response) {
             if (!response.ok) throw new Error('Nightscout entries gaf HTTP ' + response.status);
             return response.json();
@@ -1696,11 +1689,19 @@
       });
   }
 
-  function start() {
+    function start() {
+    console.log('--- NIEUWE SCRIPT VERSIE GELADEN ---');
     installSoundDefaultOff();
     installPointTooltip();
     installChartRangeListeners();
     observeCurrentGlucose();
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'visible') {
+      if (window.console) console.log('[CGM Overlay] Woke up on mobile, forcing refresh');
+      scheduleRefresh(10, true);
+    }
+  });
+
     observeChartChanges();
     fetchLatestDbPrediction();
     refresh(true);

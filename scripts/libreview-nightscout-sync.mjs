@@ -210,7 +210,8 @@ function buildForecast(input) {
   const predictedMmol = {}
   const probabilities = {}
   for (const h of horizons) {
-    const w = Math.min(1, h / 20)
+    // The pattern correction should scale linearly or slightly aggressively with time
+    const w = h / 30; // Max out the correction at 30 minutes instead of 20
     const v = clamp(input.currentMmol + baseRate * h - corr * w, 1.5, 33)
     predictedMmol[String(h)] = round(v, 3)
     probabilities[String(h)] = {
