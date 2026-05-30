@@ -104,6 +104,16 @@ curl -X POST http://localhost:8787/sync
 
 Start handmatig dezelfde sync die de `Sync Libre` knop gebruikt.
 
+### Sync-service endpoints
+
+De `libreview-sync` service (poort 8787) biedt naast `/health` en `/sync`:
+
+- `GET /prediction/latest` — de nieuwste `prediction_snapshots` record (risico, `predictedMmol` per horizon 10/15/20/30/60/120/180, kansen `<4.5`/`<4.0`).
+- `GET /overlay/entries?count=N` — recente entries voor de overlay-grafiek.
+- `POST /feedback` — schrijft `user_feedback` (types: `confirmed`, `false_alarm`, `feels_hypo`, `ate_now`, `fingerstick_confirmed`), gekoppeld aan de dichtstbijzijnde entry + actieve snapshot.
+
+De nginx-overlay proxyt deze als `/_prediction/latest`, `/_overlay/entries` en `/_feedback`, zodat de browser ze same-origin kan benaderen. De feedbackknoppen in de hypo-kaart van de overlay gebruiken `POST /_feedback`.
+
 ```bash
 npm run nightscout:down
 ```
@@ -121,6 +131,36 @@ npm run snapshots:live
 ```
 
 Maakt één live `prediction_snapshots` record op basis van de meest recente Nightscout entry (idempotent per `entryId`).
+
+```bash
+npm run patterns:analyze
+```
+
+Scant alle entries en vult `pattern_events` (spikes, drops, (near-)hypo's, hypo-na-hyper).
+
+```bash
+npm run features:build
+```
+
+Berekent afgeleide `entry_features` per CGM-entry.
+
+```bash
+npm run vectors:build
+```
+
+Bouwt `episode_vectors` uit `pattern_events` + entries: per episode een genormaliseerde curve-vector, een uitlegbare featureVector en de gemeten outcome. Basis voor de live similarity-correctie. Draai dit ná `patterns:analyze`.
+
+```bash
+npm run snapshots:backfill
+```
+
+Simuleert historische voorspellingen op oude entries (voor training/evaluatie).
+
+```bash
+npm run snapshots:evaluate
+```
+
+Vult de uitkomsten van `prediction_snapshots` (`actualMinMmol_30m/60m/120m/180m`, (near-)hypo-vlaggen, `true/false_positive/negative`).
 
 ```bash
 npm run summaries:build
@@ -148,10 +188,15 @@ Afgerond:
 - modeltraining + export naar app-config
 - `daily_summaries` script
 - policy-gestuurde training (`balanced` / `precision-first`)
+- forecast-horizons 10/15/20/30/60/120/180 (rate satureert vanaf >30 min)
+- `episode_vectors` + live similarity-correctie op de patrooncorrectie
+- `user_feedback` feedbackknoppen in de overlay-hypokaart
 
 Nog open (bewust):
 
 - fine-tuning van thresholds/policies op langere dataperiode (optioneel)
+- AI-laag (`ai_observations` / `ai_questions`): uitleg/context/vragen — komt later, neemt nooit de live alarmbeslissing
+- `episode_vectors` similarity ook in de UI-redenen tonen
 
 ## Environment Files
 

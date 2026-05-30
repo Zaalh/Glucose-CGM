@@ -37,7 +37,7 @@ Dit plan is deels gebouwd. Onderstaand overzicht houdt bij wat af is en wat nog 
 3. **`episode_vectors`**: `scripts/build-episode-vectors.mjs` (genormaliseerde curve-vector + uitlegbare featureVector + outcome). Live similarity (`findSimilarEpisodes`) verrijkt de patrooncorrectie en voegt een risicoreden toe ("Lijkt op N eerdere episodes; M gingen onder 4.5"), met fallback op de simpele peak-correctie.
 4. **npm-scripts** toegevoegd voor de hele analyse-pipeline: `patterns:analyze`, `features:build`, `vectors:build`, `snapshots:backfill`, `snapshots:evaluate`.
 
-> Let op: de mongo-shell scripts en de sync-wijzigingen zijn `node --check`-geverifieerd, maar nog NIET tegen de live MongoDB gedraaid. Eerst `patterns:analyze` -> `vectors:build` draaien om `episode_vectors` te vullen voordat de live similarity effect heeft.
+> Status: **live gedeployed** (2026-05-30) op de Nightscout-stack. `episode_vectors` is gevuld (34 episodes uit 520 events), `/feedback` en `/prediction/latest` met alle 7 horizons zijn live geverifieerd. De wijzigingen zijn samengevoegd met `codex/overlay-light-refresh` (de live overlay) en draaien op `main` / `codex/overlay-light-refresh`.
 
 ### Open
 
