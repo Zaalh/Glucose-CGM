@@ -42,6 +42,26 @@
     return mmol(Number(entry.sgv)).toFixed(2);
   }
 
+  // Reformat whatever number Nightscout already rendered to 2 decimals.
+  // Used as a fallback when we don't yet have a fresh reading, so the
+  // displayed value never falls back to Nightscout's 1-decimal format.
+  function formatDisplayedMmol(text) {
+    var num = parseFloat(text);
+    if (!Number.isFinite(num)) return null;
+    // Skip mg/dL values (whole numbers >= 36); mmol stays well below that.
+    if (text.indexOf('.') === -1 && num >= 36) return null;
+    return num.toFixed(2);
+  }
+
+  // Reformat Nightscout's mmol delta (e.g. "+0.4mmol/L") to 2 decimals,
+  // preserving the sign and any unit suffix. Only touches decimal (mmol)
+  // deltas, so mg/dL integer deltas are left untouched.
+  function formatDisplayedDelta(text) {
+    var match = /^\s*([+-])?(\d+\.\d+)(.*)$/.exec(text || '');
+    if (!match) return null;
+    return (match[1] || '') + parseFloat(match[2]).toFixed(2) + match[3];
+  }
+
   function signed(value, digits) {
     var rounded = value.toFixed(digits);
     return value > 0 ? '+' + rounded : rounded;
@@ -677,6 +697,10 @@
       '#cgm-hypo-alert .hypo-average{font-family:monospace;font-size:14px;font-weight:900;line-height:1.1;white-space:nowrap;opacity:.95}',
       '#cgm-hypo-alert .hypo-predict{font-family:monospace;font-size:13px;font-weight:800;line-height:1.15;white-space:nowrap;opacity:.95}',
       '#cgm-hypo-alert .hypo-drop{font-family:monospace;font-size:12px;font-weight:800;line-height:1.15;white-space:nowrap;opacity:.95}',
+      '#cgm-hypo-alert .hypo-feedback{display:flex;flex-wrap:wrap;gap:4px;justify-content:center;margin-top:4px}',
+      '#cgm-hypo-alert .hypo-feedback button{font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;line-height:1;padding:4px 7px;border:1px solid rgba(0,0,0,.28);border-radius:5px;background:rgba(255,255,255,.55);color:inherit;cursor:pointer}',
+      '#cgm-hypo-alert .hypo-feedback button:disabled{opacity:.55;cursor:default}',
+      '@media(max-width:700px){#cgm-hypo-alert .hypo-feedback button{font-size:10px;padding:3px 5px}}',
       '#cgm-hypo-alert.ok{color:#063b1d;border-color:#4ade80;background:linear-gradient(135deg,#bbf7d0 0%,#4ade80 100%)}',
       '#cgm-hypo-alert.watch{color:#2f1600;border-color:#facc15;background:linear-gradient(135deg,#fff3a3 0%,#fbbf24 100%)}',
       '#cgm-hypo-alert.warning{color:#2f1600;border-color:#f59e0b;background:linear-gradient(135deg,#ffe08a 0%,#fb923c 100%)}',
@@ -894,6 +918,12 @@
     var alert = document.createElement('div');
     alert.id = 'cgm-hypo-alert';
     alert.setAttribute('aria-label', 'Hypoglykemie waarschuwing');
+    alert.addEventListener('click', function (event) {
+      var btn = event.target && event.target.closest ? event.target.closest('button[data-feedback]') : null;
+      if (!btn) return;
+      event.stopPropagation();
+      sendFeedback(btn.getAttribute('data-feedback'), btn);
+    });
     document.body.appendChild(alert);
     return alert;
   }
@@ -1022,8 +1052,31 @@
       '<div class="hypo-line"><span class="hypo-average">', averageRateText(true), '</span></div>',
       '<div class="hypo-line"><span class="hypo-predict">verwacht: ', horizonPredictionText(), ' mmol/L</span></div>',
       dropLine ? '<div class="hypo-line"><span class="hypo-drop">' + dropLine + '</span></div>' : '',
-      patternLine ? '<div class="hypo-line"><span class="hypo-drop">' + patternLine + '</span></div>' : ''
+      patternLine ? '<div class="hypo-line"><span class="hypo-drop">' + patternLine + '</span></div>' : '',
+      '<div class="hypo-feedback">',
+      '<button type="button" data-feedback="confirmed">Klopt</button>',
+      '<button type="button" data-feedback="false_alarm">Vals alarm</button>',
+      '<button type="button" data-feedback="feels_hypo">Ik voel hypo</button>',
+      '<button type="button" data-feedback="ate_now">Ik heb gegeten</button>',
+      '<button type="button" data-feedback="fingerstick_confirmed">Vingerprik ok</button>',
+      '</div>'
     ].join('');
+  }
+
+  function sendFeedback(type, btn) {
+    if (!type) return;
+    var proto = window.location.protocol === 'https:' ? 'https://' : 'http://';
+    var url = proto + window.location.hostname + ':8787/feedback';
+    var payload = { type: type };
+    if (latestReading && latestReading.identifier) payload.entryIdentifier = latestReading.identifier;
+    if (btn) btn.disabled = true;
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function (res) { return res.json(); })
+      .then(function () { if (btn) btn.textContent = '✓'; })
+      .catch(function () { if (btn) btn.disabled = false; });
   }
 
   function positionContainer() {
@@ -1225,13 +1278,24 @@
   }
 
   function renderCurrentGlucose(entry) {
-    var value = formatCurrentMmol(entry);
     var currentBg = document.querySelector('.currentBG');
-    if (!value || !currentBg) return;
+    if (!currentBg) return;
+    var value = formatCurrentMmol(entry) || formatDisplayedMmol(currentBg.textContent);
+    if (!value) return;
     if (currentBg.textContent === value) return;
 
     updatingCurrentGlucose = true;
     currentBg.textContent = value;
+    updatingCurrentGlucose = false;
+  }
+
+  function renderCurrentDelta() {
+    var deltaEl = document.querySelector('.bgdelta, #bgdelta, .currentDelta, [data-delta]');
+    if (!deltaEl) return;
+    var value = formatDisplayedDelta(deltaEl.textContent);
+    if (!value || deltaEl.textContent === value) return;
+    updatingCurrentGlucose = true;
+    deltaEl.textContent = value;
     updatingCurrentGlucose = false;
   }
 
@@ -1524,6 +1588,7 @@
     var observer = new MutationObserver(function () {
       if (updatingCurrentGlucose) return;
       renderCurrentGlucose(latestReading);
+      renderCurrentDelta();
     });
 
     observer.observe(document.body, {
@@ -1555,6 +1620,7 @@
         var rows = calculateRows(readings, anchorEntry);
         latestReading = readings[0] || null;
         renderCurrentGlucose(anchorEntry || readings[0]);
+        renderCurrentDelta();
         currentHypoRisk = calculateHypoRisk(readings, rows);
         var peakSignal = detectPeakDropSignal(readings);
         currentPatternCorrection = computePatternCorrection(readings, peakSignal);

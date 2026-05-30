@@ -15,6 +15,40 @@ Belangrijk voor onze voorspelling:
 - De relevante horizon is vooral 10, 15, 20, 30 en 60 minuten, met 120 en 180 minuten als secundaire vensters.
 - Een "bijna hypo" is ook belangrijk, bijvoorbeeld onder 4.5 mmol/L, omdat jouw data al laat zien dat dit vaak voorafgaat aan echte hypo's.
 
+## Implementatiestatus (bijgewerkt 2026-05-30)
+
+Dit plan is deels gebouwd. Onderstaand overzicht houdt bij wat af is en wat nog open staat. De rest van dit document blijft de volledige specificatie/roadmap.
+
+### Gebouwd
+
+- **Live dataflow**: LibreView -> `scripts/libreview-nightscout-sync.mjs` (server + loop) -> Nightscout -> MongoDB. Server-endpoints: `/health`, `/sync`, `/prediction/latest`.
+- **`prediction_snapshots`**: per nieuwe entry een snapshot (upsert op `entryIdentifier`). Bevat `risk`, `riskScore`, `reasons`, `predictedMmol`, `probabilities` (`lt45`/`lt40`), `modelVersion: 'rules-v1'`. Backfill via `scripts/backfill-prediction-snapshots.mjs`, evaluatie via `scripts/evaluate-predictions.mjs`.
+- **`pattern_events`**: episodedetectie via `scripts/analyze-patterns.mjs`; door de sync gebruikt voor patrooncorrectie.
+- **`entry_features`**: backfill via `scripts/build-entry-features.mjs`.
+- **`model_state`**: training via `scripts/train-risk-model.mjs` (policies: recall-first/balanced/precision-first), export naar `src/lib/risk-model-state.json` via `scripts/retrain-and-export-model.mjs`.
+- **`daily_summaries`**: aggregatie via `scripts/summarize-days.mjs`.
+- **Regelgebaseerde risicoscore (uitlegbaar)**: `src/lib/riskModel.ts` (frontend) en `evaluateRiskRuleV1` in de sync. Niveaus low/watch/high/urgent, met drempels uit `model_state`.
+- **Live UI**: nginx-overlay `nightscout-overlay/rate-overlay.js` toont rates, forecast-lijn, hypo-risico (peak-drop watch/high/urgent) en forecast-calibratie op poort 1337.
+
+### Recent afgemaakt (2026-05-30)
+
+1. **Snapshot-horizons uitgebreid** naar 60/120/180 min in `buildForecast` (rate satureert vanaf >30 min via `RATE_DECAY_TAU`); `evaluate-predictions.mjs` meet nu ook `actualMinMmol_120m/180m` en (near-)hypo-vlaggen op 60/180 min.
+2. **`user_feedback`**: collection + feedbackknoppen (`Klopt`, `Vals alarm`, `Ik voel hypo`, `Ik heb gegeten`, `Vingerprik bevestigd`) in de overlay-hypokaart -> sync-endpoint `POST /feedback` -> MongoDB, gekoppeld aan dichtstbijzijnde entry + actieve snapshot.
+3. **`episode_vectors`**: `scripts/build-episode-vectors.mjs` (genormaliseerde curve-vector + uitlegbare featureVector + outcome). Live similarity (`findSimilarEpisodes`) verrijkt de patrooncorrectie en voegt een risicoreden toe ("Lijkt op N eerdere episodes; M gingen onder 4.5"), met fallback op de simpele peak-correctie.
+4. **npm-scripts** toegevoegd voor de hele analyse-pipeline: `patterns:analyze`, `features:build`, `vectors:build`, `snapshots:backfill`, `snapshots:evaluate`.
+
+> Let op: de mongo-shell scripts en de sync-wijzigingen zijn `node --check`-geverifieerd, maar nog NIET tegen de live MongoDB gedraaid. Eerst `patterns:analyze` -> `vectors:build` draaien om `episode_vectors` te vullen voordat de live similarity effect heeft.
+
+### Open
+
+- **AI-laag** (`ai_observations` + `ai_questions`, analyse via de lokale gemini-mcp): bewust uitgesteld, komt later. Mag NOOIT de live alarmbeslissing nemen; alleen uitleg, context en vragen.
+
+### Bewust nog niet
+
+- Wearable/activiteit/slaap-databronnen (prioriteit 4-6 hieronder).
+- Maaltijdfoto/tekst-AI.
+- Vector-index in Atlas; lokale numerieke search volstaat zolang de dataset klein is.
+
 ## Eerste observatie uit jouw data
 
 Op de live Nightscout/MongoDB-data, niet de afgeronde PDF:

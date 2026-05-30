@@ -14,6 +14,10 @@ const HISTORY_PERIOD_MINUTES = 7
 const RATE_WINDOWS_MINUTES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 20, 30, 45, 60, 90, 120]
 const RATE_MAX_BASELINE_DIFF_MS = 45_000
 const MGDL_PER_MMOL = 18.0182
+const FORECAST_HORIZONS = [10, 15, 20, 30, 60, 120, 180]
+// Vanaf >30 min satureert het rate-effect: glucose keert terug naar baseline,
+// dus 120/180 min mag niet puur lineair doorlopen (anders altijd in de clamp).
+const RATE_DECAY_TAU = 45
 
 const LLU_BASE_HEADERS = {
   'Content-Type': 'application/json',
@@ -94,6 +98,7 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
     .sort((a, b) => a.date - b.date)
 
   const episodes = await loadPatternEpisodes()
+  const episodeVectors = await loadEpisodeVectors()
   const snapshots = entries.map((entry) => {
     const idx = timeline.findIndex((candidate) => candidate.identifier === entry.identifier)
     if (idx < 0) return null
@@ -115,6 +120,16 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
     const rate10m = calcRateFromTimeline(timeline, idx, 10)
     const rate15m = calcRateFromTimeline(timeline, idx, 15)
 
+    const maxFallRate = Math.min(
+      Number.isFinite(rate5m) ? rate5m : 0,
+      Number.isFinite(rate10m) ? rate10m : 0,
+      Number.isFinite(rate15m) ? rate15m : 0,
+    )
+    const similar = findSimilarEpisodes(
+      { peakMmol, dropFromPeakMmol, minutesSincePeak, maxFallRate },
+      episodeVectors,
+    )
+
     const risk = evaluateRiskRuleV1({
       currentMmol,
       rate5m,
@@ -125,6 +140,12 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
       dropFromPeakMmol,
       dropFromPeakPercent,
     })
+    if (similar && similar.count >= 3 && similar.hypoRatio >= 0.5) {
+      risk.reasons = risk.reasons.concat(
+        `Lijkt op ${similar.count} eerdere episodes; ${similar.hypoCount} gingen onder 4.5`,
+      )
+    }
+
     const forecast = buildForecast({
       currentMmol,
       rate5m,
@@ -134,6 +155,7 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
       minutesSincePeak,
       dropFromPeakMmol,
       episodes,
+      patternDrop: similar ? similar.correction : null,
     })
 
     return {
@@ -203,15 +225,83 @@ async function loadPatternEpisodes() {
   }
 }
 
+async function loadEpisodeVectors() {
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    return await client.db().collection('episode_vectors')
+      .find({}, { projection: { featureVector: 1, outcome: 1, eventType: 1 } })
+      .limit(2000)
+      .toArray()
+  } catch {
+    return []
+  } finally {
+    if (client) await client.close().catch(() => undefined)
+  }
+}
+
+const SIM_SCALES = { peakMmol: 4, dropFromPeakMmol: 3, minutesSincePeak: 30, maxFallRate: 0.1 }
+const SIM_MAX_DIST = 1.5
+const SIM_K = 8
+
+function sq(x) { return x * x }
+
+// Vergelijkt de huidige situatie met opgeslagen episode_vectors op een paar
+// dimensies die live betrouwbaar beschikbaar zijn. Geeft een gewogen
+// drop-correctie en hoeveel vergelijkbare episodes in (near-)hypo eindigden.
+function findSimilarEpisodes(input, vectors) {
+  if (!vectors || !vectors.length) return null
+  const scored = []
+  for (const v of vectors) {
+    const f = v.featureVector
+    if (!f || !Number.isFinite(f.peakMmol) || !Number.isFinite(f.dropFromPeakMmol)) continue
+    let sum = sq((f.peakMmol - input.peakMmol) / SIM_SCALES.peakMmol)
+    sum += sq((f.dropFromPeakMmol - input.dropFromPeakMmol) / SIM_SCALES.dropFromPeakMmol)
+    if (Number.isFinite(f.minutesPeakToEnd) && Number.isFinite(input.minutesSincePeak)) {
+      sum += sq((f.minutesPeakToEnd - input.minutesSincePeak) / SIM_SCALES.minutesSincePeak)
+    }
+    if (Number.isFinite(f.maxFallRate) && Number.isFinite(input.maxFallRate)) {
+      sum += sq((f.maxFallRate - input.maxFallRate) / SIM_SCALES.maxFallRate)
+    }
+    const dist = Math.sqrt(sum)
+    if (dist <= SIM_MAX_DIST) scored.push({ dist, drop: f.dropFromPeakMmol, outcome: v.outcome })
+  }
+  if (scored.length < 3) return null
+
+  scored.sort((a, b) => a.dist - b.dist)
+  const top = scored.slice(0, SIM_K)
+  let wsum = 0
+  let wdrop = 0
+  let hypoCount = 0
+  for (const s of top) {
+    const w = 1 / (1 + s.dist)
+    wsum += w
+    wdrop += w * (Number.isFinite(s.drop) ? s.drop : 0)
+    if (s.outcome === 'hypo' || s.outcome === 'near_hypo') hypoCount += 1
+  }
+  const weightedDrop = wsum > 0 ? wdrop / wsum : 0
+  return {
+    count: top.length,
+    hypoCount,
+    hypoRatio: top.length ? hypoCount / top.length : 0,
+    correction: Math.max(0, weightedDrop * 0.18),
+  }
+}
+
 function buildForecast(input) {
-  const horizons = [10, 15, 20, 30]
   const baseRate = blendRate(input.rate5m, input.rate10m, input.rate15m)
-  const corr = patternCorrection(input, input.episodes || [])
+  // Vector-similarity heeft voorrang; valt terug op de simpele peak-correctie.
+  const corr = Number.isFinite(input.patternDrop)
+    ? Math.max(0, input.patternDrop)
+    : patternCorrection(input, input.episodes || [])
   const predictedMmol = {}
   const probabilities = {}
-  for (const h of horizons) {
+  for (const h of FORECAST_HORIZONS) {
+    // Korte horizons lineair; vanaf >30 min satureert de bijdrage van de rate.
+    const effMinutes = h <= 30 ? h : 30 + RATE_DECAY_TAU * (1 - Math.exp(-(h - 30) / RATE_DECAY_TAU))
     const w = Math.min(1, h / 20)
-    const v = clamp(input.currentMmol + baseRate * h - corr * w, 1.5, 33)
+    const v = clamp(input.currentMmol + baseRate * effMinutes - corr * w, 1.5, 33)
     predictedMmol[String(h)] = round(v, 3)
     probabilities[String(h)] = {
       lt45: probBelow(v, 4.5),
@@ -361,6 +451,18 @@ function startServer() {
       return
     }
 
+    if (req.url === '/feedback' && req.method === 'POST') {
+      try {
+        const body = await readJsonBody(req)
+        const result = await writeUserFeedback(body)
+        res.end(JSON.stringify({ ok: true, id: result.id }))
+      } catch (err) {
+        res.writeHead(400)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
     res.writeHead(404)
     res.end(JSON.stringify({ success: false, message: 'Niet gevonden.' }))
   })
@@ -368,6 +470,89 @@ function startServer() {
   httpServer.listen(port, '0.0.0.0', () => {
     console.log(`[libreview-sync] HTTP sync server luistert op ${port}`)
   })
+}
+
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let raw = ''
+    req.on('data', (chunk) => {
+      raw += chunk
+      if (raw.length > 1_000_000) {
+        reject(new Error('Body te groot'))
+        req.destroy()
+      }
+    })
+    req.on('end', () => {
+      try {
+        resolve(raw ? JSON.parse(raw) : {})
+      } catch (err) {
+        reject(new Error(`Ongeldige JSON: ${formatError(err)}`))
+      }
+    })
+    req.on('error', reject)
+  })
+}
+
+const FEEDBACK_TYPES = new Set([
+  'confirmed',
+  'false_alarm',
+  'feels_hypo',
+  'ate_now',
+  'fingerstick_confirmed',
+])
+
+async function writeUserFeedback(body) {
+  const type = String((body && body.type) || '').trim()
+  if (!FEEDBACK_TYPES.has(type)) {
+    throw new Error(`Onbekend feedbacktype: ${type || '(leeg)'}`)
+  }
+
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    const db = client.db()
+
+    let entry = null
+    if (body && body.entryIdentifier) {
+      entry = await db.collection('entries')
+        .find({ identifier: body.entryIdentifier }, { projection: { _id: 1, identifier: 1, date: 1, sgv: 1 } })
+        .limit(1)
+        .next()
+    }
+    if (!entry) {
+      entry = await db.collection('entries')
+        .find({ type: 'sgv' }, { projection: { _id: 1, identifier: 1, date: 1, sgv: 1 } })
+        .sort({ date: -1 })
+        .limit(1)
+        .next()
+    }
+
+    const snapshot = entry
+      ? await db.collection('prediction_snapshots')
+          .find({ entryIdentifier: entry.identifier }, { projection: { _id: 1, risk: 1, riskScore: 1 } })
+          .limit(1)
+          .next()
+      : null
+
+    const doc = {
+      createdAt: new Date().toISOString(),
+      type,
+      value: body && body.value != null ? body.value : null,
+      note: body && body.note ? String(body.note).slice(0, 500) : null,
+      relatedEntryId: entry ? entry._id : null,
+      relatedEntryIdentifier: entry ? entry.identifier ?? null : null,
+      relatedEntryMmol: entry && Number.isFinite(entry.sgv) ? round(Number(entry.sgv) / MGDL_PER_MMOL, 3) : null,
+      relatedSnapshotId: snapshot ? snapshot._id : null,
+      riskAtFeedback: snapshot ? snapshot.risk : null,
+      riskScoreAtFeedback: snapshot ? snapshot.riskScore : null,
+    }
+
+    const result = await db.collection('user_feedback').insertOne(doc)
+    return { id: String(result.insertedId) }
+  } finally {
+    if (client) await client.close().catch(() => undefined)
+  }
 }
 
 async function getLatestPredictionSnapshot() {

@@ -1,2 +1,7 @@
 node_modules/
 .env
+.env.*
+dist/
+.npm-cache/
+nightscout-mongo-data/
+.claude/
