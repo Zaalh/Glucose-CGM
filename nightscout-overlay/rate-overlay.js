@@ -1658,10 +1658,25 @@
     }, wait);
   }
 
+  // Fetch met harde timeout. Zonder dit blijft een hangende request (bijv. tijdens een
+  // backend-herstart) eeuwig openstaan, waardoor refreshInFlight nooit reset en de
+  // auto-refresh bevriest tot een handmatige herlaad.
+  function fetchWithTimeout(url, options, ms) {
+    var opts = options || {};
+    if (typeof AbortController === 'undefined') return fetch(url, opts);
+    var ctrl = new AbortController();
+    var merged = Object.assign({}, opts, { signal: ctrl.signal });
+    var timer = window.setTimeout(function () { ctrl.abort(); }, ms || 12000);
+    return fetch(url, merged).then(
+      function (r) { window.clearTimeout(timer); return r; },
+      function (e) { window.clearTimeout(timer); throw e; }
+    );
+  }
+
   function fetchOverlayEntries() {
     var ts = Date.now();
     if (window.console) console.log('[CGM Overlay] Fetching data... ts=' + ts);
-    return fetch('/_overlay/entries?count=' + OVERLAY_ENTRY_COUNT + '&ts=' + ts, { cache: 'no-store' })
+    return fetchWithTimeout('/_overlay/entries?count=' + OVERLAY_ENTRY_COUNT + '&ts=' + ts, { cache: 'no-store' }, 12000)
       .then(function (response) {
         if (!response.ok) throw new Error('Overlay entries gaf HTTP ' + response.status);
         return response.json();
@@ -1675,7 +1690,7 @@
         if (window.console && window.console.warn) {
           window.console.warn('[CGM Overlay] Lichte endpoint faalde, val terug op Nightscout:', error);
         }
-        return fetch('/api/v1/entries/sgv.json?count=' + OVERLAY_ENTRY_COUNT + '&ts=' + ts, { cache: 'no-store' })
+        return fetchWithTimeout('/api/v1/entries/sgv.json?count=' + OVERLAY_ENTRY_COUNT + '&ts=' + ts, { cache: 'no-store' }, 12000)
           .then(function (response) {
             if (!response.ok) throw new Error('Nightscout entries gaf HTTP ' + response.status);
             return response.json();
@@ -1685,8 +1700,12 @@
 
   function refresh(force) {
     if (refreshInFlight) {
-      pendingRefresh = true;
-      return;
+      // Watchdog: laat een vastgelopen/hangende refresh de auto-update niet permanent
+      // blokkeren. Na 45s als vastgelopen beschouwen en alsnog doorgaan.
+      if (Date.now() - lastRefreshStartedAt < 45000) {
+        pendingRefresh = true;
+        return;
+      }
     }
     refreshInFlight = true;
     lastRefreshStartedAt = Date.now();
@@ -1766,7 +1785,7 @@
   }
 
   function fetchLatestDbPrediction() {
-    fetch('/_prediction/latest', { cache: 'no-store' })
+    fetchWithTimeout('/_prediction/latest', { cache: 'no-store' }, 12000)
       .then(function (response) { return response.ok ? response.json() : null; })
       .then(function (json) {
         latestDbPrediction = json && json.snapshot ? json.snapshot : null;
