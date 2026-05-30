@@ -120,15 +120,13 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
     const rate10m = calcRateFromTimeline(timeline, idx, 10)
     const rate15m = calcRateFromTimeline(timeline, idx, 15)
 
-    const maxFallRate = Math.min(
-      Number.isFinite(rate5m) ? rate5m : 0,
-      Number.isFinite(rate10m) ? rate10m : 0,
-      Number.isFinite(rate15m) ? rate15m : 0,
-    )
-    const similar = findSimilarEpisodes(
-      { peakMmol, dropFromPeakMmol, minutesSincePeak, maxFallRate },
-      episodeVectors,
-    )
+    // Alleen vergelijken bij een echte recente post-piek daling. pattern_events
+    // bevat enkel drops/hypo's, dus bij stabiele/stijgende metingen zou similarity
+    // ten onrechte matchen en de forecast omlaag trekken.
+    const isDropContext = dropFromPeakMmol >= 2 && minutesSincePeak <= 60
+    const similar = isDropContext
+      ? findSimilarEpisodes({ peakMmol, dropFromPeakMmol, minutesSincePeak }, episodeVectors)
+      : null
 
     const risk = evaluateRiskRuleV1({
       currentMmol,
@@ -241,15 +239,17 @@ async function loadEpisodeVectors() {
   }
 }
 
-const SIM_SCALES = { peakMmol: 4, dropFromPeakMmol: 3, minutesSincePeak: 30, maxFallRate: 0.1 }
+// Alleen dimensies die offline (episode_vectors) en live identiek gedefinieerd
+// zijn. maxFallRate is bewust weggelaten: offline uit 1-min diffs (ruizig),
+// live uit gladde 5/10/15-min rates -> niet vergelijkbaar.
+const SIM_SCALES = { peakMmol: 4, dropFromPeakMmol: 3, minutesSincePeak: 30 }
 const SIM_MAX_DIST = 1.5
 const SIM_K = 8
 
 function sq(x) { return x * x }
 
-// Vergelijkt de huidige situatie met opgeslagen episode_vectors op een paar
-// dimensies die live betrouwbaar beschikbaar zijn. Geeft een gewogen
-// drop-correctie en hoeveel vergelijkbare episodes in (near-)hypo eindigden.
+// Vergelijkt de huidige situatie met opgeslagen episode_vectors. Geeft een
+// gewogen drop-correctie en hoeveel vergelijkbare episodes in (near-)hypo eindigden.
 function findSimilarEpisodes(input, vectors) {
   if (!vectors || !vectors.length) return null
   const scored = []
@@ -260,9 +260,6 @@ function findSimilarEpisodes(input, vectors) {
     sum += sq((f.dropFromPeakMmol - input.dropFromPeakMmol) / SIM_SCALES.dropFromPeakMmol)
     if (Number.isFinite(f.minutesPeakToEnd) && Number.isFinite(input.minutesSincePeak)) {
       sum += sq((f.minutesPeakToEnd - input.minutesSincePeak) / SIM_SCALES.minutesSincePeak)
-    }
-    if (Number.isFinite(f.maxFallRate) && Number.isFinite(input.maxFallRate)) {
-      sum += sq((f.maxFallRate - input.maxFallRate) / SIM_SCALES.maxFallRate)
     }
     const dist = Math.sqrt(sum)
     if (dist <= SIM_MAX_DIST) scored.push({ dist, drop: f.dropFromPeakMmol, outcome: v.outcome })
