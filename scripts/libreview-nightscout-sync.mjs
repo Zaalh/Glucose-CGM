@@ -617,20 +617,30 @@ function parsePositiveInt(value, fallback, max) {
 }
 
 function toNightscoutEntry(pt) {
-  const dateString = parseLibreTimestamp(pt.Timestamp ?? pt.FactoryTimestamp, config.tzOffsetMinutes)
+  const dateString = parseLibreTimestamp(pt.Timestamp ?? pt.FactoryTimestamp)
   const date = new Date(dateString).getTime()
-  const rawValue = Number(pt.ValueInMgPerDl ?? pt.Value)
-  const sgv = rawValue > 40 ? Math.round(rawValue) : Math.round(rawValue * 18.0182)
 
-  return {
+  // ValueInMgPerDl is altijd mg/dL — ook bij ernstige hypo (<40 mg/dL). NIET ×18 doen,
+  // anders wordt bv. 2.0 mmol/L (36 mg/dL) opgeslagen als 649 mg/dL (extreme hyper).
+  // De ×18-heuristiek geldt alleen voor het ambigue `Value`-only geval (mmol vs mg/dL).
+  const sgv = pt.ValueInMgPerDl != null
+    ? Math.round(Number(pt.ValueInMgPerDl))
+    : (Number(pt.Value) > 40
+        ? Math.round(Number(pt.Value))                 // Value al in mg/dL
+        : Math.round(Number(pt.Value) * 18.0182))      // Value in mmol/L
+
+  const entry = {
     type: 'sgv',
     date,
     dateString,
     sgv,
-    direction: mapNightscoutDirection(pt.TrendArrow ?? 4),
+    // Alleen een richting zetten als de bron er echt een geeft. History-/measurement-punten
+    // hebben vaak geen TrendArrow; geen valse 'Flat' verzinnen.
+    direction: pt.TrendArrow != null ? mapNightscoutDirection(pt.TrendArrow) : 'NOT COMPUTABLE',
     device: 'glucose-cgm-libreview',
     identifier: `glucose-cgm-libreview:${dateString}`,
   }
+  return entry
 }
 
 async function libreLogin(email, password) {
@@ -866,7 +876,7 @@ async function uploadEntries(entries) {
   }
 }
 
-function parseLibreTimestamp(ts, tzOffsetMinutes) {
+function parseLibreTimestamp(ts) {
   if (!ts) throw new Error('Lege timestamp')
 
   const asNum = Number(ts)
@@ -907,7 +917,32 @@ function parseLibreTimestamp(ts, tzOffsetMinutes) {
   }
 
   if (localMs === null) throw new Error(`Onbekend timestamp formaat: ${ts}`)
-  return new Date(localMs - tzOffsetMinutes * 60_000).toISOString()
+  // localMs = lokale wandkloktijd, geïnterpreteerd als UTC-getallen (container draait in UTC).
+  // Expliciete vaste offset? Die gebruiken. Anders DST-bewust omzetten voor de tijdzone,
+  // zodat zomer- én wintertijd vanzelf kloppen.
+  if (config.tzFixedOffsetMinutes != null) {
+    return new Date(localMs - config.tzFixedOffsetMinutes * 60_000).toISOString()
+  }
+  return new Date(wallClockToUtc(localMs, config.tzName)).toISOString()
+}
+
+// Zet een lokale wandkloktijd (als UTC-getallen) DST-bewust om naar echte UTC-ms voor `timeZone`.
+function wallClockToUtc(wallAsUtcMs, timeZone) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone, hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  })
+  // Wandkloktijd die `timeZone` toont voor een echt UTC-moment, terug als UTC-getallen.
+  const zoneWallMs = (utcMs) => {
+    const p = dtf.formatToParts(new Date(utcMs)).reduce((a, x) => { a[x.type] = x.value; return a }, {})
+    const hour = p.hour === '24' ? 0 : Number(p.hour)
+    return Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), hour, Number(p.minute), Number(p.second))
+  }
+  // offset = hoeveel de zone vóór UTC loopt; twee passes voor de DST-randen.
+  let offset = zoneWallMs(wallAsUtcMs) - wallAsUtcMs
+  offset = zoneWallMs(wallAsUtcMs - offset) - (wallAsUtcMs - offset)
+  return wallAsUtcMs - offset
 }
 
 function mapNightscoutDirection(trend) {
@@ -1011,7 +1046,10 @@ function readConfig(requireSecrets) {
   const next = {
     email: requireSecrets ? requiredEnv('LIBREVIEW_EMAIL') : optionalEnv('LIBREVIEW_EMAIL'),
     password: requireSecrets ? requiredEnv('LIBREVIEW_PASSWORD') : optionalEnv('LIBREVIEW_PASSWORD'),
-    tzOffsetMinutes: Number(process.env.LIBREVIEW_TZ_OFFSET ?? 120),
+    tzFixedOffsetMinutes: (process.env.LIBREVIEW_TZ_OFFSET != null && process.env.LIBREVIEW_TZ_OFFSET !== '')
+      ? Number(process.env.LIBREVIEW_TZ_OFFSET)
+      : null,
+    tzName: process.env.LIBREVIEW_TZ ?? 'Europe/Amsterdam',
     nightscoutUrl: trimTrailingSlash(process.env.NIGHTSCOUT_URL ?? 'http://localhost:1337'),
     mongoUri: process.env.MONGODB_URI ?? 'mongodb://nightscout-mongo:27017/nightscout',
     apiSecret: requireSecrets ? requiredEnv('API_SECRET') : optionalEnv('API_SECRET'),
@@ -1024,8 +1062,8 @@ function readConfig(requireSecrets) {
     retryJitterMs: Number(process.env.LIBREVIEW_RETRY_JITTER_MS ?? DEFAULT_RETRY_JITTER_MS),
   }
 
-  if (!Number.isFinite(next.tzOffsetMinutes)) {
-    throw new Error('LIBREVIEW_TZ_OFFSET moet een getal in minuten zijn.')
+  if (next.tzFixedOffsetMinutes != null && !Number.isFinite(next.tzFixedOffsetMinutes)) {
+    throw new Error('LIBREVIEW_TZ_OFFSET moet een getal in minuten zijn (of leeg laten voor DST-automatiek).')
   }
 
   if (!Number.isFinite(next.intervalSeconds) || next.intervalSeconds < 30) {
