@@ -341,7 +341,7 @@
     if (valueMmol < 3.9) {
       return {
         css: 'hypo',
-        title: 'HYPO NU',
+        title: 'HYPO',
         detail: predictedUrgentSoon ? valueMmol.toFixed(2) + ' mmol/L · 3.8 ' + lowEta + ' · 3.0 ' + urgentEta : valueMmol.toFixed(2) + ' mmol/L',
         rate: rateMmol
       };
