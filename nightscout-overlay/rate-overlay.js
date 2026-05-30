@@ -342,7 +342,7 @@
       return {
         css: 'hypo',
         title: 'HYPO NU',
-        detail: predictedUrgentSoon ? '3.8 ' + lowEta + ' · 3.0 ' + urgentEta : valueMmol.toFixed(2) + ' mmol/L',
+        detail: predictedUrgentSoon ? valueMmol.toFixed(2) + ' mmol/L · 3.0 ' + urgentEta : valueMmol.toFixed(2) + ' mmol/L',
         rate: rateMmol
       };
     }
@@ -351,15 +351,15 @@
       return {
         css: 'urgent',
         title: 'URGENT RISICO',
-        detail: '3.8 ' + lowEta + ' · 3.0 ' + urgentEta,
+        detail: valueMmol.toFixed(2) + ' mmol/L · 3.0 ' + urgentEta,
         rate: rateMmol
       };
     }
 
     if (valueMmol < 4.5 || predictedHypoSoon) {
-      var hypoDetail = 'richting 3.9 in ±' + Math.ceil(minutesToHypo) + ' min';
+      var hypoDetail = valueMmol.toFixed(2) + ' mmol/L · richting 3.9 in ±' + Math.ceil(minutesToHypo) + ' min';
       if (predictedHypoSoon && minutesToUrgent !== null && minutesToUrgent >= 0) {
-        hypoDetail = '3.9 ±' + Math.ceil(minutesToHypo) + 'm · 3.0 ±' + Math.ceil(minutesToUrgent) + 'm';
+        hypoDetail = valueMmol.toFixed(2) + ' mmol/L · 3.9 ±' + Math.ceil(minutesToHypo) + 'm · 3.0 ±' + Math.ceil(minutesToUrgent) + 'm';
       }
 
       return {
