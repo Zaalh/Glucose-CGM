@@ -259,18 +259,28 @@
     });
     if (!candidates.length) return null;
 
-    var weighted = candidates.map(function (row) {
-      var w;
-      if (row.actualMinutes <= 5) w = 0.45;
-      else if (row.actualMinutes <= 10) w = 0.30;
-      else if (row.actualMinutes <= 15) w = 0.17;
-      else w = 0.08;
-      return { rate: row.rateMmol, weight: w };
+    // Groepeer per tijdband en middel bínnen elke band, daarna weeg de banden.
+    // Anders tellen de ~5 korte vensters (1-5m) elk apart mee (5x 0.45) en domineert
+    // 1-minuut-ruis de blend: een mini-opwaartse wiebel kan "stijgend" tonen terwijl
+    // de trend duidelijk daalt.
+    var bands = [
+      { max: 5, w: 0.35, sum: 0, n: 0 },
+      { max: 10, w: 0.30, sum: 0, n: 0 },
+      { max: 15, w: 0.20, sum: 0, n: 0 },
+      { max: 20, w: 0.15, sum: 0, n: 0 }
+    ];
+    candidates.forEach(function (row) {
+      for (var bi = 0; bi < bands.length; bi++) {
+        if (row.actualMinutes <= bands[bi].max) { bands[bi].sum += row.rateMmol; bands[bi].n += 1; break; }
+      }
     });
-
-    var totalW = weighted.reduce(function (s, x) { return s + x.weight; }, 0);
+    var totalW = 0;
+    var rate = 0;
+    bands.forEach(function (b) {
+      if (b.n > 0) { rate += (b.sum / b.n) * b.w; totalW += b.w; }
+    });
     if (totalW <= 0) return null;
-    var rate = weighted.reduce(function (s, x) { return s + x.rate * x.weight; }, 0) / totalW;
+    rate = rate / totalW;
 
     // Guardrail against single-window spikes.
     var sorted = candidates.map(function (r) { return r.rateMmol; }).sort(function (a, b) { return a - b; });
