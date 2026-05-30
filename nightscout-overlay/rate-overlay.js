@@ -10,6 +10,7 @@
   var CLASSIC_WINDOWS_MINUTES = [1, 2, 3, 4, 5, 10, 15, 20, 30, 45, 60, 90, 120];
   var RATE_MODE_KEY = 'cgm-rate-overlay-mode';
   var RATE_VIEW_KEY = 'cgm-rate-overlay-view';
+  var RATE_CALC_KEY = 'cgm-rate-overlay-calc';
   var SOUND_OFF_KEY = 'cgm-nightscout-sound-off';
   var ESTIMATE_LINE_CLASS = 'cgm-estimated-glucose-line';
   var ESTIMATE_GAP_MIN_MS = 150000;
@@ -197,6 +198,51 @@
         text: trendLabel(rateMgdl)
       };
     });
+  }
+
+  // Momentaan: elk vakje = de instantane snelheid op dat moment in het verleden
+  // (de helling van díe ene minuut), als tijdlijn terug. 1M = nu, 2M = 1 min geleden, enz.
+  function calculateMomentRows(readings, anchorEntry) {
+    var latest = anchorEntry || readings[0];
+    if (!latest) return [];
+    var latestTime = readingTime(latest);
+    return WINDOWS_MINUTES.map(function (minutesBack) {
+      var target = latestTime - (minutesBack - 1) * 60000;
+      var bestIdx = -1;
+      var bestDiff = Infinity;
+      for (var i = 0; i < readings.length; i++) {
+        var time = readingTime(readings[i]);
+        if (!Number.isFinite(time) || time > latestTime) continue;
+        var diff = Math.abs(time - target);
+        if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+      }
+      if (bestIdx < 0 || bestDiff > MAX_BASELINE_DIFF_MS) {
+        return { label: minutesBack + 'm', missing: true };
+      }
+      var pointEntry = readings[bestIdx];
+      var prevEntry = readings[bestIdx + 1]; // één meting ouder
+      var r = rateBetween(prevEntry, pointEntry);
+      if (!r) return { label: minutesBack + 'm', missing: true };
+      var rateMgdl = r.rate * MGDL_PER_MMOL;
+      return {
+        label: minutesBack + 'm',
+        actualMinutes: r.minutes,
+        rateMgdl: rateMgdl,
+        rateMmol: r.rate,
+        deltaMmol: r.delta,
+        fromMmol: mmol(Number(prevEntry.sgv)),
+        toMmol: mmol(Number(pointEntry.sgv)),
+        arrow: trendArrow(rateMgdl),
+        css: trendClass(rateMgdl),
+        text: trendLabel(rateMgdl)
+      };
+    });
+  }
+
+  function computeRows(readings, anchorEntry) {
+    return getCalcMode() === 'momentaan'
+      ? calculateMomentRows(readings, anchorEntry)
+      : calculateRows(readings, anchorEntry);
   }
 
   function getPrimaryRate(rows) {
@@ -734,10 +780,10 @@
       '#cgm-stats-panel .stat-label{display:block;font-size:9px;line-height:1;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
       '#cgm-stats-panel .stat-value{display:block;font-family:monospace;font-size:13px;font-weight:900;line-height:1.15;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
       '#cgm-stats-panel .low .stat-value{color:#fb7185}#cgm-stats-panel .range .stat-value{color:#4ade80}#cgm-stats-panel .high .stat-value{color:#c084fc}',
-      '#cgm-rate-toggle,#cgm-rate-view-toggle{position:absolute!important;z-index:10003!important;border:1px solid rgba(255,255,255,.25);border-radius:5px;background:rgba(0,0,0,.72);color:#ddd;font:700 11px Arial,Helvetica,sans-serif;padding:5px 8px;cursor:pointer;min-width:64px;text-align:center}',
+      '#cgm-rate-toggle,#cgm-rate-view-toggle,#cgm-rate-calc-toggle{position:absolute!important;z-index:10003!important;border:1px solid rgba(255,255,255,.25);border-radius:5px;background:rgba(0,0,0,.72);color:#ddd;font:700 11px Arial,Helvetica,sans-serif;padding:5px 8px;cursor:pointer;min-width:64px;text-align:center}',
       '#cgm-rate-toggle{left:50%;transform:translateX(-50%);top:174px}',
       '#cgm-rate-view-toggle{top:174px}',
-      '#cgm-rate-toggle:hover,#cgm-rate-view-toggle:hover{background:rgba(30,30,30,.9);color:#fff}',
+      '#cgm-rate-toggle:hover,#cgm-rate-view-toggle:hover,#cgm-rate-calc-toggle:hover{background:rgba(30,30,30,.9);color:#fff}',
       '#cgm-rate-history-nav{position:absolute!important;z-index:10003!important;display:none;align-items:center;gap:6px;border:1px solid rgba(255,255,255,.25);border-radius:5px;background:rgba(0,0,0,.72);padding:3px 6px;color:#ddd;font:700 11px Arial,Helvetica,sans-serif;white-space:nowrap}',
       '#cgm-rate-history-nav button{border:1px solid rgba(255,255,255,.25);background:rgba(30,30,30,.6);color:#ddd;border-radius:4px;padding:2px 6px;font:700 11px Arial,Helvetica,sans-serif;cursor:pointer}',
       '#cgm-rate-history-nav button:hover:not(:disabled){background:rgba(60,60,60,.9);color:#fff}',
@@ -891,6 +937,26 @@
     return button;
   }
 
+  function ensureCalcToggle() {
+    var existing = document.getElementById('cgm-rate-calc-toggle');
+    if (existing) return existing;
+
+    var button = document.createElement('button');
+    button.id = 'cgm-rate-calc-toggle';
+    button.type = 'button';
+    button.addEventListener('click', function () {
+      var next = getCalcMode() === 'momentaan' ? 'verhouding' : 'momentaan';
+      localStorage.setItem(RATE_CALC_KEY, next);
+      refresh();
+    });
+    document.body.appendChild(button);
+    return button;
+  }
+
+  function getCalcMode() {
+    return localStorage.getItem(RATE_CALC_KEY) === 'momentaan' ? 'momentaan' : 'verhouding';
+  }
+
   function ensureHistoryNav() {
     var existing = document.getElementById('cgm-rate-history-nav');
     if (existing) return existing;
@@ -929,7 +995,7 @@
     if (!currentReadings.length) return;
     selectedReadingTime = anchorTime;
     var anchorEntry = currentReadings.find(function (entry) { return readingTime(entry) === anchorTime; }) || null;
-    render(calculateRows(currentReadings, anchorEntry));
+    render(computeRows(currentReadings, anchorEntry));
   }
 
   function ensureHypoAlert() {
@@ -1025,6 +1091,8 @@
     button.textContent = mode === 'compact' ? 'compact' : mode === 'classic' ? 'klassiek' : mode === 'all' ? 'alles' : 'uit';
     var view = getViewMode();
     viewButton.textContent = view === 'history' ? 'history' : 'live';
+    var calcButton = ensureCalcToggle();
+    calcButton.textContent = getCalcMode() === 'momentaan' ? 'momentaan' : 'verhouding';
   }
 
   function updateHistoryNav() {
@@ -1123,6 +1191,7 @@
     var container = ensureContainer();
     var button = ensureToggle();
     var viewButton = ensureViewToggle();
+    var calcButton = ensureCalcToggle();
     var alert = ensureHypoAlert();
     var statsPanel = ensureStatsPanel();
     var chart = document.querySelector('#chartContainer');
@@ -1158,10 +1227,11 @@
       dock.appendChild(alert);
       dock.appendChild(button);
       dock.appendChild(viewButton);
+      dock.appendChild(calcButton);
       dock.appendChild(container);
       if (nav.parentElement !== dock) dock.appendChild(nav);
 
-      [alert, button, viewButton, nav, container].forEach(function (el) {
+      [alert, button, viewButton, calcButton, nav, container].forEach(function (el) {
         el.style.setProperty('position', 'static', 'important');
         el.style.setProperty('left', 'auto', 'important');
         el.style.setProperty('top', 'auto', 'important');
@@ -1176,6 +1246,7 @@
       container.style.setProperty('margin', '0', 'important');
       button.style.setProperty('margin', '0 6px 0 0', 'important');
       viewButton.style.setProperty('margin', '0', 'important');
+      calcButton.style.setProperty('margin', '0 6px 0 0', 'important');
       nav.style.setProperty('margin', '0', 'important');
       statsPanel.style.removeProperty('display');
       var topElements = [
@@ -1200,9 +1271,10 @@
       if (alert.parentElement !== document.body) document.body.appendChild(alert);
       if (button.parentElement !== document.body) document.body.appendChild(button);
       if (viewButton.parentElement !== document.body) document.body.appendChild(viewButton);
+      if (calcButton.parentElement !== document.body) document.body.appendChild(calcButton);
       if (container.parentElement !== document.body) document.body.appendChild(container);
       if (nav.parentElement !== document.body) document.body.appendChild(nav);
-      [alert, button, viewButton, nav, container].forEach(function (el) {
+      [alert, button, viewButton, calcButton, nav, container].forEach(function (el) {
         el.style.removeProperty('position');
         el.style.removeProperty('box-sizing');
       });
@@ -1224,6 +1296,11 @@
       var btnRect = button.getBoundingClientRect();
       viewButton.style.left = Math.round(window.scrollX + btnRect.left - viewWidth - 8) + 'px';
       viewButton.style.transform = 'none';
+      var viewRect = viewButton.getBoundingClientRect();
+      var calcWidth = calcButton.getBoundingClientRect().width || 80;
+      calcButton.style.top = Math.max(0, Math.round(buttonTop)) + 'px';
+      calcButton.style.left = Math.round(window.scrollX + viewRect.left - calcWidth - 8) + 'px';
+      calcButton.style.transform = 'none';
     }
     var buttonRect = button.getBoundingClientRect();
     nav.style.top = Math.max(0, Math.round(buttonTop)) + 'px';
@@ -1622,7 +1699,7 @@
 
     document.addEventListener('click', function (event) {
       var protectedUi = event.target && event.target.closest
-        ? event.target.closest('#cgm-rate-history-nav, #cgm-rate-toggle, #cgm-rate-view-toggle')
+        ? event.target.closest('#cgm-rate-history-nav, #cgm-rate-toggle, #cgm-rate-view-toggle, #cgm-rate-calc-toggle')
         : null;
       if (protectedUi) return;
 
@@ -1770,7 +1847,7 @@
           selectedReadingTime = readingTime(readings[0]);
           anchorEntry = readings[0];
         }
-        var rows = calculateRows(readings, anchorEntry);
+        var rows = computeRows(readings, anchorEntry);
         latestReading = readings[0] || null;
         renderCurrentGlucose(anchorEntry || readings[0]);
         renderCurrentDelta();
