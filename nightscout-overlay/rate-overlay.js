@@ -49,6 +49,32 @@
     return mmol(Number(entry.sgv)).toFixed(2);
   }
 
+  // Reformat whatever number Nightscout already rendered to 2 decimals.
+  // Used as a fallback when we don't yet have a fresh reading, so the
+  // displayed value never falls back to Nightscout's 1-decimal format.
+  function formatDisplayedMmol(text) {
+    var num = parseFloat(text);
+    if (!Number.isFinite(num)) return null;
+    // Skip mg/dL values (whole numbers >= 36); mmol stays well below that.
+    if (text.indexOf('.') === -1 && num >= 36) return null;
+    return num.toFixed(2);
+  }
+
+  // Our own precise delta, computed from raw sgv values over a ~5-minute
+  // window (the reading closest to 5 min before the latest). Returns mmol
+  // as a number, or null when no matching baseline exists. This is the
+  // exact change from raw data — not a re-padding of Nightscout's rounded
+  // header delta.
+  function computePreciseDelta() {
+    var readings = currentReadings;
+    if (!readings || readings.length < 2) return null;
+    var latest = readings[0];
+    if (!latest || !Number.isFinite(Number(latest.sgv))) return null;
+    var baseline = findBaseline(readings, readingTime(latest), 5);
+    if (!baseline) return null;
+    return mmol(Number(latest.sgv) - Number(baseline.sgv));
+  }
+
   function signed(value, digits) {
     var rounded = value.toFixed(digits);
     return value > 0 ? '+' + rounded : rounded;
@@ -1240,13 +1266,41 @@
   }
 
   function renderCurrentGlucose(entry) {
-    var value = formatCurrentMmol(entry);
     var currentBg = document.querySelector('.currentBG');
-    if (!value || !currentBg) return;
+    if (!currentBg) return;
+    var value = formatCurrentMmol(entry) || formatDisplayedMmol(currentBg.textContent);
+    if (!value) return;
     if (currentBg.textContent === value) return;
 
     updatingCurrentGlucose = true;
     currentBg.textContent = value;
+    updatingCurrentGlucose = false;
+  }
+
+  // Leave Nightscout's own header delta untouched and show our precise
+  // 2-decimal 5-min delta alongside it, so both are visible for comparison.
+  function renderCurrentDelta() {
+    var deltaEl = document.querySelector('.bgdelta, #bgdelta, .currentDelta, [data-delta]');
+    if (!deltaEl) return;
+    var delta = computePreciseDelta();
+    var ours = document.getElementById('cgm-precise-delta');
+
+    if (delta === null) {
+      if (ours) { updatingCurrentGlucose = true; ours.remove(); updatingCurrentGlucose = false; }
+      return;
+    }
+
+    updatingCurrentGlucose = true;
+    if (!ours) {
+      ours = document.createElement('span');
+      ours.id = 'cgm-precise-delta';
+      ours.style.cssText = 'margin-left:6px;opacity:0.7;font-size:0.62em;font-weight:600;vertical-align:middle;';
+    }
+    if (ours.previousElementSibling !== deltaEl) {
+      deltaEl.insertAdjacentElement('afterend', ours);
+    }
+    var text = signed(delta, 2) + ' (5m)';
+    if (ours.textContent !== text) ours.textContent = text;
     updatingCurrentGlucose = false;
   }
 
@@ -1625,6 +1679,7 @@
         var rows = calculateRows(readings, anchorEntry);
         latestReading = readings[0] || null;
         renderCurrentGlucose(anchorEntry || readings[0]);
+        renderCurrentDelta();
         currentHypoRisk = calculateHypoRisk(readings, rows);
         var peakSignal = detectPeakDropSignal(readings);
         currentPatternCorrection = computePatternCorrection(readings, peakSignal);
