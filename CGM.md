@@ -14,10 +14,11 @@ Belangrijkste doel:
 
 - UI: Nightscout-webinterface + geïnjecteerde nginx-overlay (`nightscout-overlay/rate-overlay.js`).
 - CGM opslag: MongoDB via Nightscout.
+- Optioneel tijdreeks-archief: InfluxDB 1.8 voor xDrip/Grafana.
 - CGM API/UI backend: `nightscout/cgm-remote-monitor`.
 - Lokale Libre sync: `scripts/libreview-nightscout-sync.mjs`.
 - Predictie: offline Node-scripts in `scripts/`.
-- Docker services: `nightscout-mongo`, `nightscout`, `libreview-sync`, `nightscout-ui` (nginx).
+- Docker services: `nightscout-mongo`, `nightscout`, `libreview-sync`, `nightscout-ui` (nginx), optioneel `influxdb`.
 
 De oude React/Vite-frontend (`src/`) en de Supabase-laag (`supabase/`) zijn verwijderd; bouw nieuwe features op de Nightscout/MongoDB-flow.
 
@@ -46,6 +47,15 @@ npm run libre:logs
 ```
 
 Toont LibreView sync logs.
+
+```bash
+npm run influxdb:up
+npm run influxdb:logs
+npm run influxdb:down
+npm run grafana:up
+```
+
+Start, toont logs of stopt de optionele InfluxDB-service, of start Grafana voor xDrip-dashboarding.
 
 ```bash
 curl http://localhost:8787/health
@@ -115,6 +125,20 @@ LIBREVIEW_RETRY_BASE_DELAY_MS=750
 `LIBREVIEW_GRACE_WINDOW_MINUTES` bepaalt hoeveel recente LibreView-historie elke sync opnieuw ophaalt, zodat late meetpunten alsnog opgeslagen kunnen worden.
 `LIBREVIEW_RETRY_ATTEMPTS` en `LIBREVIEW_RETRY_BASE_DELAY_MS` bepalen hoeveel korte herpogingen de sync doet bij tijdelijke netwerkfouten, timeouts, rate limits of serverfouten.
 
+### `.env.influxdb`
+
+Optionele InfluxDB 1.8 configuratie. Dit is alleen voor xDrip upload of Grafana; Nightscout/MongoDB blijft de bron voor deze app.
+
+```env
+INFLUXDB_DB=xdrip
+INFLUXDB_HTTP_AUTH_ENABLED=true
+INFLUXDB_ADMIN_USER=root
+INFLUXDB_ADMIN_PASSWORD=root
+INFLUXDB_USER=root
+INFLUXDB_USER_PASSWORD=root
+INFLUXDB_PORT=8086
+```
+
 ## Data Flow
 
 1. LibreView/LibreLink account levert sensorhistorie.
@@ -130,9 +154,69 @@ LIBREVIEW_RETRY_BASE_DELAY_MS=750
 
 De sync-service biedt op poort 8787 `POST /sync` om dezelfde LibreView-sync handmatig te starten.
 
+## xDrip + InfluxDB
+
+InfluxDB is optioneel en staat los van de Nightscout/MongoDB-flow. xDrip kan metingen naar InfluxDB schrijven voor tijdreeksopslag of Grafana, maar de overlay en predictie-scripts lezen daar niet uit.
+
+Aanbevolen flow als xDrip de bron is:
+
+```text
+xDrip+ -> Nightscout API -> MongoDB -> Nightscout UI + overlay + predictie
+xDrip+ -> InfluxDB -> Grafana/archief
+```
+
+Start InfluxDB:
+
+```bash
+cp .env.influxdb.example .env.influxdb
+npm run influxdb:up
+curl -i http://localhost:8086/ping
+```
+
+xDrip InfluxDB instellingen:
+
+- URL: `http://<server-ip>:8086`
+- Database: `xdrip`
+- User: `root`
+- Password: `root`
+
+## Grafana
+
+Grafana leest de xDrip-data uit InfluxDB. De datasource staat in `grafana/provisioning/datasources/influxdb.yml` en volgt de Grafana InfluxDB datasource-configuratie voor InfluxDB 1.x:
+
+- Type: `influxdb`
+- Query language: `InfluxQL`
+- URL binnen Docker: `http://influxdb:8086`
+- Database: `xdrip`
+- User/password: `root` / `root`
+- HTTP method: `GET`
+
+Start Grafana:
+
+```bash
+npm run grafana:up
+```
+
+Open lokaal of op de server:
+
+```text
+http://localhost:3000/d/xdrip-glucose/xdrip-glucose
+```
+
+Op de huidige LAN-server:
+
+```text
+http://192.168.178.240:3000/d/xdrip-glucose/xdrip-glucose
+```
+
+De live setup is geverifieerd met InfluxDB `1.8.10`, Grafana `11.5.2`, datasource `xDrip InfluxDB` en dashboard `xDrip Glucose`.
+
 ## Important Files
 
-- `docker-compose.nightscout.yml`: Docker services voor MongoDB, Nightscout en LibreView sync.
+- `docker-compose.nightscout.yml`: Docker services voor MongoDB, Nightscout, LibreView sync en optionele InfluxDB.
+- `grafana/provisioning/datasources/influxdb.yml`: Grafana datasource voor InfluxDB 1.x / InfluxQL.
+- `grafana/provisioning/dashboards/dashboards.yml`: Grafana dashboard provider.
+- `grafana/dashboards/xdrip-glucose.json`: Basisdashboard voor xDrip glucosewaarden.
 - `scripts/libreview-nightscout-sync.mjs`: Lokale sync van LibreView naar Nightscout.
 - `scripts/build-entry-features.mjs`: Backfill van `entry_features`.
 - `scripts/analyze-patterns.mjs`: Detectie van pattern events.
@@ -178,6 +262,14 @@ nightscout-mongo-data/
 ```
 
 Deze map staat in `.gitignore`.
+
+Optionele InfluxDB data staat lokaal in:
+
+```text
+influxdb-data/
+```
+
+Deze map staat ook in `.gitignore`.
 
 Controleer Nightscout status:
 

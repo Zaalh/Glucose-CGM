@@ -1,0 +1,18 @@
+apiVersion: 1
+
+datasources:
+  - name: xDrip InfluxDB
+    uid: xdrip-influxdb
+    type: influxdb
+    access: proxy
+    url: http://influxdb:8086
+    database: xdrip
+    user: root
+    secureJsonData:
+      password: root
+    jsonData:
+      dbName: xdrip
+      httpMode: GET
+      version: InfluxQL
+    isDefault: true
+    editable: true

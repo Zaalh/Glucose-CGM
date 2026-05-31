@@ -22,6 +22,7 @@ Lokale CGM-monitor voor LibreView/LibreLink data met Nightscout en MongoDB. De N
    ```bash
    cp .env.nightscout.example .env.nightscout
    cp .env.libreview.example .env.libreview
+   cp .env.influxdb.example .env.influxdb
    ```
 
 3. Vul `.env.libreview` met je LibreView/LibreLink gegevens:
@@ -64,6 +65,30 @@ npm run libre:logs
 ```
 
 Bekijk LibreView sync logs.
+
+```bash
+npm run influxdb:up
+```
+
+Start optioneel alleen InfluxDB voor xDrip/Grafana. Deze database vervangt Nightscout/MongoDB niet.
+
+```bash
+npm run influxdb:logs
+```
+
+Bekijk InfluxDB logs.
+
+```bash
+npm run influxdb:down
+```
+
+Stop alleen de optionele InfluxDB-service.
+
+```bash
+npm run grafana:up
+```
+
+Start optioneel Grafana met een vooraf geconfigureerde InfluxDB datasource en glucose-dashboard.
 
 ```bash
 curl http://localhost:8787/health
@@ -208,6 +233,22 @@ LIBREVIEW_RETRY_JITTER_MS=400
 
 `LIBREVIEW_TZ` (IANA-zone, default `Europe/Amsterdam`) zet timestamps **DST-bewust** om, dus zomer- én wintertijd kloppen vanzelf. Alleen als je een vaste offset wilt forceren zet je `LIBREVIEW_TZ_OFFSET` (minuten); leeg laten = automatisch.
 
+### `.env.influxdb`
+
+Optionele InfluxDB 1.8 configuratie voor xDrip upload of Grafana. Dit bestand wordt niet gecommit.
+
+```env
+INFLUXDB_DB=xdrip
+INFLUXDB_HTTP_AUTH_ENABLED=true
+INFLUXDB_ADMIN_USER=root
+INFLUXDB_ADMIN_PASSWORD=root
+INFLUXDB_USER=root
+INFLUXDB_USER_PASSWORD=root
+INFLUXDB_PORT=8086
+```
+
+InfluxDB is hier een extra tijdreeks-archief. De Nightscout UI, overlay en predictie-scripts blijven Nightscout/MongoDB gebruiken als bron van waarheid.
+
 ## Data Flow
 
 ```text
@@ -218,9 +259,67 @@ LibreView/LibreLink
   -> Nightscout-UI + nginx-overlay: grafiek, alarmen en voorspelling
 ```
 
+Optioneel kan xDrip parallel naar InfluxDB schrijven:
+
+```text
+xDrip+
+  -> InfluxDB: archief/Grafana
+  -> Nightscout API: live UI/predictie in deze repo
+```
+
+Gebruik InfluxDB dus niet als enige uploaddoel als je deze app live wilt blijven voeden.
+
 De sync draait elke 60 seconden. Elke meting krijgt een vaste Nightscout `identifier`, waardoor vertraagde minuutmetingen alsnog worden opgeslagen zonder dubbele records.
 
 De sync-service biedt op poort 8787 `POST /sync` om handmatig dezelfde sync te starten.
+
+## xDrip + InfluxDB
+
+Start InfluxDB met `npm run influxdb:up` en controleer lokaal met:
+
+```bash
+curl -i http://localhost:8086/ping
+```
+
+Configureer xDrip+ InfluxDB upload met:
+
+- URL: `http://<server-ip>:8086`
+- Database: `xdrip`
+- User: `root`
+- Password: `root`
+
+Laat xDrip daarnaast ook naar Nightscout uploaden als de Nightscout UI en predicties in deze repo live-data moeten ontvangen.
+
+## Grafana
+
+Grafana is optioneel en leest de xDrip-data uit InfluxDB. De datasource is via provisioning ingesteld volgens de Grafana InfluxDB-documentatie:
+
+- Type: `influxdb`
+- Query language: `InfluxQL`
+- URL binnen Docker: `http://influxdb:8086`
+- Database: `xdrip`
+- User/password: `root` / `root`
+- HTTP method: `GET`
+
+Start Grafana:
+
+```bash
+npm run grafana:up
+```
+
+Open daarna:
+
+```text
+http://localhost:3000/d/xdrip-glucose/xdrip-glucose
+```
+
+Op de huidige LAN-server:
+
+```text
+http://192.168.178.240:3000/d/xdrip-glucose/xdrip-glucose
+```
+
+Grafana is geverifieerd met datasource `xDrip InfluxDB` en dashboard `xDrip Glucose`.
 
 ## Documentatie
 

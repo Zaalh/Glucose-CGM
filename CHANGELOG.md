@@ -7,6 +7,14 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Toegevoegd
 
+- **Optionele xDrip InfluxDB-laag**: `influxdb:1.8` Docker service achter profile
+  `influxdb`, `.env.influxdb.example`, persistente `influxdb-data/`, en npm-scripts
+  `influxdb:up`, `influxdb:logs`, `influxdb:down`.
+- **Optionele Grafana-laag**: `grafana/grafana:11.5.2` Docker service achter profile
+  `grafana`, InfluxDB datasource provisioning (`InfluxQL`, database `xdrip`,
+  user/password `root`/`root`) en basisdashboard `xDrip Glucose`.
+- **Nightscout env-template**: `.env.nightscout.example`, zodat de README quickstart
+  niet naar een ontbrekend bestand verwijst.
 - **Forecast-horizons 60/120/180 min** naast 10/15/20/30 in `buildForecast`. Vanaf
   >30 min satureert de bijdrage van de rate (`RATE_DECAY_TAU`), zodat lange horizons
   niet altijd in de clamp lopen.
@@ -29,7 +37,8 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 ### Gewijzigd
 
 - `.gitignore` uitgebreid (`dist/`, `.env*`, `nightscout-mongo-data/`, `.npm-cache/`,
-  `.claude/`).
+  `.claude/`, `influxdb-data/`, `grafana-data/`) en `.env.*.example` expliciet
+  trackbaar gemaakt.
 - Pattern-correctiegewicht schaalt nu tot ~30 min (`w = min(1, h/30)`), samengevoegd
   met de horizon-saturatie.
 
