@@ -15,6 +15,7 @@
     "grafana:up": "docker compose -f docker-compose.nightscout.yml --profile influxdb --profile grafana up -d influxdb grafana",
     "grafana:logs": "docker compose -f docker-compose.nightscout.yml logs -f grafana",
     "grafana:down": "docker compose -f docker-compose.nightscout.yml --profile grafana stop grafana",
+    "forecast:influx": "node scripts/write-influx-forecast.mjs",
     "model:retrain": "node scripts/retrain-and-export-model.mjs",
     "snapshots:live": "node scripts/live-snapshot-from-latest.mjs",
     "patterns:analyze": "docker compose -f docker-compose.nightscout.yml exec -T nightscout-mongo sh -lc \"mongo nightscout --quiet\" < scripts/analyze-patterns.mjs",
