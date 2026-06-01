@@ -1,0 +1,1532 @@
+# Plan: betere hypo-detectie voor reactieve hypoglykemie
+
+Dit plan beschrijft hoe we de huidige glucose-data uit LibreView, xDrip,
+Nightscout, InfluxDB en Grafana kunnen gebruiken om reactieve hypo's eerder
+te herkennen. Het doel is niet alleen achteraf rapporteren, maar vooral:
+
+- vroeg waarschuwen bij snelle daling na een piek;
+- hypo en near-hypo beter onderscheiden;
+- minder vals alarm geven als de waarde nog veilig en stabiel is;
+- leren van eerdere persoonlijke episodes.
+
+Medische nuance: dit systeem is hulpmiddel en rapportage, geen vervanging voor
+medisch advies of een officiële medische alarmfunctie. Bij klachten of twijfel
+blijft een vingerprik/medisch advies belangrijk.
+
+## Huidige situatie
+
+De basis is aanwezig:
+
+- Libre sensor levert glucosemetingen.
+- LibreView-sync schrijft data naar Nightscout.
+- xDrip/Nightscout/InfluxDB/Grafana gebruiken dezelfde meetketen.
+- Grafana toont glucose, stijgen/dalen, piek/drop en tegels.
+- `scripts/libreview-nightscout-sync.mjs` berekent al een risicoscore.
+- Er is al logica voor:
+  - actuele waarde onder 4.0 mmol/L;
+  - near-hypo onder 4.5 mmol/L;
+  - recente piek;
+  - daling vanaf piek;
+  - snelheid over 5, 10 en 15 minuten;
+  - geschatte tijd tot 4.0 en 4.5 mmol/L.
+
+## Waarom het beter moet
+
+Reactieve hypoglykemie draait vaak om het patroon, niet alleen om de actuele
+waarde. Een waarde van 6.5 mmol/L kan veilig lijken, maar riskant zijn als die
+net van 10.5 mmol/L komt en snel daalt.
+
+Belangrijke beperkingen nu:
+
+- De huidige drempels zijn handmatig gekozen.
+- De detector is nog niet gevalideerd tegen jouw echte hypo-momenten.
+- CGM-data loopt achter op bloedglucose, vooral bij snelle veranderingen.
+- Maaltijd, beweging, slaap, stress en alcohol zitten nog niet in de score.
+- Er is nog geen duidelijke evaluatie van vals-positief en vals-negatief alarm.
+
+## Online voorbeelden en lessen
+
+Andere CGM-projecten en documentatie lossen dit probleem meestal niet op met
+een enkele grenswaarde. Ze combineren actuele glucose, trend, voorspelling,
+context en veiligheidsdrempels.
+
+### Nightscout
+
+Nightscout ondersteunt alarmen voor hoge/lage glucose, ontbrekende data en
+forecast-plugins. De documentatie noemt onder andere `ar2` forecast als default
+forecast-keuze als er niets anders is ingesteld. Belangrijke les voor ons:
+
+- alarmen horen apart te zijn van de ruwe glucosemeting;
+- forecast is nuttig, maar moet uitlegbaar blijven;
+- ontbrekende data moet ook een aparte waarschuwing kunnen zijn;
+- Nightscout is geschikt als transportlaag naar apps zoals Nightwatch/xDrip.
+
+Ontwerpkeuze voor dit project:
+
+- schrijf `likely` en `urgent` naar Nightscout als status/event;
+- schrijf `watch` vooral naar MongoDB/Influx/Grafana, niet als luid alarm;
+- gebruik rate limiting zodat Nightscout niet volloopt met herhaalde events.
+
+### xDrip+
+
+xDrip+ heeft low/high alerts en predictive low/high alerts. De xDrip-documentatie
+beschrijft dat predictive alerts momentum gebruiken: extrapolatie van de huidige
+BG-trend, niet per se alle prediction-settings. Belangrijke les:
+
+- korte-termijn momentum is belangrijk voor "gaat zo laag worden";
+- alert-instellingen moeten los staan van grafiekweergave;
+- gebruikers hebben controle nodig over gevoeligheid en herhaling.
+
+Ontwerpkeuze voor dit project:
+
+- gebruik `blendedRate` als momentumlaag;
+- maak `minutesTo45` en `minutesTo40` expliciet;
+- maak drempels later configureerbaar via `.env` of configbestand;
+- voorkom alarmspam met cooldown per risiconiveau.
+
+### OpenAPS / oref0
+
+OpenAPS/oref0 gebruikt meerdere voorspelde BG-scenario's in plaats van een
+enkele rechte lijn. Documentatie beschrijft onder andere voorspellingen per
+5-minuten interval en safety thresholds. Voor mensen met insuline gebruikt het
+IOB/COB en insuline-effecten; dat past niet rechtstreeks op reactieve hypo
+zonder insulinedata, maar de architectuur is waardevol.
+
+Belangrijke les:
+
+- maak meerdere scenario's, niet een enkele voorspelling;
+- beslis op basis van het laagste verwachte punt binnen een horizon;
+- safety thresholds moeten conservatief zijn;
+- live beslissingen en offline evaluatie moeten dezelfde logica gebruiken.
+
+Ontwerpkeuze voor dit project:
+
+- maak minimaal drie forecast-scenario's:
+  - `momentum`: huidige trend doorgetrokken;
+  - `decay`: trend zwakt geleidelijk af;
+  - `pattern`: correctie op basis van eerdere vergelijkbare episodes;
+- gebruik de laagste voorspelde waarde binnen 30 minuten als alarmsignaal;
+- bewaar alle scenario's in `prediction_snapshots`.
+
+### Libre trendpijlen
+
+Libre en andere CGM-systemen gebruiken trendpijlen als rate-of-change signaal.
+In publicaties over Libre-trendpijlen worden praktische snelheidsbanden genoemd:
+
+- ongeveer `< 0.05 mmol/L/min`: vlak of langzaam;
+- ongeveer `0.05 - 0.10 mmol/L/min`: stijgend/dalend;
+- ongeveer `> 0.10 mmol/L/min`: snel stijgend/dalend.
+
+Belangrijke les:
+
+- onze drempels `-0.03`, `-0.05`, `-0.08` en `-0.10` mmol/L/min zijn logisch;
+- een "platte" pijl betekent niet altijd veilig als glucose dicht bij laag zit;
+- bij snelle daling is CGM-lag extra belangrijk.
+
+Ontwerpkeuze voor dit project:
+
+- align trend labels met bekende CGM-pijlbanden;
+- toon zowel pijl als numerieke rate;
+- behandel `4.6 mmol/L met snelle daling` anders dan `4.6 mmol/L stabiel`.
+
+### Wat we niet blind moeten kopieren
+
+Veel bestaande systemen zijn ontworpen voor type 1 diabetes en insuline-dosing.
+Reactieve hypoglykemie zonder insulinepomp vraagt andere nadruk:
+
+- minder focus op IOB/COB als die data ontbreekt;
+- meer focus op piek-na-maaltijd en snelle post-piek daling;
+- meer persoonlijke patroonherkenning;
+- near-hypo klachten serieus nemen, ook als CGM nog niet onder 4.0 zit.
+
+## Jouw patroon: sneller dan standaard
+
+Algemene informatie over reactieve hypoglykemie noemt vaak dalingen binnen
+enkele uren na eten. Voor dit project moeten we niet wachten op zo'n lang
+venster, omdat jouw patroon sneller kan zijn. De detector moet daarom eerst
+kijken naar de snelle post-piek fase.
+
+Belangrijk uitgangspunt:
+
+- jouw persoonlijke snelheid gaat boven algemene literatuurvensters;
+- een snelle piek gevolgd door snelle daling moet vroeg alarm geven;
+- lange maaltijdvensters zijn extra context, niet de hoofdtrigger;
+- `minutesTo45` en `minutesTo40` zijn belangrijker dan "hoeveel uur na eten".
+
+Praktische korte vensters:
+
+- `0-15 min na piek`: vroege draai herkennen;
+- `15-45 min na piek`: hoogste aandacht voor snelle reactieve daling;
+- `45-90 min na piek`: nog steeds relevant, maar minder urgent zonder snelle rate;
+- `90-240 min`: alleen gebruiken voor vertraagde eiwit/vet/gemengde effecten.
+
+Snelle waarschuwing moet al starten als:
+
+- piek `>= 7.5` en daling `>= 1.0 mmol/L` binnen 30 minuten;
+- piek `>= 8.5` blijft een sterker signaal, maar mag niet de minimumgrens zijn;
+- `rate10m <= -0.05` na een maaltijdachtige piek;
+- `rate5m <= -0.08`, ook als de glucosewaarde nog boven 5.0 zit;
+- voorspelling onder 4.5 komt binnen 15-20 minuten;
+- vergelijkbare eerdere snelle episodes vaak near-hypo/hypo werden.
+
+Voor jouw situatie moeten de defaults dus agressiever vroeg kijken:
+
+```text
+HYPO_FAST_PATTERN_PEAK_WINDOW_MINUTES=45
+HYPO_FAST_PATTERN_MIN_PEAK_MMOL=7.5
+HYPO_FAST_PATTERN_STRONG_PEAK_MMOL=8.5
+HYPO_FAST_PATTERN_DROP_MIN_MMOL=1.0
+HYPO_FAST_PATTERN_RATE10=-0.05
+HYPO_FAST_PATTERN_RATE5=-0.08
+HYPO_EARLY_WARN_MINUTES_TO_45=20
+HYPO_URGENT_MINUTES_TO_40=15
+```
+
+## Automatisch leren van eten en maaltijdreacties
+
+Wens: het systeem moet zoveel mogelijk vanzelf leren wanneer je hebt gegeten,
+wat het vermoedelijk effect was, en of dat later een hyper, hypo of combinatie
+gaf. Dat kan als patroonherkenning, maar met een grens:
+
+- zonder invoer kan het systeem niet zeker weten wat je precies at;
+- het kan wel automatisch maaltijdachtige patronen herkennen;
+- het kan leren dat bepaalde curvevormen bij jou horen bij suiker, koolhydraten,
+  eiwit, vet of gemengde maaltijden;
+- af en toe feedback maakt het veel sterker, maar moet niet verplicht zijn.
+
+### Automatisch maaltijdmoment herkennen
+
+Een `meal_candidate` kan automatisch worden gedetecteerd als:
+
+- glucose binnen korte tijd duidelijk stijgt;
+- stijgsnelheid boven een drempel komt;
+- er een lokale piek ontstaat;
+- daarna een daling volgt;
+- het patroon vaker rond vergelijkbare momenten voorkomt.
+
+Voor jouw snelle patroon gebruiken we twee soorten maaltijdvensters:
+
+- `fastMealWindow`: 0-90 minuten, voor snelle piek/daling.
+- `delayedMealWindow`: 90-300 minuten, voor eiwit/vet/gemengde effecten.
+
+Eerste databasecheck op jouw Nightscout-data liet zien dat snelle vensters echt
+belangrijk zijn:
+
+- veel piek-daling episodes starten al rond `7.5-8.0 mmol/L`;
+- ongeveer twee derde van de near-hypo/hypo passages na een piek gebeurt binnen
+  45 minuten;
+- daarom moet de detector niet wachten op een piek boven `8.5` of op een lang
+  postprandiaal venster.
+
+Startregels voor snelle maaltijdreactie:
+
+- `riseFromBaselineMmol >= 1.0`;
+- `rate10m >= 0.04`;
+- lokale piek binnen 15-75 minuten;
+- daarna `rate10m <= -0.04` of drop `>= 1.0 mmol/L`.
+
+### Maaltijdtype schatten uit curvevorm
+
+Het systeem mag een vermoedelijk type labelen, maar dit blijft een inschatting:
+
+- `fast_sugar`: snelle stijging, korte piek, relatief snelle daling.
+- `carb_heavy`: duidelijke stijging binnen 30-90 minuten, grotere piek.
+- `protein_heavy`: mildere of vertraagde stijging, langer effect 2-5 uur.
+- `fat_protein_mixed`: vertraagde brede stijging of tweede golf.
+- `unknown_meal`: maaltijdachtig patroon, type onzeker.
+- `non_meal_spike`: stress, sensorruis, compressie, beweging of onbekend.
+
+Jouw observatie moet expliciet als hypothese in het model:
+
+- suiker kan bij jou soms minder heftig zijn dan verwacht;
+- eiwit kan juist heftig of vertraagd reageren;
+- koolhydraten kunnen snelle piek/drop geven;
+- daarom moet het model per persoon leren, niet algemene voedingsregels volgen.
+
+### Hyper en hypo samen modelleren
+
+Voor reactieve hypo is de hyper/piek vaak onderdeel van hetzelfde event.
+Daarom moet een episode niet alleen `hypo` zijn, maar een postprandiale episode.
+
+Mogelijke outcomes:
+
+- `stable`: geen grote afwijking.
+- `hyper_only`: piek hoog, geen hypo.
+- `near_hypo_only`: geen grote piek, wel near-hypo.
+- `reactive_near_hypo`: piek gevolgd door `< 4.5`.
+- `reactive_hypo`: piek gevolgd door `< 4.0`.
+- `hyper_then_hypo`: duidelijke hyper gevolgd door hypo.
+- `fast_spike_fast_drop`: snelle piek en snelle daling, ook als nadir net veilig is.
+- `delayed_hyper`: vertraagde stijging zonder hypo.
+- `rebound_hyper`: stijging na hypo/correctie.
+
+### Meal response document
+
+Nieuwe collection:
+
+```text
+meal_response_events
+```
+
+Voorbeeld:
+
+```json
+{
+  "version": 1,
+  "detectedAt": "2026-06-01T12:00:00.000Z",
+  "windowStart": "2026-06-01T11:30:00.000Z",
+  "windowEnd": "2026-06-01T13:00:00.000Z",
+  "inferredMealAt": "2026-06-01T11:45:00.000Z",
+  "inferredMealType": "carb_heavy",
+  "confidence": 0.68,
+  "baselineMmol": 5.4,
+  "peakMmol": 9.1,
+  "nadirMmol": 4.2,
+  "timeToPeakMinutes": 28,
+  "minutesPeakToNadir": 34,
+  "dropFromPeakMmol": 4.9,
+  "maxFallRate10m": -0.08,
+  "outcome": "fast_spike_fast_drop",
+  "manualFood": null,
+  "manualMacros": null,
+  "feedback": []
+}
+```
+
+### Automatisch leren zonder feedback
+
+Zonder feedback kan het systeem alsnog leren via self-supervised labels:
+
+- deze curve had snelle piek;
+- deze curve had snelle post-piek daling;
+- deze curve ging later onder 4.5;
+- deze curve bleef veilig;
+- deze curve had vertraagde tweede golf;
+- deze curve lijkt op eerdere eiwitachtige patronen.
+
+Daarna kan het clusteren:
+
+- cluster A: snelle suikerpiek, meestal veilig;
+- cluster B: koolhydraatpiek, vaak snelle daling;
+- cluster C: eiwit/vet breed effect, late stijging;
+- cluster D: hoge piek gevolgd door reactieve hypo;
+- cluster E: sensorruis of onduidelijk.
+
+### Live gebruik
+
+Live detector krijgt extra context:
+
+- `activeMealWindow`: ja/nee.
+- `fastMealWindow`: ja/nee.
+- `delayedMealWindow`: ja/nee.
+- `inferredMealType`: geschat type.
+- `minutesSinceInferredMeal`.
+- `postMealPeakDetected`: ja/nee.
+- `mealPatternRisk`: kans op hypo/hyper vanuit eerdere vergelijkbare maaltijden.
+
+Voor snelle patronen moet `mealPatternRisk` direct invloed hebben op `watch` en
+`likely`, niet pas als de glucose al laag is.
+
+## Definities
+
+Voor dit project gebruiken we praktische niveaus:
+
+- `low`: geen duidelijk risico.
+- `watch`: patroon verdient aandacht.
+- `likely`: hypo of near-hypo is waarschijnlijk als trend doorzet.
+- `urgent`: actuele hypo of zeer waarschijnlijke hypo op korte termijn.
+
+Praktische glucosegrenzen:
+
+- `< 4.5 mmol/L`: near-hypo / vroeg waarschuwen.
+- `< 4.0 mmol/L`: hypo-alarmgrens voor dit dashboard.
+- `< 3.9 mmol/L`: gangbare internationale level-1 hypo grens.
+- `< 3.0 mmol/L`: ernstiger/klinisch significante hypo grens.
+
+## Nieuwe detectie-aanpak
+
+De hypo-detectie moet uit meerdere lagen bestaan.
+
+## Dataflow
+
+De detector moet expliciet maken welke laag welke verantwoordelijkheid heeft.
+
+```text
+Libre sensor
+  -> LibreView
+  -> libreview-sync
+  -> Nightscout entries/devicestatus
+  -> MongoDB collections
+  -> InfluxDB metrics
+  -> Grafana rapportage
+  -> Nightwatch/xDrip via Nightscout
+```
+
+Belangrijk onderscheid:
+
+- Nightscout/MongoDB is de bron voor ruwe historie, snapshots, feedback en episodes.
+- InfluxDB is vooral handig voor tijdreeksen, Grafana-panelen en snelle aggregaties.
+- Grafana is rapportage/visualisatie, niet de plek waar medische logica hoort te leven.
+- `libreview-nightscout-sync.mjs` is nu de beste plek voor live detectie.
+- Een apart evaluatiescript is de beste plek voor backtests en tuning.
+
+## Bestaande bouwstenen in de code
+
+Er is al meer aanwezig dan alleen een simpele drempel:
+
+- `prediction_snapshots`: live snapshots met huidige waarde, risico, voorspelling en redenen.
+- `pattern_events`: eerdere patroon-events met piek/eindwaarde en tijd tot onder drempels.
+- `episode_vectors`: vectoren voor similarity matching.
+- `findSimilarEpisodes(...)`: vergelijkt huidige piek/drop/timing met eerdere episodes.
+- `buildForecast(...)`: maakt voorspellingen op meerdere horizons.
+- `evaluateRiskRuleV1(...)`: huidige regelscore.
+
+V2 moet deze bouwstenen niet weggooien. V2 moet ze strakker maken, beter opslaan,
+en meetbaar testen.
+
+### 1. Actuele veiligheid
+
+Direct risico op basis van de laatste waarde:
+
+- `< 4.0`: urgent.
+- `4.0 - 4.5` met dalende trend: likely of urgent.
+- `4.0 - 4.5` stabiel/stijgend: watch of likely.
+
+### 2. Trend en snelheid
+
+Gebruik meerdere snelheden:
+
+- `rate5m`: snelste, gevoelig voor ruis.
+- `rate10m`: beste korte-termijn signaal.
+- `rate15m`: bevestigt aanhoudende daling.
+- `blendedRate`: gewogen combinatie van 5/10/15 minuten.
+
+Voorstel drempels:
+
+- `<= -0.03 mmol/L/min`: daling.
+- `<= -0.05 mmol/L/min`: snelle daling.
+- `<= -0.08 mmol/L/min`: zeer snelle daling.
+
+### 3. Reactieve hypo-context
+
+Een patroon is verdachter als er kort daarvoor een piek was:
+
+- piek `>= 8.5 mmol/L` met snelle daling;
+- piek `>= 10.0 mmol/L` binnen 30-60 minuten;
+- drop vanaf piek `>= 2.0 mmol/L`;
+- drop vanaf piek `>= 25%`;
+- piek naar huidige waarde binnen 30-90 minuten.
+
+### 4. Voorspelling
+
+Bereken per meting:
+
+- `minutesTo45`: tijd tot 4.5 bij huidige dalingssnelheid.
+- `minutesTo40`: tijd tot 4.0 bij huidige dalingssnelheid.
+- `predicted10m`, `predicted20m`, `predicted30m`.
+
+Risico omhoog als:
+
+- voorspeld `< 4.5` binnen 20 minuten;
+- voorspeld `< 4.0` binnen 20 minuten;
+- voorspelling én historische patroonmatch allebei risicovol zijn.
+
+### 5. CGM-lag correctie
+
+Bij snelle daling kan de echte bloedglucose lager zijn dan de CGM-waarde.
+Daarom moet de detector bij snelle daling conservatiever zijn.
+
+Voorstel:
+
+- schat een `lagAdjustedMmol`;
+- gebruik 4-6 minuten correctie bij snelle daling;
+- toon in de uitleg dat dit een CGM-lag waarschuwing is.
+
+Voorbeeld:
+
+```text
+lagAdjustedMmol = currentMmol + blendedRate * 5
+```
+
+Als `currentMmol = 5.0` en `blendedRate = -0.08`, dan is:
+
+```text
+lagAdjustedMmol = 4.6
+```
+
+Dat is nog geen hypo, maar wel duidelijker risico.
+
+### 6. Persoonlijke patroonherkenning
+
+De detector moet leren van eerdere episodes.
+
+Per episode opslaan:
+
+- startwaarde;
+- piekwaarde;
+- tijd sinds piek;
+- maximale dalingssnelheid;
+- drop vanaf piek;
+- laagste waarde binnen 30/60/90 minuten;
+- of jij klachten had;
+- of het vals alarm was;
+- maaltijd/context indien beschikbaar.
+
+Daarna vergelijken:
+
+- lijkt huidige curve op eerdere hypo-curves?
+- hoeveel vergelijkbare episodes gingen onder 4.5?
+- hoeveel gingen onder 4.0?
+- hoe lang duurde dat gemiddeld?
+
+## Feature set voor detector V2
+
+Elke live meting krijgt een vaste set features. Diezelfde features moeten ook
+offline in de backtest worden gebruikt, anders testen we iets anders dan live.
+
+### Ruwe glucosefeatures
+
+- `currentMmol`: laatste glucosewaarde.
+- `previousMmol`: vorige glucosewaarde.
+- `delta5m`: verschil met ongeveer 5 minuten terug.
+- `delta10m`: verschil met ongeveer 10 minuten terug.
+- `delta15m`: verschil met ongeveer 15 minuten terug.
+- `ageSeconds`: leeftijd van de meting.
+
+### Snelheidsfeatures
+
+- `rate5m`: mmol/L/min over 5 minuten.
+- `rate10m`: mmol/L/min over 10 minuten.
+- `rate15m`: mmol/L/min over 15 minuten.
+- `rate30m`: mmol/L/min over 30 minuten.
+- `blendedRate`: gewogen rate, live en offline identiek berekend.
+- `maxFallRate30m`: snelste daling in de laatste 30 minuten.
+- `isAcceleratingDown`: daling wordt sneller.
+- `isRecovering`: rate wordt minder negatief of positief.
+
+### Piek/drop features
+
+- `peakMmol120m`: hoogste waarde in laatste 120 minuten.
+- `minutesSincePeak`: minuten sinds die piek.
+- `dropFromPeakMmol`: piek min huidige waarde.
+- `dropFromPeakPercent`: relatieve daling vanaf piek.
+- `peakToCurrentSlope`: gemiddelde daling vanaf piek.
+- `postPeakWindow`: `early`, `middle`, `late` of `none`.
+
+### Forecast features
+
+- `predicted10m`.
+- `predicted20m`.
+- `predicted30m`.
+- `minutesTo45`.
+- `minutesTo40`.
+- `probLt45_20m`.
+- `probLt40_20m`.
+- `lagAdjustedMmol`.
+
+### Pattern features
+
+- `similarEpisodeCount`.
+- `similarHypoCount`.
+- `similarNearHypoCount`.
+- `similarHypoRatio`.
+- `similarMedianNadir`.
+- `similarMedianMinutesTo45`.
+- `similarMedianMinutesTo40`.
+- `patternDropCorrection`.
+- `patternConfidence`.
+
+### Context features
+
+In eerste versie mogen deze leeg/null zijn, maar het schema moet er al klaar
+voor zijn:
+
+- `mealMinutesAgo`.
+- `carbsEstimate`.
+- `exerciseMinutesAgo`.
+- `sleepContext`.
+- `manualFeeling`: bijvoorbeeld `feels_hypo`.
+- `fingerstickMmol`.
+
+## Episode model
+
+Een episode is een stuk curve dat begint bij een relevante piek of snelle daling
+en eindigt als de curve stabiliseert of herstelt.
+
+### Episode start
+
+Start een episode als een van deze regels waar is:
+
+- piek `>= 8.5 mmol/L` en daarna daling `>= 1.0 mmol/L`;
+- `rate10m <= -0.05`;
+- `dropFromPeakMmol >= 1.5` binnen 90 minuten;
+- huidige waarde `< 4.5`;
+- handmatige feedback zoals `feels_hypo`.
+
+### Episode einde
+
+Eindig een episode als:
+
+- glucose 30 minuten stabiel of stijgend is;
+- er 120 minuten sinds piek voorbij zijn;
+- er een nieuwe aparte piek ontstaat;
+- er 45 minuten geen nieuwe data is.
+
+### Episode outcome
+
+Label elke episode achteraf:
+
+- `hypo`: nadir `< 4.0`.
+- `near_hypo`: nadir `>= 4.0` en `< 4.5`.
+- `safe_drop`: duidelijke daling maar nadir `>= 4.5`.
+- `false_alarm`: waarschuwing zonder near-hypo en door feedback bevestigd.
+- `unknown`: onvoldoende data.
+
+### Episode document
+
+Voorstel voor MongoDB collection `reactive_hypo_episodes`:
+
+```json
+{
+  "version": 2,
+  "start": "2026-06-01T10:00:00.000Z",
+  "end": "2026-06-01T11:30:00.000Z",
+  "peakAt": "2026-06-01T10:15:00.000Z",
+  "nadirAt": "2026-06-01T11:05:00.000Z",
+  "startMmol": 7.2,
+  "peakMmol": 10.4,
+  "nadirMmol": 3.8,
+  "endMmol": 5.1,
+  "minutesPeakToNadir": 50,
+  "minutesPeakToUnder45": 35,
+  "minutesPeakToUnder40": 48,
+  "dropFromPeakMmol": 6.6,
+  "dropFromPeakPercent": 63.5,
+  "maxFallRate30m": -0.09,
+  "outcome": "hypo",
+  "feedback": ["feels_hypo"],
+  "featureVector": {
+    "peakMmol": 10.4,
+    "dropFromPeakMmol": 3.0,
+    "minutesSincePeak": 30,
+    "rate10m": -0.07,
+    "rate15m": -0.05
+  },
+  "createdAt": "2026-06-01T12:00:00.000Z",
+  "updatedAt": "2026-06-01T12:00:00.000Z"
+}
+```
+
+## Similarity model
+
+De huidige similarity gebruikt vooral piek, drop en timing. V2 moet dit
+uitbreiden, maar niet te ingewikkeld maken.
+
+### Feature-afstanden
+
+Gebruik genormaliseerde afstanden:
+
+- `peakMmol / 4.0`
+- `dropFromPeakMmol / 3.0`
+- `minutesSincePeak / 35`
+- `rate10m / 0.08`
+- `rate15m / 0.06`
+- `dropFromPeakPercent / 30`
+
+### Weging
+
+Voorstel:
+
+- piek: `15%`
+- absolute drop: `25%`
+- relatieve drop: `15%`
+- minuten sinds piek: `15%`
+- rate10m: `20%`
+- rate15m: `10%`
+
+### Confidence
+
+Pattern confidence wordt hoger als:
+
+- minstens 5 vergelijkbare episodes bestaan;
+- vergelijkbare episodes dicht bij huidige situatie liggen;
+- outcomes consistent zijn;
+- episodes recent genoeg zijn;
+- feedback aanwezig is.
+
+Voorstel:
+
+```text
+patternConfidence = min(1, similarCount / 8) * outcomeConsistency * distanceQuality
+```
+
+## Detector V2 scoring
+
+V2 moet geen zwarte doos zijn. Elk onderdeel levert punten en redenen op.
+
+### Componenten
+
+- `currentScore`: actuele waarde en near-hypo.
+- `rateScore`: snelheid en acceleratie.
+- `reactiveScore`: piek/drop context.
+- `forecastScore`: voorspelde grenspassage.
+- `patternScore`: persoonlijke historie.
+- `lagScore`: CGM-lag correctie.
+- `dampingScore`: demping voor veilig/stabiel patroon.
+
+### Voorstel score-opbouw
+
+```text
+score =
+  currentScore
+  + rateScore
+  + reactiveScore
+  + forecastScore
+  + patternScore
+  + lagScore
+  - dampingScore
+```
+
+### Risk mapping
+
+- `score < 3`: `low`.
+- `3 <= score < 5`: `watch`.
+- `5 <= score < 8`: `likely`.
+- `score >= 8`: `urgent`.
+
+Hard overrides:
+
+- actuele waarde `< 4.0`: altijd `urgent`.
+- actuele waarde `< 4.5` en dalend: minimaal `likely`.
+- `minutesTo40 <= 10`: minimaal `urgent`.
+- `minutesTo45 <= 15` met post-piek daling: minimaal `likely`.
+
+### Demping
+
+Verlaag risico als:
+
+- huidige waarde `>= 7.0` en geen snelle daling;
+- rate positief of stabiel is;
+- drop vanaf piek klein is;
+- vergelijkbare episodes meestal veilig bleven;
+- meting ouder is dan 10 minuten.
+
+Niet dempen als:
+
+- huidige waarde al `< 4.5`;
+- rate10m `<= -0.08`;
+- `minutesTo40 <= 15`;
+- patroonmatch sterk richting hypo wijst.
+
+## Variabiliteit en onzekerheid
+
+Jouw lichaam kan op vergelijkbare voeding of vergelijkbare curves anders
+reageren. De detector mag daarom nooit doen alsof er maar een uitkomst is.
+Hij moet werken met scenario's, kansen en onzekerheid.
+
+Online lessen die hierbij passen:
+
+- studies over gepersonaliseerde voeding tonen grote verschillen in
+  postprandiale glucose-responsen tussen personen;
+- nieuwere CGM-studies laten ook binnen dezelfde persoon variatie zien bij
+  vergelijkbare of herhaalde maaltijden;
+- OpenAPS/oref0 gebruikt meerdere voorspelde BG-lijnen en kijkt naar het
+  minimum/worst-case scenario binnen de horizon;
+- recente ML-literatuur rond CGM voorspelling benadrukt uncertainty-aware
+  voorspellingen, dus niet alleen een puntwaarde maar ook onzekerheidsbanden.
+
+Ontwerpconclusie:
+
+- V2 moet meerdere scenario's tegelijk berekenen;
+- het alarm kijkt niet alleen naar de gemiddelde voorspelling;
+- bij grote onzekerheid en mogelijk lage worst-case moet eerder `watch` of
+  `likely` volgen;
+- bij wisselende patronen moet de uitleg zeggen dat het patroon variabel is.
+
+### Scenario's
+
+Bereken minimaal deze scenario's:
+
+- `momentum`: huidige `blendedRate` loopt nog 10-30 minuten door.
+- `rateDecay`: daling/stijging vlakt geleidelijk af.
+- `patternMedian`: mediaan van vergelijkbare eerdere episodes.
+- `patternWorstSafe`: pessimistische maar realistische ondergrens, bijvoorbeeld
+  20e percentiel van vergelijkbare episodes.
+- `rebound`: daling stopt en glucose herstelt.
+- `delayedMeal`: latere eiwit/vet/gemengde maaltijdrespons.
+
+Voor jouw snelle patroon is vooral belangrijk:
+
+- `momentum` voor de directe komende 10-20 minuten;
+- `patternWorstSafe` voor "deze keer kan hij harder zakken";
+- `rateDecay` om vals alarm te dempen als de daling al afvlakt.
+
+### Scenario output
+
+Voor elk scenario opslaan:
+
+```json
+{
+  "name": "momentum",
+  "mmol10": 5.1,
+  "mmol20": 4.5,
+  "mmol30": 4.1,
+  "min30": 4.1,
+  "minutesTo45": 20,
+  "minutesTo40": null,
+  "weight": 0.35
+}
+```
+
+Samenvatting:
+
+```json
+{
+  "expectedMin30": 4.4,
+  "worstCaseMin30": 3.9,
+  "bestCaseMin30": 5.2,
+  "uncertaintyWidth": 1.3,
+  "probLt45_30m": 0.64,
+  "probLt40_30m": 0.31,
+  "scenarioAgreement": 0.58
+}
+```
+
+### Onzekerheid berekenen
+
+Gebruik meerdere bronnen voor onzekerheid:
+
+- brede spreiding in vergelijkbare episodes;
+- weinig vergelijkbare episodes;
+- oude of ontbrekende CGM-data;
+- snelle rate-wisseling;
+- sensor-lag bij snelle daling;
+- recente maaltijdrespons zonder genoeg historie;
+- tegenstrijdige scenario's.
+
+Voorstel:
+
+```text
+uncertainty =
+  patternSpread
+  + missingDataPenalty
+  + rateVolatility
+  + sensorLagRisk
+  + mealUncertainty
+  - feedbackConfidence
+```
+
+### Beslisregels met onzekerheid
+
+Niet alleen gemiddelde risico gebruiken:
+
+- als `worstCaseMin30 < 4.0`: minimaal `likely`;
+- als `worstCaseMin30 < 4.5` en `uncertainty` hoog is: minimaal `watch`;
+- als `probLt45_30m >= 0.60`: minimaal `likely`;
+- als `probLt40_30m >= 0.40`: minimaal `likely`, bij snelle daling `urgent`;
+- als scenario's sterk verdeeld zijn: toon `watch: patroon wisselend`.
+
+Voorbeeld uitleg:
+
+```text
+Patroon is wisselend: 5 vergelijkbare episodes gingen laag, 3 bleven veilig.
+Worst-case binnen 30 min komt onder 4.5, daarom watch/likely.
+```
+
+### Geen overzekerheid
+
+De API mag dus niet alleen `risk` teruggeven, maar ook:
+
+- `confidence`: hoe zeker de detector is over de classificatie;
+- `uncertainty`: hoe breed de mogelijke uitkomsten zijn;
+- `scenarioAgreement`: hoeveel scenario's dezelfde kant op wijzen;
+- `worstCaseMin30`: laagste plausibele waarde binnen 30 minuten;
+- `expectedMin30`: gemiddelde/verwachte minimumwaarde.
+
+Hoge onzekerheid betekent niet automatisch urgent. Het betekent:
+
+- bij veilige waarden: meer monitoren;
+- bij snelle daling: eerder waarschuwen;
+- bij near-hypo: minder dempen;
+- bij oude data: voorzichtig zijn met conclusies.
+
+## Detector V2 output
+
+De live API moet genoeg informatie geven voor Grafana en Nightwatch/xDrip.
+
+```json
+{
+  "modelVersion": "reactive-hypo-v2",
+  "createdAt": "2026-06-01T12:00:00.000Z",
+  "currentMmol": 5.6,
+  "risk": "likely",
+  "score": 6.8,
+  "confidence": 0.74,
+  "uncertainty": 0.46,
+  "features": {
+    "peakMmol120m": 10.1,
+    "minutesSincePeak": 42,
+    "dropFromPeakMmol": 4.5,
+    "dropFromPeakPercent": 44.5,
+    "rate5m": -0.06,
+    "rate10m": -0.07,
+    "rate15m": -0.05,
+    "blendedRate": -0.063,
+    "lagAdjustedMmol": 5.3
+  },
+  "predicted": {
+    "mmol10": 5.0,
+    "mmol20": 4.4,
+    "mmol30": 4.0,
+    "minutesTo45": 17,
+    "minutesTo40": 25,
+    "probLt45_20m": 0.67,
+    "probLt40_30m": 0.52
+  },
+  "scenarios": {
+    "expectedMin30": 4.4,
+    "worstCaseMin30": 3.9,
+    "bestCaseMin30": 5.2,
+    "uncertaintyWidth": 1.3,
+    "scenarioAgreement": 0.58,
+    "items": [
+      {
+        "name": "momentum",
+        "mmol10": 5.0,
+        "mmol20": 4.4,
+        "mmol30": 4.0,
+        "min30": 4.0,
+        "weight": 0.35
+      },
+      {
+        "name": "rateDecay",
+        "mmol10": 5.1,
+        "mmol20": 4.8,
+        "mmol30": 4.7,
+        "min30": 4.7,
+        "weight": 0.25
+      },
+      {
+        "name": "patternWorstSafe",
+        "mmol10": 4.9,
+        "mmol20": 4.2,
+        "mmol30": 3.9,
+        "min30": 3.9,
+        "weight": 0.25
+      }
+    ]
+  },
+  "pattern": {
+    "similarEpisodeCount": 7,
+    "similarHypoCount": 5,
+    "similarHypoRatio": 0.71,
+    "patternConfidence": 0.78
+  },
+  "reasons": [
+    "Snelle post-piek daling",
+    "Voorspeld onder 4.5 binnen 20 minuten",
+    "Worst-case scenario komt onder 4.0 binnen 30 minuten",
+    "Lijkt op 7 eerdere episodes; 5 gingen onder 4.5"
+  ]
+}
+```
+
+## Database-aanpassingen
+
+### `prediction_snapshots`
+
+Uitbreiden met:
+
+- `modelVersion`.
+- `confidence`.
+- `features`.
+- `predicted`.
+- `pattern`.
+- `riskComponents`.
+- `reasons`.
+- `outcomeEvaluated`.
+- `actualOutcome`.
+- `leadTimeMinutes`.
+- `falsePositive`.
+
+Belangrijk: de huidige code schrijft `riskDetails` wel in het snapshotobject,
+maar zet het nog niet mee in de MongoDB `$set`. Dat moet worden hersteld.
+
+### `reactive_hypo_episodes`
+
+Nieuwe canonieke collection voor episode-analyse. Deze mag later de oudere
+`pattern_events` en `episode_vectors` vervangen of voeden.
+
+Indexen:
+
+```text
+{ start: 1 }
+{ outcome: 1, peakMmol: 1 }
+{ "featureVector.peakMmol": 1 }
+{ "featureVector.dropFromPeakMmol": 1 }
+```
+
+### `hypo_feedback`
+
+Nieuwe of bestaande feedback collection:
+
+```json
+{
+  "createdAt": "2026-06-01T12:00:00.000Z",
+  "entryIdentifier": "libre-...",
+  "type": "feels_hypo",
+  "mmol": 4.7,
+  "note": "trillerig",
+  "source": "manual"
+}
+```
+
+## Live versus offline gelijk houden
+
+Een belangrijke regel: live detectie en offline backtest moeten dezelfde
+featurebuilder en detector gebruiken.
+
+Aanpak:
+
+- verplaats featurebouw naar `scripts/lib/hypo-features.mjs`;
+- verplaats detector naar `scripts/lib/reactive-hypo-detector.mjs`;
+- gebruik deze modules vanuit `libreview-nightscout-sync.mjs`;
+- gebruik dezelfde modules vanuit `scripts/evaluate-hypo-detector.mjs`.
+
+Dan voorkomen we dat Grafana mooi lijkt, maar de backtest iets anders meet.
+
+## Backtest ontwerp
+
+Het evaluatiescript moet oude data afspelen alsof het live was.
+
+Input:
+
+- Nightscout `entries`;
+- feedback;
+- bestaande episodes of automatisch gebouwde episodes.
+
+Proces:
+
+1. Sorteer alle entries op tijd.
+2. Loop per meetpunt door de historie.
+3. Bouw features met alleen data die op dat moment bekend was.
+4. Draai detector V2.
+5. Kijk 30/60/90 minuten vooruit voor echte outcome.
+6. Sla resultaat op als evaluatieregel.
+
+Output:
+
+```json
+{
+  "periodStart": "2026-05-01T00:00:00.000Z",
+  "periodEnd": "2026-06-01T00:00:00.000Z",
+  "hypoCount": 12,
+  "nearHypoCount": 23,
+  "alerts": 31,
+  "truePositive": 20,
+  "falsePositive": 11,
+  "missedHypo": 3,
+  "medianLeadTimeMinutes": 16,
+  "precision": 0.65,
+  "recall": 0.87
+}
+```
+
+Ook tonen:
+
+- top 10 beste waarschuwingen;
+- top 10 vals alarm;
+- top 10 gemiste hypo's;
+- voorbeelden met features en redenen.
+
+### Uncertainty evalueren
+
+De backtest moet ook meten of onzekerheid nuttig is.
+
+Extra metrics:
+
+- `worstCaseHitRate`: hoe vaak zat echte nadir onder of rond worst-case?
+- `expectedCalibration`: klopt de gemiddelde voorspelde kans met echte uitkomst?
+- `highUncertaintyMisses`: gemiste hypo's waarbij onzekerheid hoog was.
+- `lowConfidenceAlerts`: alarmen waarbij confidence laag was.
+- `scenarioDisagreementBeforeHypo`: hoe vaak scenario's verdeeld waren voor hypo.
+
+Belangrijke vragen:
+
+- had `worstCaseMin30` de gemiste hypo wel gezien?
+- gaf onzekerheid te veel extra vals alarm?
+- zijn snelle episodes vaker onzeker dan langzame episodes?
+- moeten snelle post-piek episodes een hogere uncertainty-penalty krijgen?
+
+Acceptatie:
+
+- uncertainty mag `watch` vaker maken, maar niet onnodig veel `urgent`;
+- gemiste snelle hypo's moeten dalen;
+- uitleg moet duidelijk zeggen wanneer een alarm komt door worst-case/variabiliteit.
+
+## Tuningstrategie
+
+Niet meteen machine learning zwaar maken. Eerst gecontroleerd tunen.
+
+### Fase A: veilige baseline
+
+Doel:
+
+- weinig gemiste hypo's;
+- iets meer vals alarm accepteren.
+
+Instelling:
+
+- `watch` vroeg laten afgaan;
+- `urgent` streng houden;
+- duidelijke uitleg tonen.
+
+### Fase B: persoonlijke tuning
+
+Na minimaal 1-2 weken data:
+
+- drempels aanpassen op jouw echte patronen;
+- patternConfidence zwaarder laten wegen;
+- vals alarm dempen op basis van veilige episodes.
+
+### Fase C: feedback learning
+
+Feedback laat detector leren:
+
+- `confirmed_hypo`: vergelijkbare patronen zwaarder wegen.
+- `false_alarm`: vergelijkbare patronen dempen.
+- `feels_hypo`: near-hypo ook serieus nemen, zelfs als CGM nog net hoger staat.
+- `fingerstick_confirmed`: hoogste betrouwbaarheid.
+
+## Alarmfilosofie
+
+Voor reactieve hypo is een waarschuwing nuttig als hij:
+
+- vroeg genoeg is om actie te nemen;
+- uitlegbaar is;
+- niet continu schreeuwt;
+- onderscheid maakt tussen "opletten" en "nu handelen".
+
+Daarom:
+
+- `watch`: rustig tonen in Grafana.
+- `likely`: duidelijk tonen, eventueel Nightscout treatment/devicestatus.
+- `urgent`: geschikt voor actief alarm via xDrip/Nightwatch/Nightscout.
+
+## Nightwatch/xDrip/Nightscout integratie
+
+Nachtwatch en xDrip lezen vooral Nightscout. Daarom moet V2 niet alleen in
+Grafana bestaan.
+
+Mogelijke routes:
+
+- schrijf riskstatus naar Nightscout `devicestatus`;
+- schrijf opvallende momenten als `treatments` met notitie;
+- houd rauwe glucosemetingen onaangetast;
+- gebruik duidelijke tekst zoals `Reactive hypo likely: predicted <4.5 in 17m`.
+
+Voorzichtigheid:
+
+- niet elke `watch` als treatment schrijven, dat vervuilt de timeline;
+- alleen `likely` en `urgent` als event naar Nightscout sturen;
+- rate limiting toepassen, bijvoorbeeld maximaal 1 event per 15 minuten per risiconiveau.
+
+## Grafana ontwerpregels
+
+Grafana moet helpen begrijpen, niet paniek zaaien.
+
+Bovenaan:
+
+- hoofdgrafiek glucose;
+- trend/snelheid;
+- reactieve hypo watch.
+
+Daaronder tegels:
+
+- actuele waarde;
+- trendpijl;
+- voorspelling +10/+20/+30;
+- tijd tot 4.5;
+- tijd tot 4.0;
+- risk level;
+- risk score;
+- korte reden.
+
+Onderaan rapportage:
+
+- episodes per dag/week;
+- near-hypo/hypo aantallen;
+- gemiste waarschuwingen;
+- vals alarm;
+- persoonlijke patroonmatches.
+
+## Randgevallen
+
+De detector moet expliciet omgaan met:
+
+- ontbrekende metingen;
+- dubbele metingen;
+- sensor start/einde;
+- compressie-lows;
+- snelle stijging na correctie/eten;
+- datagat van meer dan 15 minuten;
+- CGM-waarde die niet past bij klachten;
+- handmatige fingerstick die afwijkt.
+
+Regel:
+
+- bij oude of ontbrekende data geen hard alarm maken;
+- bij klachten/feedback altijd serieus labelen, ook als CGM nog niet laag is.
+
+## Uitleg bij ieder alarm
+
+Een waarschuwing moet altijd uitleggen waarom hij afgaat.
+
+Voorbeelden:
+
+- `Snelle post-piek daling: -0.07 mmol/L/min`
+- `Voorspeld onder 4.5 binnen 14 minuten`
+- `Komt overeen met 5 eerdere episodes, 4 daarvan gingen onder 4.5`
+- `CGM-lag correctie: snelle daling kan echte glucose lager maken`
+
+Dit moet zichtbaar zijn in:
+
+- API `/prediction/latest`;
+- Nightscout treatment/devicestatus indien handig;
+- Grafana tegel "Waarom risico?";
+- eventueel Nightwatch of xDrip via Nightscout-data.
+
+## Data-validatie
+
+We moeten meten of de detector echt beter wordt.
+
+Per dag/week rapporteren:
+
+- aantal echte hypo's `< 4.0`;
+- aantal near-hypo's `< 4.5`;
+- hoeveel waarschuwingen vooraf kwamen;
+- gemiddelde waarschuwingstijd;
+- vals alarm telling;
+- gemiste hypo's;
+- snelste daling;
+- grootste piek-drop;
+- tijd-in-range;
+- tijd onder 4.5, 4.0 en 3.9.
+
+Belangrijke metrics:
+
+- `leadTimeMinutes`: hoeveel minuten voor de hypo kwam de waarschuwing?
+- `falsePositiveRate`: hoeveel waarschuwingen werden geen hypo?
+- `missedHypoCount`: hoeveel hypo's kwamen zonder waarschuwing?
+- `precision`: hoeveel waarschuwingen waren terecht?
+- `recall`: hoeveel echte hypo's werden gevonden?
+
+## Grafana-uitbreiding
+
+Nieuwe of verbeterde panelen:
+
+- actuele risicostatus;
+- reden van alarm;
+- voorspelde glucose +10/+20/+30 minuten;
+- tijd tot 4.5;
+- tijd tot 4.0;
+- hypo's per dag/week;
+- near-hypo's per dag/week;
+- gemiste waarschuwingen;
+- vals alarm momenten;
+- snelste post-piek dalingen;
+- top 10 reactieve hypo patronen.
+
+Belangrijk: de hoofdgrafieken moeten rustig blijven. Extra details horen onderaan.
+
+## Implementatiestappen
+
+### Stap 1: detector V2
+
+Maak een nieuwe functie naast de bestaande regel:
+
+```text
+evaluateReactiveHypoRiskV2(input)
+```
+
+Output:
+
+```json
+{
+  "risk": "low|watch|likely|urgent",
+  "score": 0,
+  "confidence": 0.0,
+  "predicted": {
+    "mmol10": 0,
+    "mmol20": 0,
+    "mmol30": 0,
+    "minutesTo45": null,
+    "minutesTo40": null,
+    "lagAdjustedMmol": null
+  },
+  "features": {},
+  "reasons": []
+}
+```
+
+### Stap 2: feedback vastleggen
+
+Gebruik feedbackknoppen of API endpoint:
+
+- `feels_hypo`
+- `confirmed_hypo`
+- `false_alarm`
+- `meal_related`
+- `exercise_related`
+
+### Stap 3: episode builder
+
+Bouw automatisch episodes uit de historie:
+
+- start bij piek of snelle daling;
+- eindig als glucose stabiliseert;
+- label outcome als `hypo`, `near_hypo`, `safe_drop`, `false_alarm`.
+
+### Stap 4: evaluatie script
+
+Maak een script:
+
+```text
+scripts/evaluate-hypo-detector.mjs
+```
+
+Het script moet oude data replayen en tonen:
+
+- hoeveel waarschuwingen;
+- hoeveel echte hypo's;
+- hoeveel gemist;
+- gemiddelde waarschuwingstijd;
+- voorbeelden van goede/slechte detecties.
+
+### Stap 5: Grafana rapportage
+
+Schrijf extra meetvelden naar InfluxDB:
+
+- `hypo_risk_score`
+- `hypo_risk_level`
+- `minutes_to_45`
+- `minutes_to_40`
+- `lag_adjusted_mmol`
+- `reactive_drop_score`
+- `pattern_match_score`
+
+### Stap 6: tuning op jouw data
+
+Gebruik 1-2 weken echte data om drempels te tunen:
+
+- minder vals alarm als je stabiel hoog zit;
+- eerder alarm als je na piek snel daalt;
+- extra gevoeligheid bij bekende persoonlijke patronen.
+
+## Concrete bouwvolgorde
+
+Dit is de aanbevolen volgorde. Niet alles tegelijk bouwen; eerst zorgen dat elke
+laag controleerbaar is.
+
+### Mijlpaal 1: data opslaan zonder gedrag te veranderen
+
+Doel: V1 blijft werken, maar snapshots worden rijker.
+
+Taken:
+
+- `riskDetails` echt opslaan in `prediction_snapshots`.
+- `features` object toevoegen aan snapshots.
+- `predicted` object naast oude `predictedMmol` toevoegen.
+- `modelVersion` ophogen naar bijvoorbeeld `rules-v1.1`.
+- `/prediction/latest` uitbreiden met features, predicted en pattern.
+
+Acceptatie:
+
+- Docker blijft syncen.
+- `/prediction/latest` toont actuele waarde, score, reasons, features en voorspelling.
+- Grafana hoeft nog niet aangepast.
+
+### Mijlpaal 2: featurebuilder apart maken
+
+Doel: live en backtest gebruiken exact dezelfde featurelogica.
+
+Nieuwe bestanden:
+
+```text
+scripts/lib/hypo-features.mjs
+scripts/lib/reactive-hypo-detector.mjs
+```
+
+Taken:
+
+- verplaats rateberekening of maak herbruikbare helper;
+- bouw `buildHypoFeatures(timeline, idx, options)`;
+- bouw `evaluateReactiveHypoRiskV2(features, context)`;
+- voeg unitachtige testdata toe als JSON fixtures.
+
+Acceptatie:
+
+- `node --check` slaagt;
+- sync gebruikt nog steeds V1 of V1.1;
+- losse detector kan met fixture-data draaien.
+
+### Mijlpaal 3: episode builder
+
+Doel: automatisch jouw historische reactieve hypo/drop episodes maken.
+
+Nieuw script:
+
+```text
+scripts/build-reactive-hypo-episodes.mjs
+```
+
+Taken:
+
+- entries uit MongoDB lezen;
+- episodes detecteren;
+- outcomes labelen;
+- featureVector per episode opslaan;
+- oude `pattern_events` en `episode_vectors` eventueel blijven gebruiken.
+
+Acceptatie:
+
+- script print aantal episodes per outcome;
+- MongoDB bevat `reactive_hypo_episodes`;
+- er zijn voorbeeldepisodes met piek, nadir, drop en outcome.
+
+### Mijlpaal 4: backtest
+
+Doel: bewijzen of V2 beter is dan V1.
+
+Nieuw script:
+
+```text
+scripts/evaluate-hypo-detector.mjs
+```
+
+Taken:
+
+- replay historie;
+- V1 en V2 naast elkaar draaien;
+- echte outcomes bepalen met lookahead;
+- metrics printen;
+- voorbeelden van gemiste hypo's en vals alarm tonen.
+
+Acceptatie:
+
+- output toont precision, recall, missedHypo, falsePositive en leadTime;
+- minimaal V1 versus V2 vergelijking;
+- geen live gedrag veranderd.
+
+### Mijlpaal 5: V2 live aanzetten in shadow mode
+
+Doel: V2 draait mee, maar stuurt nog geen alarms.
+
+Taken:
+
+- V1 blijft bepalend voor huidige `risk`;
+- V2 wordt opgeslagen als `shadowRisk`;
+- vergelijk V1 en V2 in snapshots;
+- Grafana kan verschil tonen.
+
+Acceptatie:
+
+- sync blijft stabiel;
+- geen extra Nightscout alarmen;
+- na enkele dagen kunnen we verschillen beoordelen.
+
+### Mijlpaal 6: V2 activeren
+
+Doel: V2 wordt primaire risico-inschatting.
+
+Taken:
+
+- `risk` komt uit V2;
+- V1 eventueel opslaan als `legacyRisk`;
+- Nightscout events alleen voor `likely` en `urgent`;
+- cooldown en anti-spam toepassen.
+
+Acceptatie:
+
+- waarschuwingen hebben duidelijke redenen;
+- geen alarmspam;
+- Grafana toont risico, score, confidence en waarom.
+
+### Mijlpaal 7: tuning en feedback loop
+
+Doel: detector persoonlijk maken.
+
+Taken:
+
+- feedback endpoint uitbreiden;
+- feedback koppelen aan episodes;
+- false alarms dempen;
+- confirmed hypo patronen zwaarder wegen;
+- wekelijks evaluatierapport maken.
+
+Acceptatie:
+
+- detector kan aantoonbaar leren van jouw feedback;
+- backtest verbetert na tuning;
+- rapportage toont effect van tuning.
+
+## Configuratievoorstel
+
+Maak drempels configureerbaar, maar houd defaults veilig.
+
+```text
+HYPO_NEAR_MMOL=4.5
+HYPO_LOW_MMOL=4.0
+HYPO_SEVERE_MMOL=3.0
+HYPO_FAST_FALL_RATE=-0.05
+HYPO_VERY_FAST_FALL_RATE=-0.08
+HYPO_EXTREME_FALL_RATE=-0.10
+HYPO_LOOKAHEAD_MINUTES=30
+HYPO_FAST_PATTERN_PEAK_WINDOW_MINUTES=45
+HYPO_FAST_PATTERN_MIN_PEAK_MMOL=7.5
+HYPO_FAST_PATTERN_STRONG_PEAK_MMOL=8.5
+HYPO_FAST_PATTERN_DROP_MIN_MMOL=1.0
+HYPO_FAST_PATTERN_RATE10=-0.05
+HYPO_FAST_PATTERN_RATE5=-0.08
+HYPO_EARLY_WARN_MINUTES_TO_45=20
+HYPO_URGENT_MINUTES_TO_40=15
+HYPO_FAST_MEAL_WINDOW_MINUTES=90
+HYPO_DELAYED_MEAL_WINDOW_MINUTES=300
+HYPO_PATTERN_MIN_MATCHES=5
+HYPO_NIGHTSCOUT_EVENT_MIN_RISK=likely
+HYPO_EVENT_COOLDOWN_MINUTES=15
+HYPO_CGM_LAG_MINUTES=5
+```
+
+## Open vragen voor later
+
+Deze hoeven de eerste implementatie niet te blokkeren:
+
+- Wil je `watch` alleen in Grafana zien of ook in Nightwatch?
+- Wil je een handmatige knop voor `feels_hypo` in een simpele webpagina?
+- Wil je maaltijdmomenten handmatig invullen?
+- Wil je vingerprikmetingen als correctiebron opslaan?
+- Moet nacht/slaap gevoeliger of juist rustiger zijn?
+
+## Acceptatiecriteria
+
+De detector is pas "goed" als hij dit kan:
+
+- hypo's onder 4.0 meestal 10-20 minuten vooraf signaleren;
+- near-hypo's onder 4.5 vroeg markeren zonder paniek;
+- snelle post-piek dalingen binnen 0-45 minuten herkennen;
+- snelle patronen niet wegdempen omdat algemene literatuur langere vensters noemt;
+- hypers en hypo's als hetzelfde maaltijd-event kunnen koppelen;
+- automatisch maaltijdachtige patronen vinden zonder verplichte invoer;
+- duidelijke reden geven per waarschuwing;
+- minder vals alarm bij normale dalingen;
+- historische rapportage geven;
+- handmatig feedback verwerken;
+- na tuning aantoonbaar beter zijn dan alleen de actuele glucosewaarde.
+
+## Korte conclusie
+
+De huidige detectie is een goede V1. Voor reactieve hypoglykemie willen we naar
+een V2 die curvevorm, dalingssnelheid, CGM-lag, persoonlijke patronen en feedback
+combineert. Daarmee wordt het systeem niet alleen een dashboard, maar een vroege
+waarschuwingslaag bovenop Libre/xDrip/Nightscout.
