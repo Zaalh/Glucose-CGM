@@ -1,0 +1,14 @@
+{
+  "name": "slow-drift-down",
+  "description": "Trage daling van 6.0 naar 5.4 over 30 min (~-0.02/min). Veilig; mag hooguit watch geven, geen luid alarm.",
+  "expect": { "atMost": "watch" },
+  "readings": [
+    { "minutesAgo": 30, "mmol": 6.0 },
+    { "minutesAgo": 25, "mmol": 5.9 },
+    { "minutesAgo": 20, "mmol": 5.8 },
+    { "minutesAgo": 15, "mmol": 5.7 },
+    { "minutesAgo": 10, "mmol": 5.6 },
+    { "minutesAgo": 5, "mmol": 5.5 },
+    { "minutesAgo": 0, "mmol": 5.4 }
+  ]
+}

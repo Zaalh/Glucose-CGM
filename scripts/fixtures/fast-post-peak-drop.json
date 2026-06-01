@@ -1,0 +1,23 @@
+{
+  "name": "fast-post-peak-drop",
+  "description": "Piek ~9.5 mmol/L, daarna snelle reactieve daling; nu 5.8 en blijft zakken (~-0.08/min). Klassiek vroeg-waarschuwen geval.",
+  "expect": { "atLeast": "likely" },
+  "readings": [
+    { "minutesAgo": 60, "mmol": 7.0 },
+    { "minutesAgo": 50, "mmol": 8.2 },
+    { "minutesAgo": 45, "mmol": 9.4 },
+    { "minutesAgo": 40, "mmol": 9.5 },
+    { "minutesAgo": 35, "mmol": 9.3 },
+    { "minutesAgo": 30, "mmol": 8.8 },
+    { "minutesAgo": 25, "mmol": 8.2 },
+    { "minutesAgo": 20, "mmol": 7.6 },
+    { "minutesAgo": 15, "mmol": 7.0 },
+    { "minutesAgo": 10, "mmol": 6.5 },
+    { "minutesAgo": 5, "mmol": 6.2 },
+    { "minutesAgo": 4, "mmol": 6.1 },
+    { "minutesAgo": 3, "mmol": 6.0 },
+    { "minutesAgo": 2, "mmol": 5.93 },
+    { "minutesAgo": 1, "mmol": 5.86 },
+    { "minutesAgo": 0, "mmol": 5.8 }
+  ]
+}
