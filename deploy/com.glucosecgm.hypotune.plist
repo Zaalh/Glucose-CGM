@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd LaunchAgent: dagelijkse auto-tune + dag/week-rapport van de V2 detector.
+
+  Installeren op de iMac:
+    cp "deploy/com.glucosecgm.hypotune.plist" ~/Library/LaunchAgents/
+    launchctl load -w ~/Library/LaunchAgents/com.glucosecgm.hypotune.plist
+  Eenmalig nu draaien (test):
+    launchctl start com.glucosecgm.hypotune
+  Stoppen/verwijderen:
+    launchctl unload -w ~/Library/LaunchAgents/com.glucosecgm.hypotune.plist
+
+  Draait dagelijks 04:30. launchd haalt een gemiste run in bij de eerstvolgende
+  wake. Vereist dat Docker Desktop draait (anders faalt de run; volgende dag opnieuw).
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.glucosecgm.hypotune</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/zaa/Documents/Glucose CGM/scripts/daily-hypo-tune.sh</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>4</integer>
+    <key>Minute</key><integer>30</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/zaa/Documents/Glucose CGM/hypo-tune-reports/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/zaa/Documents/Glucose CGM/hypo-tune-reports/launchd.err.log</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

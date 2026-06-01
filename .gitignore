@@ -9,3 +9,5 @@ influxdb-data/
 grafana-data/
 .claude/
 nightscout-overlay/certs/
+hypo-tune-reports/
+scripts/reactive-hypo-v2-state.json
