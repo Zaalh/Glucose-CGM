@@ -42,10 +42,9 @@ function isLocalPeak(timeline, i) {
   return true
 }
 
-function labelOutcome(nadirMmol, dropFromPeakMmol, opt) {
+function labelOutcome(nadirMmol, opt) {
   if (nadirMmol < opt.lowMmol) return 'hypo'
   if (nadirMmol < opt.nearMmol) return 'near_hypo'
-  if (dropFromPeakMmol >= 2) return 'safe_drop'
   return 'safe_drop'
 }
 
@@ -109,7 +108,7 @@ export function buildEpisodes(timeline, options = {}) {
     }
 
     const minutesPeakToNadir = (nadir.date - peak.date) / MS_PER_MIN
-    const outcome = labelOutcome(nadirMmol, dropFromPeakMmol, opt)
+    const outcome = labelOutcome(nadirMmol, opt)
 
     episodes.push({
       version: 2,

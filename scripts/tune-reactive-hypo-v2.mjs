@@ -22,6 +22,9 @@ import { buildReplayContext, evaluateV1, evaluateV2 } from './evaluate-hypo-dete
 
 const MS_PER_MIN = 60_000
 const TRAIN_FRACTION = Number(process.env.HYPO_TUNE_TRAIN_FRACTION ?? 0.7)
+// Onder dit aantal hypo-events in train/test is een split statistisch zinloos;
+// dan schrijven we GEEN state-file (anders lijkt default ten onrechte "getuned").
+const MIN_EVENTS = Number(process.env.HYPO_TUNE_MIN_EVENTS ?? 3)
 const STATE_PATH = join(dirname(fileURLToPath(import.meta.url)), 'reactive-hypo-v2-state.json')
 
 // Parameterruimte (klein en uitlegbaar; de FP-gevoelige knoppen).
@@ -92,8 +95,12 @@ function tune(timeline, options = {}) {
   const v1Train = evaluateV1(trainCtx).metrics
   const v1Test = evaluateV1(testCtx).metrics
 
+  const minEvents = options.minEvents ?? MIN_EVENTS
+  const degenerate = trainCtx.hypoOnsets.length < minEvents || testCtx.hypoOnsets.length < minEvents
+
   return {
     ok: true,
+    degenerate,
     split: {
       at: new Date(splitMs).toISOString(),
       trainFraction: options.trainFraction ?? TRAIN_FRACTION,
@@ -164,15 +171,27 @@ async function main() {
   }
 
   try {
-    const result = tune(timeline, { sustainMin: selfTest ? 5 : undefined })
+    const result = tune(timeline, selfTest ? { sustainMin: 5, minEvents: 1 } : {})
     if (!result.ok) {
       console.log(JSON.stringify(result))
       process.exit(1)
     }
     const state = buildState(result)
-    if (!selfTest) writeFileSync(STATE_PATH, JSON.stringify(state, null, 2) + '\n')
     console.log(JSON.stringify(state, null, 2))
-    console.log(`\n${selfTest ? 'SELF-TEST OK' : `state geschreven: ${STATE_PATH}`}`)
+    if (result.degenerate) {
+      console.log(
+        `\nWAARSCHUWING: te weinig hypo-events in train (${result.split.trainHypoOnsets}) ` +
+          `of test (${result.split.testHypoOnsets}); minimaal ${MIN_EVENTS} nodig. ` +
+          `GEEN state geschreven — verzamel eerst meer 1-min data (M5 shadow-mode).`,
+      )
+      process.exit(2)
+    }
+    if (!selfTest) {
+      writeFileSync(STATE_PATH, JSON.stringify(state, null, 2) + '\n')
+      console.log(`\nstate geschreven: ${STATE_PATH}`)
+    } else {
+      console.log('\nSELF-TEST OK')
+    }
   } finally {
     if (client) await client.close().catch(() => undefined)
   }

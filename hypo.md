@@ -13,6 +13,42 @@ Medische nuance: dit systeem is hulpmiddel en rapportage, geen vervanging voor
 medisch advies of een officiële medische alarmfunctie. Bij klachten of twijfel
 blijft een vingerprik/medisch advies belangrijk.
 
+## Implementatiestatus (bijgewerkt 2026-06-01)
+
+De V2-laag uit dit plan is grotendeels gebouwd, gedeployed op de iMac en getest op
+echte data. Stand van zaken per mijlpaal:
+
+- **M1 — rijkere snapshots (af, live):** `prediction_snapshots` bevat nu `features`,
+  `predicted`, `pattern` en `lagAdjustedMmol`; de `riskDetails`-persist-bug is gefixt;
+  `modelVersion` = `rules-v1.1`. Geen gedragswijziging in de V1-risicologica.
+- **M2 — gedeelde detector-lib (af):** `scripts/lib/hypo-features.mjs`
+  (`buildHypoFeatures`) en `scripts/lib/reactive-hypo-detector.mjs`
+  (`evaluateReactiveHypoRiskV2`, component-scores + scenario's + overrides, tunebaar via
+  `context.params`). Fixtures in `scripts/fixtures/`.
+- **M3 — episode-builder (af):** `scripts/lib/episode-builder.mjs` +
+  `scripts/build-reactive-hypo-episodes.mjs` → collectie `reactive_hypo_episodes`
+  (198 episodes uit 7501 entries).
+- **M4 — backtest + auto-tuner (af):** `scripts/evaluate-hypo-detector.mjs` (V1 vs V2,
+  precision/recall/lead-time, early-warning-only, dichtheidsfilter) +
+  `scripts/lib/legacy-risk-v1.mjs`. Auto-tuner `scripts/tune-reactive-hypo-v2.mjs`
+  (`reactive-hypo-v2-state.json`).
+
+**Methodiek volgt CGM-literatuur** (o.a. PMC10012121 ensemble-CGM-hypo): ±30 min
+event-window, "sustained" hypo (≥10 min onder grens), temporele train/test-split met
+recall-gebonden grid search, en rapportage in- én out-of-sample.
+
+**Kernbevinding — databottleneck:** in de eerlijke backtest doet V2 wat het moet op
+lead-time (~20 min, vergelijkbaar met de 17.5 min uit onderzoek) maar met te veel vals
+alarm (precision ~0.05). Belangrijker: alle ~8 sustained hypo's zitten in het recente
+1-min venster; de oudere data is uurlijks/15-min en valt door het dichtheidsfilter.
+Daardoor is een train/test-split nu degenereert (0 train-events) en is auto-tunen nog
+niet zinvol. De tuner weigert in dat geval een state te schrijven.
+
+**Bijgestelde volgorde:** eerst **M5 shadow-mode** (V2 stil naast V1 in de sync,
+`shadowRisk` opslaan, géén alarm) om de dichte, over-tijd-verspreide dataset op te
+bouwen die de tuner nodig heeft → daarna pas zinvol auto-tunen → daarna pas **M6**
+(V2 activeren). V1 (`rules-v1.1`) blijft tot die tijd de enige alarmbron.
+
 ## Huidige situatie
 
 De basis is aanwezig:
