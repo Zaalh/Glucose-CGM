@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
 import { MongoClient } from 'mongodb'
+import { buildHypoFeatures } from './lib/hypo-features.mjs'
+import { evaluateReactiveHypoRiskV2 } from './lib/reactive-hypo-detector.mjs'
 
 const LIBRE_API = 'https://api-eu.libreview.io'
 const DEFAULT_INTERVAL_SECONDS = 60
@@ -204,6 +206,25 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
         }
       : null
 
+    // M5 shadow-mode: V2 (reactieve detector) draait stil mee en wordt opgeslagen
+    // náást V1. V1 (rules-v1.1) blijft de enige alarmbron; shadowRisk stuurt NIETS
+    // aan. Doel: dichte V1/V2-paren verzamelen voor latere backtest/tuning (M6).
+    // Draait met default-parameters; M6 laadt eventueel getunede params.
+    let shadow = null
+    try {
+      const shadowFeatures = buildHypoFeatures(timeline, idx, { nowMs: entry.date })
+      const v2 = evaluateReactiveHypoRiskV2(shadowFeatures, {})
+      shadow = {
+        shadowModelVersion: v2.modelVersion,
+        shadowRisk: v2.risk,
+        shadowScore: v2.score,
+        shadowConfidence: v2.confidence,
+        shadowReasons: v2.reasons,
+      }
+    } catch (err) {
+      console.warn(`[libreview-sync] shadow V2 mislukt: ${formatError(err)}`)
+    }
+
     return {
       createdAt: entry.dateString ?? new Date(entry.date).toISOString(),
       entryIdentifier: entry.identifier,
@@ -217,6 +238,7 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
       features,
       predicted,
       pattern,
+      ...(shadow || {}),
       modelVersion: 'rules-v1.1',
       outcomeEvaluated: false,
     }
@@ -244,6 +266,11 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
             features: snapshot.features,
             predicted: snapshot.predicted,
             pattern: snapshot.pattern,
+            shadowModelVersion: snapshot.shadowModelVersion ?? null,
+            shadowRisk: snapshot.shadowRisk ?? null,
+            shadowScore: snapshot.shadowScore ?? null,
+            shadowConfidence: snapshot.shadowConfidence ?? null,
+            shadowReasons: snapshot.shadowReasons ?? null,
             modelVersion: snapshot.modelVersion,
             outcomeEvaluated: false,
             updatedAt: new Date().toISOString(),
@@ -683,7 +710,7 @@ async function getLatestPredictionSnapshot() {
     client = new MongoClient(config.mongoUri)
     await client.connect()
     return await client.db().collection('prediction_snapshots')
-      .find({}, { projection: { createdAt: 1, entryIdentifier: 1, predictedMmol: 1, probabilities: 1, modelVersion: 1, currentMmol: 1, risk: 1, riskScore: 1, reasons: 1, riskDetails: 1, features: 1, predicted: 1, pattern: 1 } })
+      .find({}, { projection: { createdAt: 1, entryIdentifier: 1, predictedMmol: 1, probabilities: 1, modelVersion: 1, currentMmol: 1, risk: 1, riskScore: 1, reasons: 1, riskDetails: 1, features: 1, predicted: 1, pattern: 1, shadowModelVersion: 1, shadowRisk: 1, shadowScore: 1, shadowConfidence: 1, shadowReasons: 1 } })
       .sort({ createdAt: -1 })
       .limit(1)
       .next()
