@@ -89,6 +89,21 @@ npm run summaries:build
 
 Bouwt of ververst `daily_summaries` op basis van `entries`, `pattern_events` en geëvalueerde snapshots.
 
+```bash
+npm run episodes:build
+npm run hypo:backtest
+npm run hypo:tune
+```
+
+Reactieve-hypo detector V2 (`hypo.md`): bouwt `reactive_hypo_episodes`, draait de V1-vs-V2 backtest (precision/recall/lead-time), en auto-tunet de V2-parameters met een temporele train/test-split naar `scripts/reactive-hypo-v2-state.json`. Draaien in het Docker-netwerk (Mongo bereikbaar).
+
+```bash
+npm run detector:fixtures
+npm run episodes:check
+```
+
+Lokale sanity-checks zonder database: de V2-detector op fixtures en de episode-builder op een synthetische timeline (`node --check`-vriendelijk).
+
 ## Environment Files
 
 ### `.env.nightscout`
@@ -217,7 +232,13 @@ De live setup is geverifieerd met InfluxDB `1.8.10`, Grafana `11.5.2`, datasourc
 - `grafana/provisioning/datasources/influxdb.yml`: Grafana datasource voor InfluxDB 1.x / InfluxQL.
 - `grafana/provisioning/dashboards/dashboards.yml`: Grafana dashboard provider.
 - `grafana/dashboards/xdrip-glucose.json`: Basisdashboard voor xDrip glucosewaarden.
-- `scripts/libreview-nightscout-sync.mjs`: Lokale sync van LibreView naar Nightscout.
+- `scripts/libreview-nightscout-sync.mjs`: Lokale sync van LibreView naar Nightscout; schrijft `prediction_snapshots` (V1 + V2 shadow) en glucose/rate naar InfluxDB.
+- `scripts/lib/hypo-features.mjs`: Pure featurebuilder (`buildHypoFeatures`), gedeeld door live en backtest.
+- `scripts/lib/reactive-hypo-detector.mjs`: V2 reactieve-hypo detector (`evaluateReactiveHypoRiskV2`), tunebaar via params.
+- `scripts/lib/episode-builder.mjs` + `scripts/build-reactive-hypo-episodes.mjs`: bouwt `reactive_hypo_episodes`.
+- `scripts/lib/legacy-risk-v1.mjs`: getrouwe V1-port voor de backtest (één-op-één met de sync houden).
+- `scripts/evaluate-hypo-detector.mjs`: backtest V1 vs V2 (precision/recall/lead-time).
+- `scripts/tune-reactive-hypo-v2.mjs` + `scripts/reactive-hypo-v2-state.json`: auto-tuner en getunede V2-parameters.
 - `scripts/build-entry-features.mjs`: Backfill van `entry_features`.
 - `scripts/analyze-patterns.mjs`: Detectie van pattern events.
 - `scripts/backfill-prediction-snapshots.mjs`: Historische snapshot backfill.
@@ -234,6 +255,8 @@ De live setup is geverifieerd met InfluxDB `1.8.10`, Grafana `11.5.2`, datasourc
 De voorspelling gebruikt weighted linear regression op recente metingen. Recente waarden krijgen meer gewicht. De overlay en de sync delen deze aanpak; de risico-drempels komen uit `scripts/risk-model-state.json`.
 
 Geen quadratic regression gebruiken voor glucosevoorspelling. Bij minuutdata geeft dat te snel overfit en wilde extrapolaties.
+
+Naast de V1-regel draait een **V2 reactieve-hypo detector** (`scripts/lib/reactive-hypo-detector.mjs`, zie `hypo.md`) die curvevorm, dalingssnelheid, CGM-lag, scenario's en persoonlijke episodes combineert. V2 staat in **shadow-mode**: per snapshot opgeslagen als `shadowRisk`, maar V1 (`rules-v1.1`) blijft de enige alarmbron tot V2 op genoeg 1-min data getuned en geactiveerd is (M6). Live en backtest delen dezelfde featurebuilder/detector, zodat de backtest meet wat live draait.
 
 ## Alarms
 

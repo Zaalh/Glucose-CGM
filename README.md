@@ -106,7 +106,7 @@ Start handmatig dezelfde sync die de `Sync Libre` knop gebruikt.
 
 De `libreview-sync` service (poort 8787) biedt naast `/health` en `/sync`:
 
-- `GET /prediction/latest` — de nieuwste `prediction_snapshots` record (risico, `predictedMmol` per horizon 10/15/20/30/60/120/180, kansen `<4.5`/`<4.0`).
+- `GET /prediction/latest` — de nieuwste `prediction_snapshots` record (risico, `predictedMmol` per horizon 10/15/20/30/60/120/180, kansen `<4.5`/`<4.0`, `features`, `predicted`, `pattern`, en de V2 shadow-velden `shadowRisk`/`shadowScore`/`shadowConfidence`/`shadowReasons`).
 - `GET /overlay/entries?count=N` — recente entries voor de overlay-grafiek.
 - `POST /feedback` — schrijft `user_feedback` (types: `confirmed`, `false_alarm`, `feels_hypo`, `ate_now`, `fingerstick_confirmed`), gekoppeld aan de dichtstbijzijnde entry + actieve snapshot.
 
@@ -173,6 +173,42 @@ npm run model:retrain:precision
 
 Alternatieve trainingspolicies naast de standaard recall-first.
 
+### Reactieve-hypo detector V2 (hypo.md)
+
+De V2-laag draait op een gedeelde featurebuilder/detector in `scripts/lib/`, zodat live en
+backtest exact dezelfde logica gebruiken. Deze commands draaien node in het Docker-netwerk
+(MongoDB is daar bereikbaar) of lokaal op fixtures.
+
+```bash
+npm run episodes:build
+```
+
+Bouwt de collectie `reactive_hypo_episodes` (piek→nadir descents met outcome) uit alle entries.
+
+```bash
+npm run hypo:backtest
+```
+
+Speelt de historie af en vergelijkt V1 (regel) met V2 (reactieve detector): precision, recall,
+lead-time, gemiste hypo's en vals alarm. Telt alleen echte vroege waarschuwingen en filtert op
+meet-dichtheid. Verandert niets live.
+
+```bash
+npm run hypo:tune
+```
+
+Auto-tuner: temporele train/test-split + grid search over de V2-parameters met een
+recall-gebonden doel. Schrijft de beste set naar `scripts/reactive-hypo-v2-state.json`
+(en niets bij te weinig hypo-events). Wordt pas zinvol met genoeg 1-min data.
+
+```bash
+npm run detector:fixtures
+npm run episodes:check
+```
+
+Lokale sanity-checks zonder database (detector op testgevallen / episode-builder op een
+synthetische timeline).
+
 ## Predictie Status
 
 Afgerond:
@@ -190,8 +226,18 @@ Afgerond:
 - `episode_vectors` + live similarity-correctie op de patrooncorrectie
 - `user_feedback` feedbackknoppen in de overlay-hypokaart
 
+Reactieve-hypo detector V2 (`hypo.md`):
+
+- M1 rijkere snapshots (`features`/`predicted`/`pattern`/`lagAdjustedMmol`, `rules-v1.1`)
+- M2 gedeelde featurebuilder + V2-detector in `scripts/lib/`
+- M3 episode-builder → `reactive_hypo_episodes`
+- M4 backtest (V1 vs V2) + auto-tuner met train/test-split
+- M5 shadow-mode: V2 draait stil mee als `shadowRisk` (geen alarm)
+
 Nog open (bewust):
 
+- M6/M7: V2 activeren + feedback-tuning — wacht op ~1–2 weken shadow-data zodat de tuner
+  een echte train/test-split heeft (V2 geeft nu meer lead-time maar te veel vals alarm)
 - fine-tuning van thresholds/policies op langere dataperiode (optioneel)
 - AI-laag (`ai_observations` / `ai_questions`): uitleg/context/vragen — komt later, neemt nooit de live alarmbeslissing
 - `episode_vectors` similarity ook in de UI-redenen tonen
