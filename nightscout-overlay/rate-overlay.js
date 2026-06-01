@@ -1843,11 +1843,17 @@
       .then(function (entries) {
         var readings = sortedReadings(entries);
         if (!readings.length) throw new Error('Geen bruikbare SGV entries ontvangen');
+        var previousLatestTime = currentReadings.length ? readingTime(currentReadings[0]) : null;
         currentReadings = readings;
         chartReadingsAsc = readings.slice().reverse();
         calibrateFromHistory(readings);
         var anchorEntry = null;
         if (getViewMode() === 'history' && selectedReadingTime !== null) {
+          // If history mode was still following the previously-latest point,
+          // keep it live instead of freezing the rate cards on an old minute.
+          if (previousLatestTime !== null && selectedReadingTime === previousLatestTime) {
+            selectedReadingTime = readingTime(readings[0]);
+          }
           anchorEntry = readings.find(function (entry) {
             return readingTime(entry) === selectedReadingTime;
           }) || null;
