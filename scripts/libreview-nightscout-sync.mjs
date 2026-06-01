@@ -24,6 +24,9 @@ const RATE_DECAY_TAU = 45
 const SIM_SCALES = { peakMmol: 4, dropFromPeakMmol: 3, minutesSincePeak: 30 }
 const SIM_MAX_DIST = 1.5
 const SIM_K = 8
+// CGM-lag correctie: bij snelle daling ligt de echte bloedglucose lager dan de
+// sensorwaarde. We schatten dat met blendedRate over dit aantal minuten vooruit.
+const CGM_LAG_MINUTES = 5
 const FEEDBACK_TYPES = new Set([
   'confirmed',
   'false_alarm',
@@ -164,6 +167,43 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
       patternDrop: similar ? similar.correction : null,
     })
 
+    const blendedRate = risk.details.blendedRate
+    const lagAdjustedMmol = Number.isFinite(blendedRate)
+      ? round(currentMmol + blendedRate * CGM_LAG_MINUTES, 3)
+      : null
+
+    // Vlakke featureset naast de ruwe snapshot — live en (later) backtest delen
+    // straks dezelfde featurebuilder; voor nu leggen we vast wat al berekend is.
+    const features = {
+      currentMmol: round(currentMmol, 3),
+      peakMmol120m: round(peakMmol, 3),
+      minutesSincePeak: round(minutesSincePeak, 1),
+      dropFromPeakMmol: round(dropFromPeakMmol, 3),
+      dropFromPeakPercent: round(dropFromPeakPercent, 1),
+      rate5m: Number.isFinite(rate5m) ? round(rate5m, 4) : null,
+      rate10m: Number.isFinite(rate10m) ? round(rate10m, 4) : null,
+      rate15m: Number.isFinite(rate15m) ? round(rate15m, 4) : null,
+      blendedRate,
+      lagAdjustedMmol,
+    }
+
+    const predicted = {
+      mmol10: forecast.predictedMmol['10'] ?? null,
+      mmol20: forecast.predictedMmol['20'] ?? null,
+      mmol30: forecast.predictedMmol['30'] ?? null,
+      minutesTo45: risk.details.minutesTo45,
+      minutesTo40: risk.details.minutesTo40,
+      lagAdjustedMmol,
+    }
+
+    const pattern = similar
+      ? {
+          similarEpisodeCount: similar.count,
+          similarHypoCount: similar.hypoCount,
+          similarHypoRatio: round(similar.hypoRatio, 3),
+        }
+      : null
+
     return {
       createdAt: entry.dateString ?? new Date(entry.date).toISOString(),
       entryIdentifier: entry.identifier,
@@ -174,7 +214,10 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
       riskDetails: risk.details,
       predictedMmol: forecast.predictedMmol,
       probabilities: forecast.probabilities,
-      modelVersion: 'rules-v1',
+      features,
+      predicted,
+      pattern,
+      modelVersion: 'rules-v1.1',
       outcomeEvaluated: false,
     }
   }).filter(Boolean)
@@ -195,8 +238,12 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
             risk: snapshot.risk,
             riskScore: snapshot.riskScore,
             reasons: snapshot.reasons,
+            riskDetails: snapshot.riskDetails,
             predictedMmol: snapshot.predictedMmol,
             probabilities: snapshot.probabilities,
+            features: snapshot.features,
+            predicted: snapshot.predicted,
+            pattern: snapshot.pattern,
             modelVersion: snapshot.modelVersion,
             outcomeEvaluated: false,
             updatedAt: new Date().toISOString(),
@@ -636,7 +683,7 @@ async function getLatestPredictionSnapshot() {
     client = new MongoClient(config.mongoUri)
     await client.connect()
     return await client.db().collection('prediction_snapshots')
-      .find({}, { projection: { createdAt: 1, entryIdentifier: 1, predictedMmol: 1, probabilities: 1, modelVersion: 1, currentMmol: 1, risk: 1, riskScore: 1, reasons: 1, riskDetails: 1 } })
+      .find({}, { projection: { createdAt: 1, entryIdentifier: 1, predictedMmol: 1, probabilities: 1, modelVersion: 1, currentMmol: 1, risk: 1, riskScore: 1, reasons: 1, riskDetails: 1, features: 1, predicted: 1, pattern: 1 } })
       .sort({ createdAt: -1 })
       .limit(1)
       .next()
