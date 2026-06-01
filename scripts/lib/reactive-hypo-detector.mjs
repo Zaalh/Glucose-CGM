@@ -19,6 +19,24 @@ const TH = {
   slowFall: -0.03,
 }
 
+// Tunebare parameters. De auto-tuner (tune-reactive-hypo-v2.mjs) zoekt hierover
+// en schrijft de beste set weg; live + backtest geven ze door via context.params.
+export const DEFAULT_PARAMS = {
+  scoreCut: { urgent: 8, likely: 5, watch: 3 }, // score -> risk grenzen
+  accelDownBonus: 1, // extra rate-punt bij versnellende daling (FP-gevoelig)
+  worstCaseToLikely: true, // worst-case <4.0 dwingt minimaal 'likely'
+}
+
+function mergeParams(params) {
+  const p = params || {}
+  return {
+    scoreCut: { ...DEFAULT_PARAMS.scoreCut, ...(p.scoreCut || {}) },
+    accelDownBonus: Number.isFinite(p.accelDownBonus) ? p.accelDownBonus : DEFAULT_PARAMS.accelDownBonus,
+    worstCaseToLikely:
+      typeof p.worstCaseToLikely === 'boolean' ? p.worstCaseToLikely : DEFAULT_PARAMS.worstCaseToLikely,
+  }
+}
+
 function num(v, fallback = 0) {
   return Number.isFinite(v) ? v : fallback
 }
@@ -89,10 +107,10 @@ function buildScenarios(features) {
 // --- Risk-niveau helpers -------------------------------------------------
 const ORDER = { low: 0, watch: 1, likely: 2, urgent: 3 }
 
-function scoreToRisk(score) {
-  if (score >= 8) return 'urgent'
-  if (score >= 5) return 'likely'
-  if (score >= 3) return 'watch'
+function scoreToRisk(score, cut) {
+  if (score >= cut.urgent) return 'urgent'
+  if (score >= cut.likely) return 'likely'
+  if (score >= cut.watch) return 'watch'
   return 'low'
 }
 
@@ -103,6 +121,7 @@ function atLeast(current, floor) {
 // --- Hoofdfunctie --------------------------------------------------------
 export function evaluateReactiveHypoRiskV2(features, context = {}) {
   const f = features || {}
+  const P = mergeParams(context.params)
   const pattern = context.pattern || null
   const reasons = []
   const components = {}
@@ -151,8 +170,8 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
     rateScore = 1
   }
   if (rate15m <= -0.04) rateScore += 1
-  if (f.isAcceleratingDown) {
-    rateScore += 1
+  if (f.isAcceleratingDown && P.accelDownBonus > 0) {
+    rateScore += P.accelDownBonus
     reasons.push('Daling versnelt')
   }
   components.rateScore = rateScore
@@ -234,7 +253,7 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
   const score = Math.max(0, rawScore)
 
   const scenarios = buildScenarios(f)
-  let risk = scoreToRisk(score)
+  let risk = scoreToRisk(score, P.scoreCut)
 
   // --- Harde overrides (veiligheid) ---
   if (current < TH.low) risk = 'urgent'
@@ -245,7 +264,7 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
   }
 
   // --- Onzekerheids-overrides (worst-case scenario) ---
-  if (scenarios.worstCaseMin30 < TH.low) {
+  if (P.worstCaseToLikely && scenarios.worstCaseMin30 < TH.low) {
     risk = atLeast(risk, 'likely')
     reasons.push('Worst-case scenario komt onder 4.0 binnen 30 min')
   } else if (scenarios.worstCaseMin30 < TH.near && scenarios.uncertaintyWidth >= 1.0) {
