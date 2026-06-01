@@ -78,10 +78,13 @@ services:
         condition: service_started
     volumes:
       - ./nightscout-overlay/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nightscout-overlay/app-locations.conf:/etc/nginx/overlay/app-locations.conf:ro
       - ./nightscout-overlay/rate-overlay.js:/etc/nginx/overlay/rate-overlay.js:ro
       - ./nightscout-overlay/sw.js:/etc/nginx/overlay/sw.js:ro
+      - ./nightscout-overlay/certs:/etc/nginx/certs:ro
     ports:
       - "${NIGHTSCOUT_PORT:-1337}:1337"
+      - "443:443"
 
   libreview-sync:
     image: node:20-alpine

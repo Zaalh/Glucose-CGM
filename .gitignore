@@ -8,3 +8,4 @@ nightscout-mongo-data/
 influxdb-data/
 grafana-data/
 .claude/
+nightscout-overlay/certs/
