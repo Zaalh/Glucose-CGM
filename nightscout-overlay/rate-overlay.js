@@ -1171,14 +1171,7 @@
       '<div class="hypo-line"><span class="hypo-average">', averageRateText(true), '</span></div>',
       predictHtml,
       dropLine ? '<div class="hypo-line"><span class="hypo-drop">' + dropLine + '</span></div>' : '',
-      patternLine ? '<div class="hypo-line"><span class="hypo-drop" style="color: #ff9800; font-weight: bold;">' + patternLine + '</span></div>' : '',
-      '<div class="hypo-feedback">',
-      '<button type="button" data-feedback="confirmed">Klopt</button>',
-      '<button type="button" data-feedback="false_alarm">Vals alarm</button>',
-      '<button type="button" data-feedback="feels_hypo">Ik voel hypo</button>',
-      '<button type="button" data-feedback="ate_now">Ik heb gegeten</button>',
-      '<button type="button" data-feedback="fingerstick_confirmed">Vingerprik ok</button>',
-      '</div>'
+      patternLine ? '<div class="hypo-line"><span class="hypo-drop" style="color: #ff9800; font-weight: bold;">' + patternLine + '</span></div>' : ''
     ].join('');
   }
 
