@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
+import { readFileSync } from 'node:fs'
 import { MongoClient } from 'mongodb'
 import { buildHypoFeatures } from './lib/hypo-features.mjs'
 import { evaluateReactiveHypoRiskV2 } from './lib/reactive-hypo-detector.mjs'
@@ -29,6 +30,10 @@ const SIM_K = 8
 // CGM-lag correctie: bij snelle daling ligt de echte bloedglucose lager dan de
 // sensorwaarde. We schatten dat met blendedRate over dit aantal minuten vooruit.
 const CGM_LAG_MINUTES = 5
+// Door de wekelijkse auto-tuner geleerde V2-parameters (op jouw eigen episodes).
+// Gitignored runtime-state; afwezig = V2 draait op defaults. Wordt per sync-cyclus
+// opnieuw gelezen, zodat een verse tuning vanzelf wordt toegepast (in shadow).
+const V2_STATE_PATH = new URL('./reactive-hypo-v2-state.json', import.meta.url)
 const FEEDBACK_TYPES = new Set([
   'confirmed',
   'false_alarm',
@@ -176,6 +181,7 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
 
   const episodes = await loadPatternEpisodes()
   const episodeVectors = await loadEpisodeVectors()
+  const v2State = loadReactiveHypoV2State() // geleerde params (of null -> defaults)
   const snapshots = entries.map((entry) => {
     const idx = timeline.findIndex((candidate) => candidate.identifier === entry.identifier)
     if (idx < 0) return null
@@ -277,13 +283,14 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
     let shadow = null
     try {
       const shadowFeatures = buildHypoFeatures(timeline, idx, { nowMs: entry.date })
-      const v2 = evaluateReactiveHypoRiskV2(shadowFeatures, {})
+      const v2 = evaluateReactiveHypoRiskV2(shadowFeatures, v2State ? { params: v2State.params } : {})
       shadow = {
         shadowModelVersion: v2.modelVersion,
         shadowRisk: v2.risk,
         shadowScore: v2.score,
         shadowConfidence: v2.confidence,
         shadowReasons: v2.reasons,
+        shadowTuned: Boolean(v2State), // true = geleerde params toegepast
       }
     } catch (err) {
       console.warn(`[libreview-sync] shadow V2 mislukt: ${formatError(err)}`)
@@ -335,6 +342,7 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
             shadowScore: snapshot.shadowScore ?? null,
             shadowConfidence: snapshot.shadowConfidence ?? null,
             shadowReasons: snapshot.shadowReasons ?? null,
+            shadowTuned: snapshot.shadowTuned ?? null,
             modelVersion: snapshot.modelVersion,
             outcomeEvaluated: false,
             updatedAt: new Date().toISOString(),
@@ -350,6 +358,17 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
     console.warn(`[libreview-sync] snapshot mongo write mislukt: ${formatError(err)}`)
   } finally {
     if (client) await client.close().catch(() => undefined)
+  }
+}
+
+// Leest de geleerde V2-parameters van schijf (geschreven door de wekelijkse
+// auto-tuner). Afwezig/ongeldig = null -> V2 draait op defaults.
+function loadReactiveHypoV2State() {
+  try {
+    const state = JSON.parse(readFileSync(V2_STATE_PATH, 'utf8'))
+    return state && state.params ? state : null
+  } catch {
+    return null
   }
 }
 
@@ -774,7 +793,7 @@ async function getLatestPredictionSnapshot() {
     client = new MongoClient(config.mongoUri)
     await client.connect()
     return await client.db().collection('prediction_snapshots')
-      .find({}, { projection: { createdAt: 1, entryIdentifier: 1, predictedMmol: 1, probabilities: 1, modelVersion: 1, currentMmol: 1, risk: 1, riskScore: 1, reasons: 1, riskDetails: 1, features: 1, predicted: 1, pattern: 1, shadowModelVersion: 1, shadowRisk: 1, shadowScore: 1, shadowConfidence: 1, shadowReasons: 1 } })
+      .find({}, { projection: { createdAt: 1, entryIdentifier: 1, predictedMmol: 1, probabilities: 1, modelVersion: 1, currentMmol: 1, risk: 1, riskScore: 1, reasons: 1, riskDetails: 1, features: 1, predicted: 1, pattern: 1, shadowModelVersion: 1, shadowRisk: 1, shadowScore: 1, shadowConfidence: 1, shadowReasons: 1, shadowTuned: 1 } })
       .sort({ createdAt: -1 })
       .limit(1)
       .next()
