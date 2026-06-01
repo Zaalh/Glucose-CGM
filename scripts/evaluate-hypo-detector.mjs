@@ -70,6 +70,15 @@ function nadirAfter(timeline, fromIdx, withinMs) {
   return min
 }
 
+// Dicht genoeg gesamplede regio: minstens `minSamples` metingen in `lookbackMin`.
+// Filtert de uurlijkse/15-min historische import weg, waar rate-features zinloos zijn.
+function denseAt(timeline, i, lookbackMin, minSamples) {
+  const from = timeline[i].date - lookbackMin * MS_PER_MIN
+  let count = 0
+  for (let j = i; j >= 0 && timeline[j].date >= from; j -= 1) count += 1
+  return count >= minSamples
+}
+
 // Collapse per-punt alarmen tot alarm-episodes (start = eerste alarm in de reeks).
 function alertEpisodes(points, mergeGapMs) {
   const eps = []
@@ -89,24 +98,30 @@ function alertEpisodes(points, mergeGapMs) {
   return eps
 }
 
-function scoreModel(points, onsets, windowMs, mergeGapMs) {
+function scoreModel(points, onsets, windowMs, mergeGapMs, predictiveFloor) {
   const eps = alertEpisodes(points, mergeGapMs)
+  const byIdx = new Map(points.map((p) => [p.idx, p]))
+  for (const ep of eps) ep.startMmol = byIdx.get(ep.startIdx)?.mmol ?? null
 
-  // Precision: alarm-episode is terecht als binnen WINDOW een hypo-onset volgt.
+  // Alleen voorspellende alarmen tellen: gestart terwijl glucose nog >= 4.0 was.
+  // Alarmen die pas afgaan als je al < 4.0 bent zijn geen vroege waarschuwing.
+  const predictive = eps.filter((ep) => Number.isFinite(ep.startMmol) && ep.startMmol >= predictiveFloor)
+
+  // Precision: voorspellend alarm is terecht als er erná (binnen WINDOW) een onset volgt.
   let tpAlerts = 0
   const fpEpisodes = []
-  for (const ep of eps) {
-    const hit = onsets.some((o) => o.date >= ep.start && o.date <= ep.start + windowMs)
+  for (const ep of predictive) {
+    const hit = onsets.some((o) => o.date > ep.start && o.date <= ep.start + windowMs)
     if (hit) tpAlerts += 1
     else fpEpisodes.push(ep)
   }
 
-  // Recall: onset is gedekt als een alarm in [onset-WINDOW, onset] startte.
+  // Recall: onset is op tijd gezien als een voorspellend alarm vóór de onset startte.
   let covered = 0
   const leadTimes = []
   const missed = []
   for (const o of onsets) {
-    const before = eps.filter((ep) => ep.start >= o.date - windowMs && ep.start <= o.date)
+    const before = predictive.filter((ep) => ep.start >= o.date - windowMs && ep.start < o.date)
     if (before.length) {
       covered += 1
       const earliest = Math.min(...before.map((ep) => ep.start))
@@ -117,12 +132,13 @@ function scoreModel(points, onsets, windowMs, mergeGapMs) {
   }
 
   return {
-    alertEpisodes: eps.length,
+    totalAlertEpisodes: eps.length,
+    predictiveAlerts: predictive.length,
     truePositive: tpAlerts,
     falsePositive: fpEpisodes.length,
-    covered,
+    earlyCovered: covered,
     missed: missed.length,
-    precision: eps.length ? round(tpAlerts / eps.length, 3) : null,
+    precision: predictive.length ? round(tpAlerts / predictive.length, 3) : null,
     recall: onsets.length ? round(covered / onsets.length, 3) : null,
     medianLeadTimeMinutes: round(median(leadTimes), 1),
     _fpEpisodes: fpEpisodes,
@@ -134,6 +150,9 @@ export function replayAndEvaluate(timeline, options = {}) {
   const windowMs = (options.windowMin ?? WINDOW_MIN) * MS_PER_MIN
   const mergeGapMs = (options.mergeGapMin ?? MERGE_GAP_MIN) * MS_PER_MIN
   const warmupMs = (options.warmupMin ?? WARMUP_MIN) * MS_PER_MIN
+  const denseLookbackMin = options.denseLookbackMin ?? 15
+  const denseMinSamples = options.denseMinSamples ?? 4
+  const predictiveFloor = options.predictiveFloor ?? HYPO_MMOL
   if (timeline.length < 10) return { ok: false, reason: 'te weinig data' }
 
   const startMs = timeline[0].date + warmupMs
@@ -143,6 +162,7 @@ export function replayAndEvaluate(timeline, options = {}) {
 
   for (let i = 0; i < timeline.length; i += 1) {
     if (timeline[i].date < startMs) continue
+    if (!denseAt(timeline, i, denseLookbackMin, denseMinSamples)) continue
     const f = buildHypoFeatures(timeline, i, { nowMs: timeline[i].date })
     const v1 = evaluateRiskRuleV1({
       currentMmol: f.currentMmol,
@@ -157,15 +177,21 @@ export function replayAndEvaluate(timeline, options = {}) {
     const v2 = evaluateReactiveHypoRiskV2(f, {})
     levelCounts.v1[v1.risk] = (levelCounts.v1[v1.risk] || 0) + 1
     levelCounts.v2[v2.risk] = (levelCounts.v2[v2.risk] || 0) + 1
-    v1Points.push({ idx: i, date: timeline[i].date, alert: ALERT_LEVELS.v1.has(v1.risk), risk: v1.risk, reasons: v1.reasons })
-    v2Points.push({ idx: i, date: timeline[i].date, alert: ALERT_LEVELS.v2.has(v2.risk), risk: v2.risk, reasons: v2.reasons, features: f })
+    const mmol = f.currentMmol
+    v1Points.push({ idx: i, date: timeline[i].date, mmol, alert: ALERT_LEVELS.v1.has(v1.risk), risk: v1.risk, reasons: v1.reasons })
+    v2Points.push({ idx: i, date: timeline[i].date, mmol, alert: ALERT_LEVELS.v2.has(v2.risk), risk: v2.risk, reasons: v2.reasons, features: f })
   }
 
-  const hypoOnsets = findOnsets(timeline, HYPO_MMOL, NEAR_MMOL)
-  const nearOnsets = findOnsets(timeline, NEAR_MMOL, NEAR_MMOL + 0.3)
+  // Onsets alleen in dichte regio's — anders is "op tijd waarschuwen" niet eerlijk.
+  const hypoOnsets = findOnsets(timeline, HYPO_MMOL, NEAR_MMOL).filter((o) =>
+    denseAt(timeline, o.idx, denseLookbackMin, denseMinSamples),
+  )
+  const nearOnsets = findOnsets(timeline, NEAR_MMOL, NEAR_MMOL + 0.3).filter((o) =>
+    denseAt(timeline, o.idx, denseLookbackMin, denseMinSamples),
+  )
 
-  const v1 = scoreModel(v1Points, hypoOnsets, windowMs, mergeGapMs)
-  const v2 = scoreModel(v2Points, hypoOnsets, windowMs, mergeGapMs)
+  const v1 = scoreModel(v1Points, hypoOnsets, windowMs, mergeGapMs, predictiveFloor)
+  const v2 = scoreModel(v2Points, hypoOnsets, windowMs, mergeGapMs, predictiveFloor)
 
   // Voorbeelden (V2): gemiste hypo's, vals alarm, goede detecties.
   const missedExamples = v2._missed.slice(0, 5).map((o) => ({
