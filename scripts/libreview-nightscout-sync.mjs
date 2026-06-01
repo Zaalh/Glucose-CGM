@@ -78,10 +78,18 @@ async function syncOnce() {
   const { readings, debugInfo } = await collectReadings(lluToken, accountId, baseUrl)
   const knownIdentifiers = await getKnownNightscoutIdentifiers()
   const previousEntries = await getRecentNightscoutEntries()
-  const entries = readings
+  const collectedEntries = readings
     .filter((pt) => (pt.Timestamp ?? pt.FactoryTimestamp) && (pt.Value ?? pt.ValueInMgPerDl))
     .map(toNightscoutEntry)
     .filter((entry, index, all) => all.findIndex((candidate) => candidate.identifier === entry.identifier) === index)
+    .sort((a, b) => a.date - b.date)
+  addRateFields(collectedEntries, previousEntries)
+
+  // Influx/Grafana is een time-series view: refresh ook bekende recente punten,
+  // zodat richting/rate uit LibreView de oudere xDrip/Flat velden corrigeert.
+  await writeInfluxGlucoseEntries(collectedEntries)
+
+  const entries = collectedEntries
     .filter((entry) => !knownIdentifiers.has(entry.identifier))
     .sort((a, b) => a.date - b.date)
   addRateFields(entries, previousEntries)
@@ -101,6 +109,62 @@ async function syncOnce() {
     message: `${entries.length} metingen naar Nightscout geschreven.`,
     debug: debugInfo,
   }
+}
+
+async function writeInfluxGlucoseEntries(entries) {
+  if (!config.influxUrl || !entries.length) return
+
+  const lines = entries
+    .map(toInfluxGlucoseLine)
+    .filter(Boolean)
+
+  if (!lines.length) return
+
+  const url = new URL('/write', config.influxUrl)
+  url.searchParams.set('db', config.influxDb)
+  url.searchParams.set('precision', 'ns')
+
+  const headers = { 'Content-Type': 'text/plain' }
+  if (config.influxUser && config.influxPassword) {
+    headers.Authorization = `Basic ${Buffer.from(`${config.influxUser}:${config.influxPassword}`).toString('base64')}`
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: lines.join('\n'),
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      console.warn(`[libreview-sync] Influx write mislukt (${res.status}): ${text.slice(0, 300)}`)
+    }
+  } catch (err) {
+    console.warn(`[libreview-sync] Influx write netwerkfout: ${formatError(err)}`)
+  }
+}
+
+function toInfluxGlucoseLine(entry) {
+  const mgdl = Number(entry.sgv)
+  const date = Number(entry.date)
+  if (!Number.isFinite(mgdl) || !Number.isFinite(date)) return null
+
+  const mmol = mgdl / MGDL_PER_MMOL
+  const fields = [
+    `value_mgdl=${Math.round(mgdl)}i`,
+    `value_mmol=${round(mmol, 6)}`,
+    `direction=${quoteInfluxString(entry.direction ?? 'NOT COMPUTABLE')}`,
+  ]
+
+  const rate5m = entry.glucoseRateMmolPerMin?.['5m']
+  if (rate5m && Number.isFinite(rate5m.delta)) fields.push(`delta=${round(rate5m.delta, 6)}`)
+  if (rate5m && Number.isFinite(rate5m.rate)) fields.push(`rate_5m=${round(rate5m.rate, 6)}`)
+
+  return `glucose ${fields.join(',')} ${Math.trunc(date * 1_000_000)}`
+}
+
+function quoteInfluxString(value) {
+  return `"${String(value).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`
 }
 
 async function writePredictionSnapshots(entries, previousEntries = []) {
@@ -1127,6 +1191,10 @@ function readConfig(requireSecrets) {
     retryMaxDelayMs: Number(process.env.LIBREVIEW_RETRY_MAX_DELAY_MS ?? DEFAULT_RETRY_MAX_DELAY_MS),
     httpTimeoutMs: Number(process.env.LIBREVIEW_HTTP_TIMEOUT_MS ?? DEFAULT_HTTP_TIMEOUT_MS),
     retryJitterMs: Number(process.env.LIBREVIEW_RETRY_JITTER_MS ?? DEFAULT_RETRY_JITTER_MS),
+    influxUrl: optionalEnv('INFLUX_URL'),
+    influxDb: process.env.INFLUXDB_DB ?? 'xdrip',
+    influxUser: optionalEnv('INFLUXDB_USER') ?? optionalEnv('INFLUXDB_ADMIN_USER'),
+    influxPassword: optionalEnv('INFLUXDB_USER_PASSWORD') ?? optionalEnv('INFLUXDB_ADMIN_PASSWORD'),
   }
 
   if (next.tzFixedOffsetMinutes != null && !Number.isFinite(next.tzFixedOffsetMinutes)) {
