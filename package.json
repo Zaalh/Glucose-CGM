@@ -25,6 +25,7 @@
     "snapshots:evaluate": "docker compose -f docker-compose.nightscout.yml exec -T nightscout-mongo sh -lc \"mongo nightscout --quiet\" < scripts/evaluate-predictions.mjs",
     "summaries:build": "docker compose -f docker-compose.nightscout.yml exec -T nightscout-mongo sh -lc \"mongo nightscout --quiet\" < scripts/summarize-days.mjs",
     "episodes:build": "docker compose -f docker-compose.nightscout.yml --profile libre run --rm libreview-sync node scripts/build-reactive-hypo-episodes.mjs",
+    "hypo:backtest": "docker compose -f docker-compose.nightscout.yml --profile libre run --rm libreview-sync node scripts/evaluate-hypo-detector.mjs",
     "detector:fixtures": "node scripts/run-detector-fixtures.mjs",
     "episodes:check": "node scripts/run-episode-builder-check.mjs",
     "model:retrain:balanced": "TRAIN_POLICY=balanced node scripts/retrain-and-export-model.mjs",
