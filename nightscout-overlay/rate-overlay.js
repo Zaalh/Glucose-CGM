@@ -765,6 +765,7 @@
       '#cgm-hypo-alert .hypo-average{font-family:monospace;font-size:14px;font-weight:900;line-height:1.1;white-space:nowrap;opacity:.95}',
       '#cgm-hypo-alert .hypo-predict{font-family:monospace;font-size:13px;font-weight:800;line-height:1.15;white-space:nowrap;opacity:.95}',
       '#cgm-hypo-alert .hypo-drop{font-family:monospace;font-size:12px;font-weight:800;line-height:1.15;white-space:nowrap;opacity:.95}',
+      '#cgm-hypo-alert .hypo-model{font-family:Arial,Helvetica,sans-serif;font-size:9px;font-weight:700;opacity:.6;margin-left:6px;padding:1px 4px;border:1px solid rgba(0,0,0,.25);border-radius:4px;vertical-align:middle}',
       '#cgm-hypo-alert .hypo-feedback{display:flex;flex-wrap:wrap;gap:4px;justify-content:center;margin-top:4px}',
       '#cgm-hypo-alert .hypo-feedback button{font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;line-height:1;padding:4px 7px;border:1px solid rgba(0,0,0,.28);border-radius:5px;background:rgba(255,255,255,.55);color:inherit;cursor:pointer}',
       '#cgm-hypo-alert .hypo-feedback button:disabled{opacity:.55;cursor:default}',
@@ -1165,6 +1166,7 @@
     alert.innerHTML = [
       '<div class="hypo-line primary">',
       '<span class="hypo-title">', safeRisk.title, '</span>',
+      safeRisk.model ? '<span class="hypo-model">' + safeRisk.model + '</span>' : '',
       '<span class="hypo-detail">', safeRisk.detail || '', '</span>',
       '</div>',
       '<div class="hypo-line"><span class="hypo-rate">', signed(safeRisk.rate, 3), '/min</span></div>',
@@ -1882,6 +1884,25 @@
             currentHypoRisk.css = 'watch';
             currentHypoRisk.title = 'HYPO LET OP';
           }
+        }
+        // --- Alarm uit de sync (V1 of de geactiveerde V2) mag het kaart-alarm alleen
+        // ESCALEREN, nooit verlagen: zo neemt V2 het alarm over zodra het strenger is,
+        // terwijl de huidige-waarde-veiligheid (client-side) altijd blijft staan. ---
+        if (latestDbPrediction && currentHypoRisk && readings[0] &&
+            latestDbPrediction.entryIdentifier === readings[0].identifier) {
+          var sevOrder = { ok: 0, watch: 1, warning: 2, hypo: 3, urgent: 4 };
+          var syncCss = latestDbPrediction.risk === 'urgent' ? 'urgent'
+            : latestDbPrediction.risk === 'high' ? 'warning'
+            : latestDbPrediction.risk === 'watch' ? 'watch' : null;
+          var curCss = currentHypoRisk.css || 'ok';
+          if (syncCss && sevOrder[syncCss] > sevOrder[curCss]) {
+            currentHypoRisk.css = syncCss;
+            if (syncCss === 'urgent') currentHypoRisk.title = 'HYPO URGENT';
+            else if (syncCss === 'warning' && currentHypoRisk.title === 'HYPO OK') currentHypoRisk.title = 'HYPO RISICO';
+            else if (syncCss === 'watch' && currentHypoRisk.title === 'HYPO OK') currentHypoRisk.title = 'HYPO LET OP';
+          }
+          // Badge: welk model is de backend-alarmbron (V1 of geactiveerde V2)?
+          currentHypoRisk.model = latestDbPrediction.modelVersion === 'reactive-hypo-v2' ? 'V2' : 'V1';
         }
         var finalRate = currentHypoRisk ? currentHypoRisk.rate : 0;
         var finalMmol = mmol(Number((anchorEntry || readings[0]).sgv));

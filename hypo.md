@@ -13,10 +13,10 @@ Medische nuance: dit systeem is hulpmiddel en rapportage, geen vervanging voor
 medisch advies of een officiële medische alarmfunctie. Bij klachten of twijfel
 blijft een vingerprik/medisch advies belangrijk.
 
-## Implementatiestatus (bijgewerkt 2026-06-01)
+## Implementatiestatus (bijgewerkt 2026-06-02)
 
-De V2-laag uit dit plan is grotendeels gebouwd, gedeployed op de iMac en getest op
-echte data. Stand van zaken per mijlpaal:
+De V2-laag uit dit plan is gebouwd, gedeployed op de iMac en getest op echte data.
+Stand van zaken per mijlpaal:
 
 - **M1 — rijkere snapshots (af, live):** `prediction_snapshots` bevat nu `features`,
   `predicted`, `pattern` en `lagAdjustedMmol`; de `riskDetails`-persist-bug is gefixt;
@@ -44,10 +44,28 @@ alarm (precision ~0.05). Belangrijker: alle ~8 sustained hypo's zitten in het re
 Daardoor is een train/test-split nu degenereert (0 train-events) en is auto-tunen nog
 niet zinvol. De tuner weigert in dat geval een state te schrijven.
 
-**Bijgestelde volgorde:** eerst **M5 shadow-mode** (V2 stil naast V1 in de sync,
-`shadowRisk` opslaan, géén alarm) om de dichte, over-tijd-verspreide dataset op te
-bouwen die de tuner nodig heeft → daarna pas zinvol auto-tunen → daarna pas **M6**
-(V2 activeren). V1 (`rules-v1.1`) blijft tot die tijd de enige alarmbron.
+- **M5 — shadow-mode (af, live):** V2 draait stil mee in de sync; per snapshot
+  `shadowRisk`/`shadowScore`/`shadowConfidence`/`shadowReasons`/`shadowTuned`. Geen alarm.
+- **Automatisch leren (af, dagelijks):** `scripts/daily-hypo-tune.sh` via launchd
+  (`deploy/com.glucosecgm.hypotune.plist`, 04:30): episodes verversen → auto-tunen op je
+  eigen episodes → dag/week/weekdag/patroon-rapporten (`scripts/hypo-report.mjs`,
+  `scripts/hypo-patterns.mjs`) in `hypo-tune-reports/`. De sync laadt de geleerde params
+  (`scripts/reactive-hypo-v2-state.json`) en past ze toe op V2 shadow.
+- **M6 — auto-activatie met kwaliteitsgate (gewapend):** de tuner zet `active: true`
+  alleen als er genoeg events zijn én V2 op out-of-sample data niet slechter is dan V1
+  (recall en precision). De sync laat dan `risk` uit V2 komen (`likely`→`high`) en bewaart
+  V1 als `legacyRisk`. Tot de gate slaagt blijft V1 de alarmbron.
+
+**Methodiek volgt CGM-literatuur** (o.a. PMC10012121 ensemble-CGM-hypo): ±30 min
+event-window, "sustained" hypo (≥10 min onder grens), temporele train/test-split met
+recall-gebonden grid search, en rapportage in- én out-of-sample.
+
+**Kernbevinding — databottleneck:** V2 doet wat het moet op lead-time (~20 min,
+vergelijkbaar met de 17.5 min uit onderzoek) maar met te veel vals alarm (precision ~0.05).
+Belangrijker: alle ~8 sustained hypo's zitten in het recente 1-min venster; de oudere data
+is uurlijks/15-min en valt door het dichtheidsfilter. Daardoor is een train/test-split nu
+degenereert (0 train-events) en blijft de kwaliteitsgate dicht. De tuner weigert dan een
+state te schrijven. Het systeem leert vanzelf bij; V2 wordt pas live als de gate slaagt.
 
 ## Huidige situatie
 
@@ -1505,6 +1523,209 @@ Acceptatie:
 - detector kan aantoonbaar leren van jouw feedback;
 - backtest verbetert na tuning;
 - rapportage toont effect van tuning.
+
+## Verbeterd voorspellingsplan (2026-06-02)
+
+Dit is het uitgebreide plan voor slimmere hypo-voorspelling op basis van jouw
+echte patroon (198 episodes in de data: 71 hypo, 43 near\_hypo, 84 safe\_drop,
+mediaan piek ~9-10 mmol, drop ~4-6 mmol, piek→nadir ~30-35 min) en wat xDrip,
+OpenAPS en CGM-onderzoek laten zien.
+
+### Wat xDrip doet en waarom het voor jou niet genoeg is
+
+xDrip's predictive alert gebruikt één ding: **momentum** — de huidige rate
+doorgetrokken als een rechte lijn. Dat is snel en transparant, maar mist:
+
+- de piek-context (7.5 dalend ≠ 7.5 stabiel);
+- versnelling (dalingssnelheid neemt toe);
+- jouw persoonlijke patroon (bij jou gaat 71% van de hypo-episodes van piek
+  naar nadir in 30-40 min, dat is sneller dan xDrip's lineaire projectie verwacht);
+- het verschil tussen een veilige terugval en een reactieve hypo.
+
+xDrip's AR2 forecast (autoregressive van de tweede orde) gebruikt de laatste
+twee BG-waarden om een parabool te schatten. Dat is beter dan een rechte lijn,
+maar overschat het herstel als je op een snelle post-piek daling zit.
+
+### De kern van jouw patroon
+
+Op basis van de episode-data:
+
+1. **Trigger is altijd een piek ≥ 7.5 mmol**: onder die drempel geen reactieve hypo.
+2. **De kritieke fase is 15-45 min na de piek**: in 67% van de gevallen bereik je
+   de nadir binnen 45 minuten na de piek.
+3. **Dalingssnelheid is de sterkste voorspeller**: rate10m ≤ -0.05 mmol/min na
+   een piek ≥ 7.5 is bijna altijd gevaarlijk.
+4. **Drop ≥ 25% van de piek** onderscheidt reactieve hypo van veilige terugval.
+5. **Nacht verschilt van dag**: compressie-lows, sensorlag en geen maaltijden
+   vragen een andere gevoeligheid.
+
+### Verbeteringen: 8 concrete lagen
+
+#### Laag 1 — Nadir-voorspelling in plaats van lineaire extrapolatie
+
+Nu: rate × tijd = voorspelde glucose (rechte lijn).
+Beter: een **curve-fit op de descent** die laat zien waar de daling afvlakt.
+
+Bijna alle reactieve hypo's volgen een sigmoidale curve: snel naar beneden,
+dan afvlakking/herstel. De nadir is niet aan het einde van de rechte lijn maar
+in de buik van de S. Bereken per episode:
+
+```
+nadirEstimate = peakMmol - medianDropInSimilarEpisodes * dropProgressFactor
+```
+
+waarbij `dropProgressFactor` afhankelijk is van hoe ver langs de curve je
+al bent (`minutesSincePeak / typicalNadirMinutes`).
+
+Implementeer als extra scenario in `reactive-hypo-detector.mjs`:
+`patternNadir` — een percentiel-gebaseerde nadir-schatting uit de top-N
+vergelijkbare episodes.
+
+#### Laag 2 — Versnellingsdetectie (rate-of-rate)
+
+Nu: `isAcceleratingDown` = rate5m < rate10m - 0.005.
+Beter: een expliciete **dalingsversnelling** (mmol/min²) die aangeeft of
+de daling toeneemt of afzwakt:
+
+```
+acceleration = (rate5m - rate15m) / 10   # mmol/min per min
+```
+
+Positief = versnellende daling (extra gevaarlijk). Negatief = daling vlakt af
+(herstelindicatie, demping rechtvaardigd).
+
+In `hypo-features.mjs` toevoegen: `acceleration`, `isDecelerating`.
+In de detector: bij `acceleration < -0.005` extra score; bij `isDecelerating`
+de worst-case override dempen.
+
+#### Laag 3 — Post-piek fase met curvevorm
+
+Nu: één `postPeakWindow` (early/middle/late).
+Beter: een **curvevorm-score** die aangeeft hoe jouw huidige curve lijkt op
+historische descents. Gebruik de resample-logica die al in `episode-builder.mjs`
+zit (genormaliseerde curve van 24 punten), maar dan live:
+
+- Neem de laatste 45 minuten glucose.
+- Resample naar 12 punten.
+- Vergelijk met de top-N episodes uit `reactive_hypo_episodes`.
+- Score = gewogen fractie van vergelijkbare episodes die hypo werden.
+
+Dit is sterker dan de huidige `findSimilarEpisodes` omdat de hele curvevorm
+meewegt, niet alleen piek/drop/timing.
+
+Implementeer als `curveMatchScore` in `hypo-features.mjs` (lazy — alleen
+berekend als er een daling is) en als `curvePatternScore` in de detector.
+
+#### Laag 4 — Dagdeel-context (nacht/ochtend/middag/avond)
+
+Jouw nacht-hypo's (compressie, sensorruis) gedragen zich anders dan post-lunch
+hypo's. Voeg een `timeOfDay` feature toe:
+
+```
+'nacht'   = 00:00-06:00
+'ochtend' = 06:00-10:00
+'middag'  = 10:00-15:00
+'middag2' = 15:00-19:00
+'avond'   = 19:00-00:00
+```
+
+In de detector: bij `nacht` de worst-case override dempen (minder agressief),
+bij `middag`/`middag2` (post-lunch) de reactieve-context score verhogen.
+Leert vanzelf via de tuner zodra er genoeg per-dagdeel data is.
+
+#### Laag 5 — Weekdag-patroon gebruiken
+
+De patroon-rapportage (`hypo-patterns.mjs`) laat al zien welke weekdagen
+riskanter zijn. Dit terugkoppelen aan de detector:
+
+- Lees `latest.weekday.json` bij startup van de sync.
+- Voeg `weekdayRisk` feature toe: hoog als de huidige weekdag historisch
+  riskanter was (≥ 1.5× het gemiddelde aantal hypo's per dag).
+- Kleine bonusscore in de detector als `weekdayRisk` hoog is.
+
+#### Laag 6 — Hersteldetectie (niet alleen "daalt")
+
+Nu mist de detector wanneer een daling stopt. Voeg toe:
+
+```
+recoverySignal = rate5m > 0 AND rate10m < 0   # draai vlak na daling
+isBottoming    = |rate5m| < 0.01              # haast stilgevallen
+```
+
+Bij `isBottoming` of `recoverySignal` de worst-case scenario's dempen en
+een `watch` niet upgraden naar `likely`. Dit vermindert de vals-alarm-golf
+die op dit moment de precision drukt.
+
+#### Laag 7 — Sensorlag-correctie verfijnen
+
+Nu: `lagAdjustedMmol = currentMmol + blendedRate × 5`.
+Beter: bij bewezen snelle daling (rate10m ≤ -0.07) **meer** lag aannemen
+(6-7 min), bij langzame daling minder (3-4 min), bij stijging 0:
+
+```
+effectiveLag = rate10m <= -0.07 ? 7
+             : rate10m <= -0.04 ? 5
+             : rate10m <= 0     ? 3
+             : 0
+lagAdjustedMmol = currentMmol + blendedRate × effectiveLag
+```
+
+Dit refineert de CGM-lag-correctie die al in `hypo-features.mjs` zit.
+
+#### Laag 8 — Vroege maaltijdreactie (meal-onset detector)
+
+De sterkste voorspelling is niet "er daalt iets" maar "er is een piek
+begonnen die op een reactieve hypo-curve lijkt". Voeg toe aan
+`hypo-features.mjs`:
+
+```
+mealOnsetScore:  stijging ≥ 0.8 mmol in laatste 15 min
+                 + lokale bodem ≥ 15 min geleden
+                 = maaltijdrespons is begonnen
+```
+
+Dan al in de stijgende fase een lage `watch` geven als:
+- stijging snel genoeg (rate10m ≥ 0.04)
+- piek al ≥ 7.5
+- historisch: ≥ 40% van vergelijkbare stijgingen eindigde in reactieve hypo
+
+Dit geeft je 10-15 min extra voorlooptijd ten opzichte van nu (nu begint de
+detector pas te reageren als de daling begonnen is).
+
+### Bouwen in deze volgorde
+
+| Stap | Onderdeel | Impact | Werk |
+|---|---|---|---|
+| 1 | `acceleration` + `isDecelerating` in features | dempt vals alarm | klein |
+| 2 | `recoverySignal` + `isBottoming` → demping | dempt vals alarm | klein |
+| 3 | Nadir-schatting via vergelijkbare episodes | preciezere worst-case | middel |
+| 4 | `timeOfDay` context in features + detector | nacht/dagdeel-bewust | klein |
+| 5 | Curvegemiddelde-vergelijking (curvevorm-score) | sterkste signaal | groot |
+| 6 | Variabele sensorlag | realistischer CGM-lag | klein |
+| 7 | Weekdag-patroon terugkoppelen | patroon-bewust | middel |
+| 8 | Meal-onset vroege detector | 10-15 min eerder | groot |
+
+Stap 1-2 en 6 zijn kleine wijzigingen in `hypo-features.mjs` en de detector,
+geen database-werk. Stap 3 en 5 vereisen curve-vergelijking live; bouwen na
+stap 1-2 zodat de precision al omhoog is.
+
+### Acceptatiecriterium
+
+De verbeterde detector is beter als de backtest laat zien:
+- precision ≥ V1 op out-of-sample data (vals alarm niet erger);
+- recall ≥ V1 (geen extra gemiste hypo's);
+- mediane lead-time ≥ 20 min (nu V2 default: ~20 min; V1: ~13 min);
+- bij nacht-uren: precision strenger (minder nacht-vals-alarm).
+
+### Relatie tot xDrip/Nightscout
+
+Na verbetering:
+- Schrijf `likely` en `urgent` als Nightscout `devicestatus` zodat xDrip/
+  Nightwatch ze via de Nightscout API kan ophalen.
+- xDrip's eigen predictive alert blijft staan als tweede, onafhankelijk
+  vangnet — nooit uitzetten.
+- De overlay-kaart toont de V1/V2-badge zodat je altijd weet welk model
+  waarschuwt.
 
 ## Configuratievoorstel
 

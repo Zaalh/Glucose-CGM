@@ -209,6 +209,34 @@ npm run episodes:check
 Lokale sanity-checks zonder database (detector op testgevallen / episode-builder op een
 synthetische timeline).
 
+```bash
+npm run hypo:report -- --days 1     # dagrapport
+npm run hypo:report -- --days 7     # weekrapport
+npm run hypo:report -- --by-weekday # per-weekdag profiel (28 dagen)
+npm run hypo:patterns -- --days 28  # uur-van-de-dag + weekdag + episode-patronen
+```
+
+Rapporten over jouw eigen data: (near-)hypo's, time-in-range, snelste daling, V1 vs V2,
+en de riskantste uren/weekdagen — zodat je zoveel mogelijk patronen vindt.
+
+### Automatisch leren (dagelijks)
+
+`scripts/daily-hypo-tune.sh` draait via launchd (`deploy/com.glucosecgm.hypotune.plist`,
+dagelijks 04:30): episodes verversen → auto-tunen op je eigen episodes → dag/week/weekdag/
+patroon-rapporten in `hypo-tune-reports/`. De sync laadt de geleerde parameters
+(`scripts/reactive-hypo-v2-state.json`) en past ze toe op de V2 shadow.
+
+Installeren op de server:
+
+```bash
+cp deploy/com.glucosecgm.hypotune.plist ~/Library/LaunchAgents/
+launchctl load -w ~/Library/LaunchAgents/com.glucosecgm.hypotune.plist
+```
+
+**Auto-activatie (M6)**: de tuner zet V2 alleen automatisch live als hij op out-of-sample
+data niet slechter is dan V1 (recall én precision niet lager) en er genoeg events zijn.
+Tot die kwaliteitsgate slaagt blijft V1 (`rules-v1.1`) de alarmbron en draait V2 in shadow.
+
 ## Predictie Status
 
 Afgerond:
@@ -233,11 +261,15 @@ Reactieve-hypo detector V2 (`hypo.md`):
 - M3 episode-builder → `reactive_hypo_episodes`
 - M4 backtest (V1 vs V2) + auto-tuner met train/test-split
 - M5 shadow-mode: V2 draait stil mee als `shadowRisk` (geen alarm)
+- Dagelijkse auto-tune (launchd) + dag/week/weekdag/patroon-rapporten
+- Sync past geleerde params toe op V2 shadow (`shadowTuned`)
+- M6 auto-activatie met kwaliteitsgate (gewapend; activeert vanzelf zodra V2 ≥ V1 op
+  out-of-sample data en genoeg events)
 
-Nog open (bewust):
+Nog open (databottleneck, niet code):
 
-- M6/M7: V2 activeren + feedback-tuning — wacht op ~1–2 weken shadow-data zodat de tuner
-  een echte train/test-split heeft (V2 geeft nu meer lead-time maar te veel vals alarm)
+- De kwaliteitsgate slaagt pas met ~1–2 weken dichte 1-min data verspreid over tijd
+  (nu zitten alle hypo-events in één recente cluster). Tot dan blijft V1 de alarmbron.
 - fine-tuning van thresholds/policies op langere dataperiode (optioneel)
 - AI-laag (`ai_observations` / `ai_questions`): uitleg/context/vragen — komt later, neemt nooit de live alarmbeslissing
 - `episode_vectors` similarity ook in de UI-redenen tonen

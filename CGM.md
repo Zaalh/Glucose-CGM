@@ -104,6 +104,28 @@ npm run episodes:check
 
 Lokale sanity-checks zonder database: de V2-detector op fixtures en de episode-builder op een synthetische timeline (`node --check`-vriendelijk).
 
+```bash
+npm run hypo:report -- --days 1      # dagrapport
+npm run hypo:report -- --days 7      # weekrapport
+npm run hypo:report -- --by-weekday  # per-weekdag profiel (28 dagen)
+npm run hypo:patterns -- --days 28   # uur-van-de-dag + weekdag + episode-patronen
+```
+
+Rapporten over je eigen data: (near-)hypo's, time-in-range, snelste daling, V1 vs V2, en de riskantste uren/weekdagen.
+
+### Automatisch leren (dagelijks)
+
+`scripts/daily-hypo-tune.sh` draait via launchd (`deploy/com.glucosecgm.hypotune.plist`, dagelijks 04:30 op de iMac): episodes verversen → auto-tunen op je eigen episodes → dag/week/weekdag/patroon-rapporten in `hypo-tune-reports/`. De sync laadt de geleerde params (`scripts/reactive-hypo-v2-state.json`) en past ze toe op de V2 shadow.
+
+Installeren:
+
+```bash
+cp deploy/com.glucosecgm.hypotune.plist ~/Library/LaunchAgents/
+launchctl load -w ~/Library/LaunchAgents/com.glucosecgm.hypotune.plist
+```
+
+**Auto-activatie (M6, kwaliteitsgate):** de tuner zet V2 alleen automatisch live als er genoeg events zijn én V2 op out-of-sample data niet slechter is dan V1 (recall en precision). Dan komt `risk` uit V2 (`likely`→`high`) en wordt V1 als `legacyRisk` bewaard. Tot dan blijft V1 (`rules-v1.1`) de alarmbron. Welk model live is, zie je in `/prediction/latest` (`modelVersion`).
+
 ## Environment Files
 
 ### `.env.nightscout`

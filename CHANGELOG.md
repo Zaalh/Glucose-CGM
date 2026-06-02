@@ -7,6 +7,19 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Toegevoegd
 
+- **Automatisch leren van je eigen patroon (dagelijks)** — `scripts/daily-hypo-tune.sh`
+  draait via launchd (`deploy/com.glucosecgm.hypotune.plist`, dagelijks 04:30 op de iMac):
+  episodes verversen → auto-tunen → rapporten. De sync laadt de geleerde params
+  (`scripts/reactive-hypo-v2-state.json`, gitignored) en past ze toe op de V2 shadow
+  (`shadowTuned`-vlag).
+- **Auto-activatie met kwaliteitsgate (M6)** — de tuner zet `active: true` alleen als er
+  genoeg events zijn én V2 op out-of-sample data niet slechter is dan V1 (recall en
+  precision niet lager). De sync laat dan `risk` uit V2 komen (`likely`→`high` voor het
+  alarm-vocab) en bewaart V1 als `legacyRisk`/`legacyScore`. Tot de gate slaagt blijft V1.
+- **Rapporten (per dag / week / weekdag / patroon)** — `scripts/hypo-report.mjs`
+  (`--days N`, `--by-weekday`) en `scripts/hypo-patterns.mjs` (uur-van-de-dag + weekdag +
+  episode-statistiek + highlights van de riskantste uren/dagen, tijdzone-bewust).
+  npm: `hypo:report`, `hypo:patterns`. Gedateerde output in `hypo-tune-reports/`.
 - **Reactieve-hypo detector V2** (`hypo.md`, M1–M5) — een uitlegbare laag bovenop de
   V1-regel, gedeeld tussen live en backtest:
   - `scripts/lib/hypo-features.mjs` (`buildHypoFeatures`): pure featureset uit een
@@ -62,6 +75,8 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Gewijzigd
 
+- **Overlay**: de 5 feedbackknoppen (Klopt / Vals alarm / Ik voel hypo / Ik heb gegeten /
+  Vingerprik ok) zijn uit de hypo-kaart verwijderd (`/_feedback` blijft bestaan, ongebruikt).
 - `.gitignore` uitgebreid (`dist/`, `.env*`, `nightscout-mongo-data/`, `.npm-cache/`,
   `.claude/`, `influxdb-data/`, `grafana-data/`) en `.env.*.example` expliciet
   trackbaar gemaakt.

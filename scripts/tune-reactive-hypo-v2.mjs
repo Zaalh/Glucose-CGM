@@ -118,10 +118,23 @@ function tune(timeline, options = {}) {
   }
 }
 
+// Kwaliteitsgate (M6): V2 mag alleen automatisch het alarm overnemen als er
+// genoeg events zijn ÉN V2 op out-of-sample (test) data niet slechter is dan V1
+// — recall niet lager (geen extra gemiste hypo's) en precision niet lager (geen
+// extra vals alarm). Conservatief: bij twijfel blijft V2 in shadow.
 function buildState(result) {
+  const v1 = result.comparison.v1.test
+  const v2 = result.comparison.v2_tuned.test
+  const gate = {
+    enoughEvents: !result.degenerate,
+    recallNotWorse: (v2.recall ?? 0) >= (v1.recall ?? 0),
+    precisionNotWorse: (v2.precision ?? 0) >= (v1.precision ?? 0),
+  }
+  const active = gate.enoughEvents && gate.recallNotWorse && gate.precisionNotWorse
   return {
     modelVersion: 'reactive-hypo-v2',
-    active: false, // shadow-mode default; pas activeren in M6
+    active,
+    activationGate: gate,
     params: result.bestParams,
     tuning: {
       method: 'temporal-split grid-search, recall-constrained',
@@ -129,9 +142,9 @@ function buildState(result) {
       comparison: result.comparison,
       gridSize: result.gridSize,
     },
-    note:
-      'Auto-getuned op de backtest. Klein aantal hypo-events: indicatief, geen ' +
-      'definitief oordeel. Wordt betrouwbaarder met meer 1-min data.',
+    note: active
+      ? 'V2 AUTO-GEACTIVEERD: op out-of-sample data minstens zo goed als V1 (recall en precision niet slechter).'
+      : 'V2 in shadow: nog niet aantoonbaar >= V1 op out-of-sample data, of te weinig events.',
     trainedAt: new Date().toISOString(),
   }
 }

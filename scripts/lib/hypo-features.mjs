@@ -17,6 +17,16 @@ const PEAK_WINDOW_MINUTES = 120
 const FALL_RATE_WINDOWS = [5, 10, 15, 20, 30]
 const DEFAULT_LAG_MINUTES = 5
 
+// Variabele CGM-lag: bij snelle daling loopt de sensor meer achter op het
+// echte bloed. Waarden gebaseerd op CGM-literatuur + jouw episode-data.
+function effectiveLagMinutes(rate10m) {
+  if (!Number.isFinite(rate10m)) return DEFAULT_LAG_MINUTES
+  if (rate10m <= -0.07) return 7
+  if (rate10m <= -0.04) return 5
+  if (rate10m < 0) return 3
+  return 0
+}
+
 export function round(value, decimals) {
   if (!Number.isFinite(value)) return null
   const f = 10 ** decimals
@@ -125,6 +135,23 @@ export function buildHypoFeatures(timeline, idx, options = {}) {
   const isRecovering =
     Number.isFinite(rate5m) && Number.isFinite(rate10m) && rate5m > rate10m + 0.005
 
+  // Stap 1 — dalingsversnelling (mmol/min²): positief = versnelt, negatief = vlakt af.
+  // Gebruik rate5m vs rate15m over een 10-min tijdsbasis voor meer stabiliteit.
+  const acceleration =
+    Number.isFinite(rate5m) && Number.isFinite(rate15m)
+      ? round((rate5m - rate15m) / 10, 5)
+      : null
+  // Daling vlakt aantoonbaar af (twee opeenvolgende rate-vensters worden minder negatief).
+  const isDecelerating =
+    Number.isFinite(rate5m) && Number.isFinite(rate10m) && Number.isFinite(rate15m) &&
+    rate5m > rate10m + 0.003 && rate10m > rate15m + 0.003 && rate15m < -0.005
+
+  // Stap 2 — hersteldetectie: daling haast gestopt of draait al om.
+  const isBottoming =
+    Number.isFinite(rate5m) && Math.abs(rate5m) < 0.01 && Number.isFinite(rate10m) && rate10m < -0.01
+  const recoverySignal =
+    Number.isFinite(rate5m) && rate5m > 0 && Number.isFinite(rate10m) && rate10m < 0
+
   const peak = findPeak(timeline, idx, PEAK_WINDOW_MINUTES)
   const peakMmol120m = toMmol(peak.sgv)
   const minutesSincePeak = (latest.date - peak.date) / 60_000
@@ -137,8 +164,10 @@ export function buildHypoFeatures(timeline, idx, options = {}) {
   const minutesTo45 = fallRate && currentMmol > 4.5 ? (currentMmol - 4.5) / fallRate : null
   const minutesTo40 = fallRate && currentMmol > 4.0 ? (currentMmol - 4.0) / fallRate : null
 
-  // CGM-lag: bij snelle daling ligt echte bloedglucose lager dan de sensor.
-  const lagAdjustedMmol = currentMmol + blendedRate * lagMinutes
+  // Stap 6 — variabele CGM-lag: hoe sneller de daling, hoe meer de sensor achterloopt.
+  // Overschrijfbaar via options.lagMinutes (bijv. voor backtest-calibratie).
+  const effLag = Number.isFinite(options.lagMinutes) ? options.lagMinutes : effectiveLagMinutes(rate10m)
+  const lagAdjustedMmol = currentMmol + blendedRate * effLag
 
   return {
     // raw
@@ -157,6 +186,11 @@ export function buildHypoFeatures(timeline, idx, options = {}) {
     maxFallRate30m: round(maxFallRate30m, 4),
     isAcceleratingDown,
     isRecovering,
+    acceleration,
+    isDecelerating,
+    isBottoming,
+    recoverySignal,
+    effectiveLagMinutes: effLag,
     // peak/drop
     peakMmol120m: round(peakMmol120m, 3),
     minutesSincePeak: round(minutesSincePeak, 1),

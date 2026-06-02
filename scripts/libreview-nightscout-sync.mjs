@@ -276,14 +276,12 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
         }
       : null
 
-    // M5 shadow-mode: V2 (reactieve detector) draait stil mee en wordt opgeslagen
-    // náást V1. V1 (rules-v1.1) blijft de enige alarmbron; shadowRisk stuurt NIETS
-    // aan. Doel: dichte V1/V2-paren verzamelen voor latere backtest/tuning (M6).
-    // Draait met default-parameters; M6 laadt eventueel getunede params.
+    // V2 (reactieve detector) berekenen met de geleerde params (of defaults).
     let shadow = null
+    let v2 = null
     try {
       const shadowFeatures = buildHypoFeatures(timeline, idx, { nowMs: entry.date })
-      const v2 = evaluateReactiveHypoRiskV2(shadowFeatures, v2State ? { params: v2State.params } : {})
+      v2 = evaluateReactiveHypoRiskV2(shadowFeatures, v2State ? { params: v2State.params } : {})
       shadow = {
         shadowModelVersion: v2.modelVersion,
         shadowRisk: v2.risk,
@@ -296,21 +294,32 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
       console.warn(`[libreview-sync] shadow V2 mislukt: ${formatError(err)}`)
     }
 
+    // Auto-activatie (M6): V2 wordt pas de alarmbron als de auto-tuner hem op
+    // out-of-sample data heeft goedgekeurd (state.active === true). Tot dan blijft
+    // V1 (rules-v1.1) bepalen. V2-niveau 'likely' mapt naar 'high' (alarm-vocab van
+    // de overlay); V1 wordt als legacyRisk bewaard ter vergelijking.
+    const v2Active = Boolean(v2State && v2State.active === true && v2)
+    const primary = v2Active
+      ? { risk: mapV2Alarm(v2.risk), riskScore: v2.score, reasons: v2.reasons, modelVersion: v2.modelVersion, legacyRisk: risk.risk, legacyScore: risk.score }
+      : { risk: risk.risk, riskScore: risk.score, reasons: risk.reasons, modelVersion: 'rules-v1.1', legacyRisk: null, legacyScore: null }
+
     return {
       createdAt: entry.dateString ?? new Date(entry.date).toISOString(),
       entryIdentifier: entry.identifier,
       currentMmol: round(currentMmol, 3),
-      risk: risk.risk,
-      riskScore: risk.score,
-      reasons: risk.reasons,
+      risk: primary.risk,
+      riskScore: primary.riskScore,
+      reasons: primary.reasons,
       riskDetails: risk.details,
+      legacyRisk: primary.legacyRisk,
+      legacyScore: primary.legacyScore,
       predictedMmol: forecast.predictedMmol,
       probabilities: forecast.probabilities,
       features,
       predicted,
       pattern,
       ...(shadow || {}),
-      modelVersion: 'rules-v1.1',
+      modelVersion: primary.modelVersion,
       outcomeEvaluated: false,
     }
   }).filter(Boolean)
@@ -332,6 +341,8 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
             riskScore: snapshot.riskScore,
             reasons: snapshot.reasons,
             riskDetails: snapshot.riskDetails,
+            legacyRisk: snapshot.legacyRisk ?? null,
+            legacyScore: snapshot.legacyScore ?? null,
             predictedMmol: snapshot.predictedMmol,
             probabilities: snapshot.probabilities,
             features: snapshot.features,
@@ -359,6 +370,11 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
   } finally {
     if (client) await client.close().catch(() => undefined)
   }
+}
+
+// V2-niveau -> alarm-vocabulaire van de overlay/V1 ('likely' bestaat daar niet).
+function mapV2Alarm(risk) {
+  return risk === 'likely' ? 'high' : risk
 }
 
 // Leest de geleerde V2-parameters van schijf (geschreven door de wekelijkse
@@ -793,7 +809,7 @@ async function getLatestPredictionSnapshot() {
     client = new MongoClient(config.mongoUri)
     await client.connect()
     return await client.db().collection('prediction_snapshots')
-      .find({}, { projection: { createdAt: 1, entryIdentifier: 1, predictedMmol: 1, probabilities: 1, modelVersion: 1, currentMmol: 1, risk: 1, riskScore: 1, reasons: 1, riskDetails: 1, features: 1, predicted: 1, pattern: 1, shadowModelVersion: 1, shadowRisk: 1, shadowScore: 1, shadowConfidence: 1, shadowReasons: 1, shadowTuned: 1 } })
+      .find({}, { projection: { createdAt: 1, entryIdentifier: 1, predictedMmol: 1, probabilities: 1, modelVersion: 1, currentMmol: 1, risk: 1, riskScore: 1, reasons: 1, riskDetails: 1, legacyRisk: 1, legacyScore: 1, features: 1, predicted: 1, pattern: 1, shadowModelVersion: 1, shadowRisk: 1, shadowScore: 1, shadowConfidence: 1, shadowReasons: 1, shadowTuned: 1 } })
       .sort({ createdAt: -1 })
       .limit(1)
       .next()

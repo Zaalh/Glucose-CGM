@@ -170,7 +170,13 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
     rateScore = 1
   }
   if (rate15m <= -0.04) rateScore += 1
-  if (f.isAcceleratingDown && P.accelDownBonus > 0) {
+  // Stap 1 — versnelling: expliciete acceleratie scoort zwaarder dan de vage
+  // isAcceleratingDown-vlag; isDecelerating (vlakker wordende daling) geeft demping.
+  if (f.acceleration !== null && f.acceleration < -0.005 && P.accelDownBonus > 0) {
+    rateScore += P.accelDownBonus
+    reasons.push('Daling versnelt')
+  } else if (f.isAcceleratingDown && P.accelDownBonus > 0 && f.acceleration === null) {
+    // Fallback als acceleration niet beschikbaar is (weinig meetpunten).
     rateScore += P.accelDownBonus
     reasons.push('Daling versnelt')
   }
@@ -242,7 +248,22 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
   if (blended >= 0) dampingScore += 2
   if (drop < 1.0) dampingScore += 1
   if (ageSeconds > 600) dampingScore += 2
-  // Niet dempen als het echt risicovol is.
+  // Stap 2 — hersteldemping: daling vlakt af of draait al om → minder alarm.
+  // Dit is de grootste bron van vals alarm: daling is al voorbij maar score blijft hoog.
+  if (f.isDecelerating) {
+    dampingScore += 2
+    // Reden alleen tonen als het een meaningvol verschil maakt.
+    if (current >= TH.near) reasons.push('Daling vlakt af')
+  }
+  if (f.isBottoming) {
+    dampingScore += 2
+    if (current >= TH.near) reasons.push('Daling haast gestopt')
+  }
+  if (f.recoverySignal) {
+    dampingScore += 3
+    if (current >= TH.near) reasons.push('Daling keert om')
+  }
+  // Niet dempen als het echt risicovol is (veiligheidsklep).
   if (current < TH.near || steepest <= TH.veryFastFall || (f.minutesTo40 !== null && f.minutesTo40 <= 15)) {
     dampingScore = 0
   }
