@@ -246,18 +246,10 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
 
     // Vlakke featureset naast de ruwe snapshot — live en (later) backtest delen
     // straks dezelfde featurebuilder; voor nu leggen we vast wat al berekend is.
-    const features = {
-      currentMmol: round(currentMmol, 3),
-      peakMmol120m: round(peakMmol, 3),
-      minutesSincePeak: round(minutesSincePeak, 1),
-      dropFromPeakMmol: round(dropFromPeakMmol, 3),
-      dropFromPeakPercent: round(dropFromPeakPercent, 1),
-      rate5m: Number.isFinite(rate5m) ? round(rate5m, 4) : null,
-      rate10m: Number.isFinite(rate10m) ? round(rate10m, 4) : null,
-      rate15m: Number.isFinite(rate15m) ? round(rate15m, 4) : null,
-      blendedRate,
-      lagAdjustedMmol,
-    }
+    // Gebruik de gedeelde featurebuilder zodat snapshot en V2-shadow
+    // altijd dezelfde features bevatten (inclusief acceleration, isDecelerating, etc).
+    const shadowFeaturesFull = buildHypoFeatures(timeline, idx, { nowMs: entry.date })
+    const features = shadowFeaturesFull
 
     const predicted = {
       mmol10: forecast.predictedMmol['10'] ?? null,
@@ -276,12 +268,11 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
         }
       : null
 
-    // V2 (reactieve detector) berekenen met de geleerde params (of defaults).
+    // V2 (reactieve detector) berekenen — hergebruik de al gebouwde featureset.
     let shadow = null
     let v2 = null
     try {
-      const shadowFeatures = buildHypoFeatures(timeline, idx, { nowMs: entry.date })
-      v2 = evaluateReactiveHypoRiskV2(shadowFeatures, v2State ? { params: v2State.params } : {})
+      v2 = evaluateReactiveHypoRiskV2(shadowFeaturesFull, v2State ? { params: v2State.params } : {})
       shadow = {
         shadowModelVersion: v2.modelVersion,
         shadowRisk: v2.risk,
