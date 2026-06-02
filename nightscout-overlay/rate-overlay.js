@@ -958,7 +958,12 @@
     button.addEventListener('click', function () {
       var next = getCalcMode() === 'momentaan' ? 'verhouding' : 'momentaan';
       localStorage.setItem(RATE_CALC_KEY, next);
-      refresh();
+      // A calc-mode tap is meant to compare the current live rate cards.
+      // If history had an old chart point selected, the hypo block kept
+      // updating live while the cards appeared frozen on that old point.
+      localStorage.setItem(RATE_VIEW_KEY, 'live');
+      selectedReadingTime = null;
+      scheduleRefresh(0, true);
     });
     document.body.appendChild(button);
     return button;

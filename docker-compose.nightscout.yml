@@ -97,9 +97,11 @@ services:
     env_file:
       - .env.nightscout
       - .env.libreview
+      - .env.influxdb
     environment:
       NIGHTSCOUT_URL: http://nightscout:1337
       MONGODB_URI: mongodb://nightscout-mongo:27017/nightscout
+      INFLUX_URL: http://influxdb:8086
       LIBREVIEW_SYNC_PORT: 8787
       # Poll-interval: 60s i.p.v. 30s. LLU levert maar ~1 waarde/min, dus 2x/min
       # pollen was puur verspilling (54% lege cycli) + trigger voor 430 rate-limits.
