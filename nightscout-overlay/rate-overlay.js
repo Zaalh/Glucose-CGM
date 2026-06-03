@@ -1214,7 +1214,6 @@
     alert.innerHTML = [
       '<div class="hypo-line primary">',
       '<span class="hypo-title">', safeRisk.title, '</span>',
-      safeRisk.model ? '<span class="hypo-model">' + safeRisk.model + '</span>' : '',
       '<span class="hypo-valrate">',
       '<span class="hypo-detail">', safeRisk.detail || '', '</span>',
       '<span class="hypo-rate">', signed(safeRisk.rate, 3), '/min</span>',
