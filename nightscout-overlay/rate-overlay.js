@@ -764,7 +764,6 @@
       '#cgm-hypo-alert .hypo-valrate{display:flex;align-items:baseline;justify-content:center;gap:10px;flex-wrap:wrap}',
       '#cgm-hypo-alert .hypo-rate{font-family:monospace;font-size:19px;font-weight:900;line-height:1;white-space:nowrap;opacity:.95}',
       '#cgm-hypo-alert .hypo-v2{font-family:monospace;font-size:12px;font-weight:800;line-height:1.15;white-space:nowrap;opacity:.8}',
-      '#cgm-hypo-alert .hypo-v2reasons{font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:600;line-height:1.2;opacity:.75;white-space:normal;max-width:min(620px,86vw);text-align:center}',
       '#cgm-hypo-alert .hypo-average{font-family:monospace;font-size:14px;font-weight:900;line-height:1.1;white-space:nowrap;opacity:.95}',
       '#cgm-hypo-alert .hypo-predict{font-family:monospace;font-size:13px;font-weight:800;line-height:1.15;white-space:nowrap;opacity:.95}',
       '#cgm-hypo-alert .hypo-drop{font-family:monospace;font-size:12px;font-weight:800;line-height:1.15;white-space:nowrap;opacity:.95}',
@@ -1157,12 +1156,8 @@
     var score = Number.isFinite(p.shadowScore) ? ' · ' + p.shadowScore : '';
     var tuned = p.shadowTuned ? ' ✓' : '';
     var reasons = Array.isArray(p.shadowReasons) ? p.shadowReasons.filter(Boolean) : [];
-    var reasonText = reasons.join(' · ');
-    var head = '<span class="hypo-v2">V2 shadow: ' + lbl + score + tuned + '</span>';
-    var body = reasonText
-      ? '<div class="hypo-line"><span class="hypo-v2reasons" title="' + escapeHtml(reasonText) + '">' + escapeHtml(reasonText) + '</span></div>'
-      : '';
-    return '<div class="hypo-line">' + head + '</div>' + body;
+    var titleAttr = reasons.length ? ' title="' + escapeHtml(reasons.join(' · ')) + '"' : '';
+    return '<div class="hypo-line"><span class="hypo-v2"' + titleAttr + '>V2 shadow: ' + lbl + score + tuned + '</span></div>';
   }
 
   function renderHypoAlert(risk) {
