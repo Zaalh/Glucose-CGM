@@ -1149,7 +1149,7 @@
 
   var MODEL_RISK_LABELS = {
     ok: 'ok', low: 'laag', watch: 'let op', warning: 'risico', high: 'risico',
-    likely: 'waarschijnlijk', urgent: 'urgent'
+    likely: 'likely', urgent: 'urgent'
   };
 
   // Eén compacte model-badge (V1 of V2). Redenen alleen in de hover-tooltip.
@@ -1175,8 +1175,9 @@
     var v1Score = v2Active ? p.legacyScore : p.riskScore;
     var v1Reasons = v2Active ? null : p.reasons;
     var v1 = modelSpanHtml('hypo-v1', 'V1', v1Risk, v1Score, v1Reasons, '');
+    var conf = Number.isFinite(p.shadowConfidence) ? ' · ' + Math.round(p.shadowConfidence * 100) + '%' : '';
     var v2 = p.shadowRisk
-      ? modelSpanHtml('hypo-v2', 'V2', p.shadowRisk, p.shadowScore, p.shadowReasons, p.shadowTuned ? ' ✓' : '')
+      ? modelSpanHtml('hypo-v2', 'V2', p.shadowRisk, p.shadowScore, p.shadowReasons, conf + (p.shadowTuned ? ' ✓' : ''))
       : '';
     if (!v1 && !v2) return '';
     return '<div class="hypo-line hypo-models">' + v1 + v2 + '</div>';
