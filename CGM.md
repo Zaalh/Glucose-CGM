@@ -280,6 +280,8 @@ Geen quadratic regression gebruiken voor glucosevoorspelling. Bij minuutdata gee
 
 Naast de V1-regel draait een **V2 reactieve-hypo detector** (`scripts/lib/reactive-hypo-detector.mjs`, zie `hypo.md`) die curvevorm, dalingssnelheid, CGM-lag, scenario's en persoonlijke episodes combineert. V2 staat in **shadow-mode**: per snapshot opgeslagen als `shadowRisk`, maar V1 (`rules-v1.1`) blijft de enige alarmbron tot V2 op genoeg 1-min data getuned en geactiveerd is (M6). Live en backtest delen dezelfde featurebuilder/detector, zodat de backtest meet wat live draait.
 
+De featurebuilder (`scripts/lib/hypo-features.mjs`) berekent o.a. `acceleration` (versnelt de daling?), herstelsignalen (`isDecelerating`/`isBottoming`/`recoverySignal`) die vals alarm dempen wanneer een daling al voorbij is, en een **variabele CGM-lag** (`effectiveLagMinutes` 7/5/3/0 min, afhankelijk van de dalingssnelheid). De hypo-kaart in de overlay toont een `V1`/`V2`-label; de sync-risk mag het kaart-alarm escaleren maar nooit verlagen. `hypo.md` bevat het volledige verbeterd-voorspellingsplan (8 lagen).
+
 ## Alarms
 
 De overlay rendert de hypo-kaart op basis van de volgende standaarddrempels:

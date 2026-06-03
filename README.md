@@ -106,11 +106,17 @@ Start handmatig dezelfde sync die de `Sync Libre` knop gebruikt.
 
 De `libreview-sync` service (poort 8787) biedt naast `/health` en `/sync`:
 
-- `GET /prediction/latest` — de nieuwste `prediction_snapshots` record (risico, `predictedMmol` per horizon 10/15/20/30/60/120/180, kansen `<4.5`/`<4.0`, `features`, `predicted`, `pattern`, en de V2 shadow-velden `shadowRisk`/`shadowScore`/`shadowConfidence`/`shadowReasons`).
+- `GET /prediction/latest` — de nieuwste `prediction_snapshots` record. Bevat o.a. `modelVersion` (welk model de alarmbron is: `rules-v1.1` = V1, `reactive-hypo-v2` = V2 actief), `risk`/`riskScore`/`reasons`, `predictedMmol` per horizon 10/15/20/30/60/120/180, kansen `<4.5`/`<4.0`, `features` (incl. `acceleration`, `effectiveLagMinutes`, herstelsignalen), `predicted`, `pattern`, de V2 shadow-velden `shadowRisk`/`shadowScore`/`shadowConfidence`/`shadowReasons`/`shadowTuned`, en — als V2 actief is — `legacyRisk`/`legacyScore` (de V1-waarde ter vergelijking).
 - `GET /overlay/entries?count=N` — recente entries voor de overlay-grafiek.
-- `POST /feedback` — schrijft `user_feedback` (types: `confirmed`, `false_alarm`, `feels_hypo`, `ate_now`, `fingerstick_confirmed`), gekoppeld aan de dichtstbijzijnde entry + actieve snapshot.
+- `POST /feedback` — schrijft `user_feedback` (types: `confirmed`, `false_alarm`, `feels_hypo`, `ate_now`, `fingerstick_confirmed`). Endpoint blijft bestaan; de hypo-kaart heeft sinds kort geen feedbackknoppen meer.
 
-De nginx-overlay proxyt deze als `/_prediction/latest`, `/_overlay/entries` en `/_feedback`, zodat de browser ze same-origin kan benaderen. De feedbackknoppen in de hypo-kaart van de overlay gebruiken `POST /_feedback`.
+De nginx-overlay proxyt deze als `/_prediction/latest`, `/_overlay/entries` en `/_feedback`, zodat de browser ze same-origin kan benaderen. De hypo-kaart toont een klein `V1`/`V2`-label zodat je ziet welk model de actieve alarmbron is.
+
+Welk model nu live is, zie je ook direct via:
+
+```bash
+curl -s http://localhost:8787/prediction/latest | grep -o '"modelVersion":"[^"]*"'
+```
 
 ```bash
 npm run nightscout:down
@@ -265,12 +271,19 @@ Reactieve-hypo detector V2 (`hypo.md`):
 - Sync past geleerde params toe op V2 shadow (`shadowTuned`)
 - M6 auto-activatie met kwaliteitsgate (gewapend; activeert vanzelf zodra V2 ≥ V1 op
   out-of-sample data en genoeg events)
+- Slimmere features (stap 1+2+6): `acceleration`, herstelsignalen die vals alarm dempen,
+  en variabele CGM-lag (`effectiveLagMinutes` 7/5/3/0 min)
+- V1/V2-label in de hypo-kaart; sync-risk mag het kaart-alarm escaleren (nooit verlagen)
+
+Verbeterd voorspellingsplan: `hypo.md` beschrijft 8 voorgestelde lagen (nadir-schatting,
+curvevorm-match, dagdeel-context, weekdag-patroon, meal-onset detector). Stap 1+2+6 zijn
+gebouwd; de rest staat klaar als plan.
 
 Nog open (databottleneck, niet code):
 
 - De kwaliteitsgate slaagt pas met ~1–2 weken dichte 1-min data verspreid over tijd
   (nu zitten alle hypo-events in één recente cluster). Tot dan blijft V1 de alarmbron.
-- fine-tuning van thresholds/policies op langere dataperiode (optioneel)
+- Stap 3-5, 7-8 uit het verbeterd voorspellingsplan (curvevorm-match, meal-onset, etc.)
 - AI-laag (`ai_observations` / `ai_questions`): uitleg/context/vragen — komt later, neemt nooit de live alarmbeslissing
 - `episode_vectors` similarity ook in de UI-redenen tonen
 

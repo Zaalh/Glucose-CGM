@@ -7,6 +7,21 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Toegevoegd
 
+- **Slimmere detector-features (verbeterd voorspellingsplan, `hypo.md`)** — in
+  `scripts/lib/hypo-features.mjs`:
+  - `acceleration` (mmol/min²): meet of de daling versnelt of afvlakt.
+  - `isDecelerating` / `isBottoming` / `recoverySignal`: herstelsignalen waarmee de
+    detector vals alarm dempt wanneer een daling al voorbij/aan het omkeren is (de
+    grootste bron van vals alarm). De veiligheidsklep blijft: bij `< 4.5` of snelle
+    daling wordt nooit gedempt.
+  - **Variabele CGM-lag** (`effectiveLagMinutes`): 7/5/3/0 min afhankelijk van de
+    dalingssnelheid i.p.v. een vaste 5 min — snelle daling = meer sensorlag.
+  - `hypo.md` bevat het volledige plan met 8 voorgestelde lagen (nadir-schatting,
+    curvevorm-match, dagdeel-context, weekdag-patroon, meal-onset detector).
+- **V1/V2-indicator in de overlay** — de hypo-kaart toont een klein `V1`/`V2`-label
+  (welk model de backend-alarmbron is). De sync-risk mag het kaart-alarm bovendien
+  **escaleren** (nooit verlagen), zodat een geactiveerde V2 ook het zichtbare alarm
+  strenger kan maken terwijl de huidige-waarde-veiligheid blijft staan.
 - **Automatisch leren van je eigen patroon (dagelijks)** — `scripts/daily-hypo-tune.sh`
   draait via launchd (`deploy/com.glucosecgm.hypotune.plist`, dagelijks 04:30 op de iMac):
   episodes verversen → auto-tunen → rapporten. De sync laadt de geleerde params
@@ -45,7 +60,8 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   `pattern` en `lagAdjustedMmol`; `modelVersion` → `rules-v1.1`.
 - **Influx glucose-write vanuit de sync** (`writeInfluxGlucoseEntries`): elke sync-cyclus
   schrijft glucose/rate naar InfluxDB (`INFLUX_URL`, `INFLUXDB_DB`/`USER`/`PASSWORD`),
-  zodat Grafana de time-series toont zonder een aparte xDrip-upload.
+  zodat Grafana de time-series toont zonder een aparte xDrip-upload. De compose-file
+  geeft de sync nu `.env.influxdb` + `INFLUX_URL=http://influxdb:8086` mee.
 - **Optionele xDrip InfluxDB-laag**: `influxdb:1.8` Docker service achter profile
   `influxdb`, `.env.influxdb.example`, persistente `influxdb-data/`, en npm-scripts
   `influxdb:up`, `influxdb:logs`, `influxdb:down`.
@@ -77,6 +93,9 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 - **Overlay**: de 5 feedbackknoppen (Klopt / Vals alarm / Ik voel hypo / Ik heb gegeten /
   Vingerprik ok) zijn uit de hypo-kaart verwijderd (`/_feedback` blijft bestaan, ongebruikt).
+- **Snapshot-features** worden nu via de gedeelde `buildHypoFeatures` opgebouwd i.p.v. een
+  losse hand-gemaakte map, zodat `prediction_snapshots.features` exact dezelfde velden
+  bevat als de V2-detector (incl. `acceleration`, `effectiveLagMinutes`, herstelsignalen).
 - `.gitignore` uitgebreid (`dist/`, `.env*`, `nightscout-mongo-data/`, `.npm-cache/`,
   `.claude/`, `influxdb-data/`, `grafana-data/`) en `.env.*.example` expliciet
   trackbaar gemaakt.
@@ -85,6 +104,9 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Gefixt
 
+- **Overlay calc-mode**: een tik op de calc-knop zet de weergave nu terug naar live en
+  wist een geselecteerd grafiekpunt — eerder leken de rate-kaarten bevroren op een oud
+  punt terwijl het hypo-blok wél live bleef updaten.
 - **`riskDetails` werd niet opgeslagen**: stond wel in het snapshotobject maar ontbrak
   in de MongoDB `$set`, waardoor `blendedRate`/`minutesTo40/45` per snapshot verloren
   gingen. Nu hersteld en meegenomen in `/prediction/latest`.
