@@ -272,7 +272,7 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
     let shadow = null
     let v2 = null
     try {
-      v2 = evaluateReactiveHypoRiskV2(shadowFeaturesFull, v2State ? { params: v2State.params } : {})
+      v2 = evaluateReactiveHypoRiskV2(shadowFeaturesFull, { params: v2State ? v2State.params : undefined, pattern })
       shadow = {
         shadowModelVersion: v2.modelVersion,
         shadowRisk: v2.risk,
