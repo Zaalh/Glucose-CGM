@@ -1152,13 +1152,15 @@
     likely: 'likely', urgent: 'urgent'
   };
 
-  // Eén compacte model-badge (V1 of V2). Redenen alleen in de hover-tooltip.
-  function modelSpanHtml(cls, label, risk, score, reasons, suffix) {
+  // Eén compacte model-badge (V1 of V2). Score-uitleg + redenen in de hover-tooltip.
+  function modelSpanHtml(cls, label, risk, score, reasons, suffix, scaleNote) {
     if (!risk) return '';
     var lbl = MODEL_RISK_LABELS[risk] || risk;
     var s = Number.isFinite(score) ? ' · ' + score : '';
-    var rs = Array.isArray(reasons) ? reasons.filter(Boolean) : [];
-    var titleAttr = rs.length ? ' title="' + escapeHtml(rs.join(' · ')) + '"' : '';
+    var parts = [];
+    if (scaleNote) parts.push(scaleNote);
+    if (Array.isArray(reasons)) parts = parts.concat(reasons.filter(Boolean));
+    var titleAttr = parts.length ? ' title="' + escapeHtml(parts.join(' · ')) + '"' : '';
     return '<span class="' + cls + '"' + titleAttr + '>' +
       label + ': ' + lbl + s + (suffix || '') + '</span>';
   }
@@ -1174,10 +1176,15 @@
     var v1Risk = v2Active ? p.legacyRisk : p.risk;
     var v1Score = v2Active ? p.legacyScore : p.riskScore;
     var v1Reasons = v2Active ? null : p.reasons;
-    var v1 = modelSpanHtml('hypo-v1', 'V1', v1Risk, v1Score, v1Reasons, '');
+    // Score-schaal in de tooltip zodat het getal betekenis heeft.
+    var v1Scale = 'score-schaal: <3 laag · 3-4 let op · 5-6 risico · ≥7 urgent';
+    var v2Scale = p.shadowTuned
+      ? 'score-schaal: hoger = risicovoller (drempels getuned)'
+      : 'score-schaal: <3 laag · 3-4 let op · 5-7 likely · ≥8 urgent';
+    var v1 = modelSpanHtml('hypo-v1', 'V1', v1Risk, v1Score, v1Reasons, '', v1Scale);
     var conf = Number.isFinite(p.shadowConfidence) ? ' · ' + Math.round(p.shadowConfidence * 100) + '%' : '';
     var v2 = p.shadowRisk
-      ? modelSpanHtml('hypo-v2', 'V2', p.shadowRisk, p.shadowScore, p.shadowReasons, conf + (p.shadowTuned ? ' ✓' : ''))
+      ? modelSpanHtml('hypo-v2', 'V2', p.shadowRisk, p.shadowScore, p.shadowReasons, conf + (p.shadowTuned ? ' ✓' : ''), v2Scale)
       : '';
     if (!v1 && !v2) return '';
     return '<div class="hypo-line hypo-models">' + v1 + v2 + '</div>';
