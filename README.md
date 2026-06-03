@@ -110,7 +110,7 @@ De `libreview-sync` service (poort 8787) biedt naast `/health` en `/sync`:
 - `GET /overlay/entries?count=N` — recente entries voor de overlay-grafiek.
 - `POST /feedback` — schrijft `user_feedback` (types: `confirmed`, `false_alarm`, `feels_hypo`, `ate_now`, `fingerstick_confirmed`). Endpoint blijft bestaan; de hypo-kaart heeft sinds kort geen feedbackknoppen meer.
 
-De nginx-overlay proxyt deze als `/_prediction/latest`, `/_overlay/entries` en `/_feedback`, zodat de browser ze same-origin kan benaderen. De hypo-kaart toont een klein `V1`/`V2`-label zodat je ziet welk model de actieve alarmbron is.
+De nginx-overlay proxyt deze als `/_prediction/latest`, `/_overlay/entries` en `/_feedback`, zodat de browser ze same-origin kan benaderen. De hypo-kaart toont V1 en V2 naast elkaar (`niveau · score`, bij V2 ook `confidence %` en `✓` bij getunede params; V1 zonder `%` want het regelmodel kent geen confidence), met de redenen per model in de hover-tooltip.
 
 Welk model nu live is, zie je ook direct via:
 
@@ -273,7 +273,9 @@ Reactieve-hypo detector V2 (`hypo.md`):
   out-of-sample data en genoeg events)
 - Slimmere features (stap 1+2+6): `acceleration`, herstelsignalen die vals alarm dempen,
   en variabele CGM-lag (`effectiveLagMinutes` 7/5/3/0 min)
-- V1/V2-label in de hypo-kaart; sync-risk mag het kaart-alarm escaleren (nooit verlagen)
+- V1- én V2-regel naast elkaar in de hypo-kaart (V2 met `confidence %`, redenen in tooltip);
+  sync-risk mag het kaart-alarm escaleren (nooit verlagen)
+- V2 krijgt dezelfde persoonlijke episode-vergelijking (`pattern`) als V1 in de live-sync
 
 Verbeterd voorspellingsplan: `hypo.md` beschrijft 8 voorgestelde lagen (nadir-schatting,
 curvevorm-match, dagdeel-context, weekdag-patroon, meal-onset detector). Stap 1+2+6 zijn

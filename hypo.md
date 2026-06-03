@@ -46,6 +46,12 @@ niet zinvol. De tuner weigert in dat geval een state te schrijven.
 
 - **M5 — shadow-mode (af, live):** V2 draait stil mee in de sync; per snapshot
   `shadowRisk`/`shadowScore`/`shadowConfidence`/`shadowReasons`/`shadowTuned`. Geen alarm.
+  De live-sync geeft V2 inmiddels hetzelfde `pattern`-object door als V1 (component 6 /
+  `patternScore` wordt nu echt gevoed); de auto-tuner en backtest doen dit nog niet, dus
+  vóór M6-activatie moet die train/serve-pariteit gelijkgetrokken worden.
+  De overlay-kaart toont V1 en V2 naast elkaar (`niveau · score`, bij V2 ook `confidence %`
+  en `✓` bij getunede params; V1 zonder `%`, want het regelmodel kent geen confidence),
+  met de redenen per model in de hover-tooltip.
 - **Automatisch leren (af, dagelijks):** `scripts/daily-hypo-tune.sh` via launchd
   (`deploy/com.glucosecgm.hypotune.plist`, 04:30): episodes verversen → auto-tunen op je
   eigen episodes → dag/week/weekdag/patroon-rapporten (`scripts/hypo-report.mjs`,
@@ -1724,8 +1730,9 @@ Na verbetering:
   Nightwatch ze via de Nightscout API kan ophalen.
 - xDrip's eigen predictive alert blijft staan als tweede, onafhankelijk
   vangnet — nooit uitzetten.
-- De overlay-kaart toont de V1/V2-badge zodat je altijd weet welk model
-  waarschuwt.
+- De overlay-kaart toont V1 en V2 als twee regels naast elkaar (`niveau · score`,
+  bij V2 ook `confidence %`), met de redenen per model in de hover-tooltip, zodat je
+  altijd ziet wat beide modellen vinden en waaróm.
 
 ## Configuratievoorstel
 

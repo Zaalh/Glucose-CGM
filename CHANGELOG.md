@@ -18,10 +18,24 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
     dalingssnelheid i.p.v. een vaste 5 min — snelle daling = meer sensorlag.
   - `hypo.md` bevat het volledige plan met 8 voorgestelde lagen (nadir-schatting,
     curvevorm-match, dagdeel-context, weekdag-patroon, meal-onset detector).
-- **V1/V2-indicator in de overlay** — de hypo-kaart toont een klein `V1`/`V2`-label
-  (welk model de backend-alarmbron is). De sync-risk mag het kaart-alarm bovendien
+- **V1- én V2-regel in de hypo-kaart** — de overlay toont V1 en V2 naast elkaar op één
+  regel (V1 links, V2 rechts): per model `niveau · score`. Bij V2 staat ook de
+  `confidence` (`%`) en een `✓` als getunede params actief zijn (`shadowTuned`); V1 toont
+  géén `%` omdat het regelmodel geen confidence berekent — die dimensie is juist V2's
+  meerwaarde. De redenen van elk model staan in de **hover-tooltip** op de betreffende
+  regel (geen tekstblok op de kaart). De rate (`/min`) staat nu naast de glucosewaarde
+  zodat dit geen extra kaarthoogte kost; de losse `V1`/`V2`-badge naast de titel is
+  vervallen (V1 staat al als regel). De sync-risk mag het kaart-alarm bovendien
   **escaleren** (nooit verlagen), zodat een geactiveerde V2 ook het zichtbare alarm
   strenger kan maken terwijl de huidige-waarde-veiligheid blijft staan.
+- **V2 krijgt dezelfde persoonlijke episode-vergelijking als V1** — de live-sync gaf het
+  `pattern`-object (similarEpisodeCount/HypoCount/HypoRatio) wel aan V1 door maar niet aan
+  V2, terwijl V2's component 6 (`patternScore` + confidence/uncertainty) er al op wachtte.
+  Nu krijgt `evaluateReactiveHypoRiskV2` het pattern mee, zodat V2's shadow-oordeel jouw
+  eerdere vergelijkbare episodes meeweegt. *Bekende beperking:* de auto-tuner
+  (`tune-reactive-hypo-v2.mjs`) en de backtest (`evaluate-hypo-detector.mjs`) geven dit
+  pattern nog niet mee; zolang V2 in shadow draait is dat onschadelijk, maar vóór activatie
+  moeten beide paden gelijk worden getrokken (train/serve-pariteit).
 - **Automatisch leren van je eigen patroon (dagelijks)** — `scripts/daily-hypo-tune.sh`
   draait via launchd (`deploy/com.glucosecgm.hypotune.plist`, dagelijks 04:30 op de iMac):
   episodes verversen → auto-tunen → rapporten. De sync laadt de geleerde params
