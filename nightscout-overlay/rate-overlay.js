@@ -761,7 +761,9 @@
       '#cgm-hypo-alert .hypo-line.primary{display:flex;flex-direction:column;gap:2px;align-items:center;justify-content:center}',
       '#cgm-hypo-alert .hypo-title{font-size:15px;font-weight:900;line-height:1;text-transform:uppercase;white-space:nowrap}',
       '#cgm-hypo-alert .hypo-detail{font-size:24px;font-weight:900;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+      '#cgm-hypo-alert .hypo-valrate{display:flex;align-items:baseline;justify-content:center;gap:10px;flex-wrap:wrap}',
       '#cgm-hypo-alert .hypo-rate{font-family:monospace;font-size:19px;font-weight:900;line-height:1;white-space:nowrap;opacity:.95}',
+      '#cgm-hypo-alert .hypo-v2{font-family:monospace;font-size:12px;font-weight:800;line-height:1.15;white-space:nowrap;opacity:.8}',
       '#cgm-hypo-alert .hypo-average{font-family:monospace;font-size:14px;font-weight:900;line-height:1.1;white-space:nowrap;opacity:.95}',
       '#cgm-hypo-alert .hypo-predict{font-family:monospace;font-size:13px;font-weight:800;line-height:1.15;white-space:nowrap;opacity:.95}',
       '#cgm-hypo-alert .hypo-drop{font-family:monospace;font-size:12px;font-weight:800;line-height:1.15;white-space:nowrap;opacity:.95}',
@@ -1137,6 +1139,19 @@
     if (nextBtn) nextBtn.disabled = idx <= 0;
   }
 
+  // Toont de V2-detector (reactieve-hypo) als shadow naast V1, zonder het alarm
+  // over te nemen. Alleen tonen als de snapshot bij de actuele meting hoort.
+  function v2ShadowHtml() {
+    var p = latestDbPrediction;
+    if (!p || !p.shadowRisk) return '';
+    if (latestReading && p.entryIdentifier && p.entryIdentifier !== latestReading.identifier) return '';
+    var labels = { low: 'laag', watch: 'let op', likely: 'waarschijnlijk', urgent: 'urgent' };
+    var lbl = labels[p.shadowRisk] || p.shadowRisk;
+    var score = Number.isFinite(p.shadowScore) ? ' · ' + p.shadowScore : '';
+    var tuned = p.shadowTuned ? ' ✓' : '';
+    return '<div class="hypo-line"><span class="hypo-v2">V2 shadow: ' + lbl + score + tuned + '</span></div>';
+  }
+
   function renderHypoAlert(risk) {
     var alert = ensureHypoAlert();
     currentHypoRisk = risk;
@@ -1172,9 +1187,12 @@
       '<div class="hypo-line primary">',
       '<span class="hypo-title">', safeRisk.title, '</span>',
       safeRisk.model ? '<span class="hypo-model">' + safeRisk.model + '</span>' : '',
+      '<span class="hypo-valrate">',
       '<span class="hypo-detail">', safeRisk.detail || '', '</span>',
+      '<span class="hypo-rate">', signed(safeRisk.rate, 3), '/min</span>',
+      '</span>',
       '</div>',
-      '<div class="hypo-line"><span class="hypo-rate">', signed(safeRisk.rate, 3), '/min</span></div>',
+      v2ShadowHtml(),
       '<div class="hypo-line"><span class="hypo-average">', averageRateText(true), '</span></div>',
       predictHtml,
       dropLine ? '<div class="hypo-line"><span class="hypo-drop">' + dropLine + '</span></div>' : '',
