@@ -763,6 +763,7 @@
       '#cgm-hypo-alert .hypo-detail{font-size:24px;font-weight:900;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
       '#cgm-hypo-alert .hypo-valrate{display:flex;align-items:baseline;justify-content:center;gap:10px;flex-wrap:wrap}',
       '#cgm-hypo-alert .hypo-rate{font-family:monospace;font-size:19px;font-weight:900;line-height:1;white-space:nowrap;opacity:.95}',
+      '#cgm-hypo-alert .hypo-v1{font-family:monospace;font-size:12px;font-weight:800;line-height:1.15;white-space:nowrap;opacity:.85}',
       '#cgm-hypo-alert .hypo-v2{font-family:monospace;font-size:12px;font-weight:800;line-height:1.15;white-space:nowrap;opacity:.8}',
       '#cgm-hypo-alert .hypo-average{font-family:monospace;font-size:14px;font-weight:900;line-height:1.1;white-space:nowrap;opacity:.95}',
       '#cgm-hypo-alert .hypo-predict{font-family:monospace;font-size:13px;font-weight:800;line-height:1.15;white-space:nowrap;opacity:.95}',
@@ -1145,19 +1146,38 @@
     });
   }
 
-  // Toont de V2-detector (reactieve-hypo) als shadow naast V1, zonder het alarm
-  // over te nemen. Alleen tonen als de snapshot bij de actuele meting hoort.
-  function v2ShadowHtml() {
+  var MODEL_RISK_LABELS = {
+    ok: 'ok', low: 'laag', watch: 'let op', warning: 'risico', high: 'risico',
+    likely: 'waarschijnlijk', urgent: 'urgent'
+  };
+
+  // Eén compacte modelregel (V1 of V2). Redenen alleen in de hover-tooltip.
+  function modelLineHtml(cls, label, risk, score, reasons, suffix) {
+    if (!risk) return '';
+    var lbl = MODEL_RISK_LABELS[risk] || risk;
+    var s = Number.isFinite(score) ? ' · ' + score : '';
+    var rs = Array.isArray(reasons) ? reasons.filter(Boolean) : [];
+    var titleAttr = rs.length ? ' title="' + escapeHtml(rs.join(' · ')) + '"' : '';
+    return '<div class="hypo-line"><span class="' + cls + '"' + titleAttr + '>' +
+      label + ': ' + lbl + s + (suffix || '') + '</span></div>';
+  }
+
+  // V1 (regelmodel) boven V2 (reactieve-hypo shadow). Alleen tonen als de
+  // snapshot bij de actuele meting hoort. V1 = primair tenzij V2 geactiveerd is,
+  // dan staat V1 in legacyRisk/legacyScore.
+  function modelLinesHtml() {
     var p = latestDbPrediction;
-    if (!p || !p.shadowRisk) return '';
+    if (!p) return '';
     if (latestReading && p.entryIdentifier && p.entryIdentifier !== latestReading.identifier) return '';
-    var labels = { low: 'laag', watch: 'let op', likely: 'waarschijnlijk', urgent: 'urgent' };
-    var lbl = labels[p.shadowRisk] || p.shadowRisk;
-    var score = Number.isFinite(p.shadowScore) ? ' · ' + p.shadowScore : '';
-    var tuned = p.shadowTuned ? ' ✓' : '';
-    var reasons = Array.isArray(p.shadowReasons) ? p.shadowReasons.filter(Boolean) : [];
-    var titleAttr = reasons.length ? ' title="' + escapeHtml(reasons.join(' · ')) + '"' : '';
-    return '<div class="hypo-line"><span class="hypo-v2"' + titleAttr + '>V2 shadow: ' + lbl + score + tuned + '</span></div>';
+    var v2Active = p.legacyRisk != null;
+    var v1Risk = v2Active ? p.legacyRisk : p.risk;
+    var v1Score = v2Active ? p.legacyScore : p.riskScore;
+    var v1Reasons = v2Active ? null : p.reasons;
+    var v1 = modelLineHtml('hypo-v1', 'V1', v1Risk, v1Score, v1Reasons, '');
+    var v2 = p.shadowRisk
+      ? modelLineHtml('hypo-v2', 'V2 shadow', p.shadowRisk, p.shadowScore, p.shadowReasons, p.shadowTuned ? ' ✓' : '')
+      : '';
+    return v1 + v2;
   }
 
   function renderHypoAlert(risk) {
@@ -1200,7 +1220,7 @@
       '<span class="hypo-rate">', signed(safeRisk.rate, 3), '/min</span>',
       '</span>',
       '</div>',
-      v2ShadowHtml(),
+      modelLinesHtml(),
       '<div class="hypo-line"><span class="hypo-average">', averageRateText(true), '</span></div>',
       predictHtml,
       dropLine ? '<div class="hypo-line"><span class="hypo-drop">' + dropLine + '</span></div>' : '',
