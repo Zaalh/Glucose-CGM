@@ -37,18 +37,41 @@ Stand van zaken per mijlpaal:
 event-window, "sustained" hypo (≥10 min onder grens), temporele train/test-split met
 recall-gebonden grid search, en rapportage in- én out-of-sample.
 
-**Kernbevinding — databottleneck:** in de eerlijke backtest doet V2 wat het moet op
-lead-time (~20 min, vergelijkbaar met de 17.5 min uit onderzoek) maar met te veel vals
-alarm (precision ~0.05). Belangrijker: alle ~8 sustained hypo's zitten in het recente
-1-min venster; de oudere data is uurlijks/15-min en valt door het dichtheidsfilter.
-Daardoor is een train/test-split nu degenereert (0 train-events) en is auto-tunen nog
-niet zinvol. De tuner weigert in dat geval een state te schrijven.
+**Kernbevinding — event-definitie (gecorrigeerd 2026-06-04):** de oorspronkelijke
+bottleneck-diagnose ("te weinig sustained hypo's") was een artefact van de event-definitie,
+niet van de data. De backtest telde een hypo pas bij ≥10 min aaneengesloten onder de grens
+(diabetes-CGM-criterium). Maar deze gebruiker heeft **reactieve/postprandiale hypoglykemie**:
+korte scherpe dips ~30–40 min na een maaltijdpiek, vaak maar enkele minuten onder de grens.
+De literatuur bevestigt dit (nadir 30–40 min na piek; een *duur*-drempel voor postprandiale
+hypo is "niet goed gekarakteriseerd"). Het ≥10-min-filter gooide juist de dips weg die de
+gebruiker voelt.
+
+Geverifieerd op de live data (5341 entries, 2026-05-31→06-04, mediaan-gap 1.0 min/dag):
+
+| Drempel | losse dips | ≥3 min | ≥5 min | ≥10 min |
+|---|---|---|---|---|
+| <3.9 | 16 (~4/dag) | 10 | 9 | 7 |
+| <3.0 | 4 | 3 | 2 | 1 |
+
+**Fix:** de event-definitie is nu nadir-gebaseerd (`SUSTAIN_MIN` 10→2 min; alleen
+enkel-sample sensorruis wordt nog afgewezen). Daarmee telt de backtest ~16 events i.p.v. 7
+en geeft een 70/30-split ~12/4 i.p.v. 5/2 — niet langer degenererend. Dit lijnt de backtest
+ook uit met de `episode-builder`, die al nadir-gebaseerd labelt (train/serve-pariteit).
+
+**Secundair — meetvenster:** de resolutie is fijn (1-min, geverifieerd), maar het venster is
+nog kort (~4–5 dagen) omdat de LibreView history-backfill nooit lukte (LSL-history/
+measurements gaven 400/403/404). Voor lange-termijn-patronen (weekdag, tijd-van-de-dag)
+hebben we dus meer kalenderdagen nodig; voor de event-telling/tuning was de definitie de
+echte blocker.
 
 - **M5 — shadow-mode (af, live):** V2 draait stil mee in de sync; per snapshot
   `shadowRisk`/`shadowScore`/`shadowConfidence`/`shadowReasons`/`shadowTuned`. Geen alarm.
-  De live-sync geeft V2 inmiddels hetzelfde `pattern`-object door als V1 (component 6 /
-  `patternScore` wordt nu echt gevoed); de auto-tuner en backtest doen dit nog niet, dus
-  vóór M6-activatie moet die train/serve-pariteit gelijkgetrokken worden.
+  De live-sync geeft V2 hetzelfde `pattern`-object door als V1 (component 6 /
+  `patternScore` wordt echt gevoed). **Train/serve-pariteit is nu rond:** de similarity
+  zit in de gedeelde module `scripts/lib/episode-similarity.mjs` (`findSimilarEpisodes` +
+  `patternFromFeatures`), en de backtest (`evaluate-hypo-detector.mjs`) én de auto-tuner
+  (`tune-reactive-hypo-v2.mjs`) laden `episode_vectors` en voeden V2 per punt hetzelfde
+  pattern als de live-sync. Daarmee tunen we op dezelfde score als we serveren.
   De overlay-kaart toont V1 en V2 naast elkaar (`niveau · score`, bij V2 ook `confidence %`
   en `✓` bij getunede params; V1 zonder `%`, want het regelmodel kent geen confidence),
   met de redenen per model in de hover-tooltip.
@@ -63,15 +86,28 @@ niet zinvol. De tuner weigert in dat geval een state te schrijven.
   V1 als `legacyRisk`. Tot de gate slaagt blijft V1 de alarmbron.
 
 **Methodiek volgt CGM-literatuur** (o.a. PMC10012121 ensemble-CGM-hypo): ±30 min
-event-window, "sustained" hypo (≥10 min onder grens), temporele train/test-split met
-recall-gebonden grid search, en rapportage in- én out-of-sample.
+event-window, temporele train/test-split met recall-gebonden grid search, en rapportage
+in- én out-of-sample. **Afwijking voor reactieve hypo:** géén ≥10-min-sustained-criterium —
+de event-definitie is nadir-gebaseerd (`SUSTAIN_MIN`=2, alleen enkel-sample ruis afgewezen),
+want reactieve hypo's zijn korte scherpe dips (~30–40 min na de piek; postprandiale
+duur-drempel is in de literatuur niet gekarakteriseerd).
 
-**Kernbevinding — databottleneck:** V2 doet wat het moet op lead-time (~20 min,
+**Kernbevinding — event-definitie:** V2 doet wat het moet op lead-time (~20 min,
 vergelijkbaar met de 17.5 min uit onderzoek) maar met te veel vals alarm (precision ~0.05).
-Belangrijker: alle ~8 sustained hypo's zitten in het recente 1-min venster; de oudere data
-is uurlijks/15-min en valt door het dichtheidsfilter. Daardoor is een train/test-split nu
-degenereert (0 train-events) en blijft de kwaliteitsgate dicht. De tuner weigert dan een
-state te schrijven. Het systeem leert vanzelf bij; V2 wordt pas live als de gate slaagt.
+De oorspronkelijke "te weinig events"-diagnose kwam door het ≥10-min-filter, dat reactieve
+dips wegfilterde. Met de nadir-gebaseerde definitie telt de backtest ~16 events i.p.v. 7 en
+degenereert de split niet meer (~12/4 i.p.v. 5/2). De resolutie is fijn (1-min); het
+meetvenster (~4–5 dagen, LibreView history-backfill lukte nooit: 400/403/404) is alleen voor
+lange-termijn-patronen nog kort. Het systeem verzamelt vanzelf meer dagen; V2 wordt pas
+live als de gate slaagt (V2 ≥ V1 op recall én precision out-of-sample).
+
+**Jouw patroon (geverifieerd uit de live data):** ~16 dips onder 3.9 in 4 dagen (~4/dag),
+meestal kort — de gebruiker voelt ze allemaal, maar slechts 7 duren ≥10 min. Ze zijn
+reactief/postprandiaal: telkens voorafgegaan door een piek (6.9–10.7 mmol/L) zo'n 22–116 min
+eerder, met een daling van 4.0–7.8 mmol/L de hypo in (nadir 2.9–3.4). Dit bevestigt dat de
+piek→drop-context (component die V2 op `dropFromPeakMmol` / `minutesSincePeak` bouwt) de
+juiste voorspeller is, en dat een korte-dip (nadir-gebaseerde) event-definitie nodig is.
+Tijd onder 3.9 ≈ 2.7%, onder 3.0 ≈ 0.36%.
 
 ## Huidige situatie
 
@@ -1678,7 +1714,17 @@ lagAdjustedMmol = currentMmol + blendedRate × effectiveLag
 
 Dit refineert de CGM-lag-correctie die al in `hypo-features.mjs` zit.
 
-#### Laag 8 — Vroege maaltijdreactie (meal-onset detector)
+#### Laag 8 — Vroege maaltijdreactie (meal-onset detector) — **GEBOUWD**
+
+> **Status: af.** `hypo-features.mjs` levert nu `mealOnset` / `riseFromTroughMmol` /
+> `minutesSinceTrough`; `reactive-hypo-detector.mjs` heeft component 8 die als
+> **risk-floor** een lage `watch` zet zodra een maaltijdpiek begint (curve-conditie,
+> zie hieronder). Bewust géén score-bijdrage: meal-onset kan nooit zelf tot een alarm
+> (`likely`/`urgent`) leiden — dat blijft voorbehouden aan de dalende fase, en `watch`
+> zit niet in de V2-alarmset. Regressie: `scripts/fixtures/meal-onset-rising.json`.
+> De historische conditie ("≥ 40% van vergelijkbare stijgingen → reactieve hypo")
+> is nog niet meegenomen; dat vergt rise-similarity (nu alleen drop-context-vectors)
+> en is een latere verfijning.
 
 De sterkste voorspelling is niet "er daalt iets" maar "er is een piek
 begonnen die op een reactieve hypo-curve lijkt". Voeg toe aan
@@ -1700,16 +1746,16 @@ detector pas te reageren als de daling begonnen is).
 
 ### Bouwen in deze volgorde
 
-| Stap | Onderdeel | Impact | Werk |
-|---|---|---|---|
-| 1 | `acceleration` + `isDecelerating` in features | dempt vals alarm | klein |
-| 2 | `recoverySignal` + `isBottoming` → demping | dempt vals alarm | klein |
-| 3 | Nadir-schatting via vergelijkbare episodes | preciezere worst-case | middel |
-| 4 | `timeOfDay` context in features + detector | nacht/dagdeel-bewust | klein |
-| 5 | Curvegemiddelde-vergelijking (curvevorm-score) | sterkste signaal | groot |
-| 6 | Variabele sensorlag | realistischer CGM-lag | klein |
-| 7 | Weekdag-patroon terugkoppelen | patroon-bewust | middel |
-| 8 | Meal-onset vroege detector | 10-15 min eerder | groot |
+| Stap | Onderdeel | Impact | Werk | Status |
+|---|---|---|---|---|
+| 1 | `acceleration` + `isDecelerating` in features | dempt vals alarm | klein | ✅ af |
+| 2 | `recoverySignal` + `isBottoming` → demping | dempt vals alarm | klein | ✅ af |
+| 3 | Nadir-schatting via vergelijkbare episodes | preciezere worst-case | middel | — |
+| 4 | `timeOfDay` context in features + detector | nacht/dagdeel-bewust | klein | — |
+| 5 | Curvegemiddelde-vergelijking (curvevorm-score) | sterkste signaal | groot | — |
+| 6 | Variabele sensorlag | realistischer CGM-lag | klein | ✅ af |
+| 7 | Weekdag-patroon terugkoppelen | patroon-bewust | middel | — |
+| 8 | Meal-onset vroege detector | 10-15 min eerder | groot | ✅ af |
 
 Stap 1-2 en 6 zijn kleine wijzigingen in `hypo-features.mjs` en de detector,
 geen database-werk. Stap 3 en 5 vereisen curve-vergelijking live; bouwen na

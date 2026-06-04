@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { MongoClient } from 'mongodb'
 import { buildHypoFeatures } from './lib/hypo-features.mjs'
 import { evaluateReactiveHypoRiskV2 } from './lib/reactive-hypo-detector.mjs'
+import { findSimilarEpisodes, patternFromFeatures } from './lib/episode-similarity.mjs'
 
 const LIBRE_API = 'https://api-eu.libreview.io'
 const DEFAULT_INTERVAL_SECONDS = 60
@@ -24,9 +25,6 @@ const RATE_DECAY_TAU = 45
 // Similarity-dimensies die offline (episode_vectors) en live identiek zijn.
 // maxFallRate bewust weggelaten: offline uit 1-min diffs (ruizig), live uit
 // gladde 5/10/15-min rates -> niet vergelijkbaar.
-const SIM_SCALES = { peakMmol: 4, dropFromPeakMmol: 3, minutesSincePeak: 30 }
-const SIM_MAX_DIST = 1.5
-const SIM_K = 8
 // CGM-lag correctie: bij snelle daling ligt de echte bloedglucose lager dan de
 // sensorwaarde. We schatten dat met blendedRate over dit aantal minuten vooruit.
 const CGM_LAG_MINUTES = 5
@@ -260,13 +258,10 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
       lagAdjustedMmol,
     }
 
-    const pattern = similar
-      ? {
-          similarEpisodeCount: similar.count,
-          similarHypoCount: similar.hypoCount,
-          similarHypoRatio: round(similar.hypoRatio, 3),
-        }
-      : null
+    // V2-pattern uit dezelfde featureset die V2 zelf ziet, via de gedeelde helper —
+    // zo is het pattern in live én backtest exact gelijk (echte train/serve-pariteit;
+    // anders verschilt minutesSincePeak door de tie-break in de piekselectie).
+    const pattern = patternFromFeatures(shadowFeaturesFull, episodeVectors)
 
     // V2 (reactieve detector) berekenen — hergebruik de al gebouwde featureset.
     let shadow = null
@@ -409,46 +404,6 @@ async function loadEpisodeVectors() {
     return []
   } finally {
     if (client) await client.close().catch(() => undefined)
-  }
-}
-
-function sq(x) { return x * x }
-
-// Vergelijkt de huidige situatie met opgeslagen episode_vectors. Geeft een
-// gewogen drop-correctie en hoeveel vergelijkbare episodes in (near-)hypo eindigden.
-function findSimilarEpisodes(input, vectors) {
-  if (!vectors || !vectors.length) return null
-  const scored = []
-  for (const v of vectors) {
-    const f = v.featureVector
-    if (!f || !Number.isFinite(f.peakMmol) || !Number.isFinite(f.dropFromPeakMmol)) continue
-    let sum = sq((f.peakMmol - input.peakMmol) / SIM_SCALES.peakMmol)
-    sum += sq((f.dropFromPeakMmol - input.dropFromPeakMmol) / SIM_SCALES.dropFromPeakMmol)
-    if (Number.isFinite(f.minutesPeakToEnd) && Number.isFinite(input.minutesSincePeak)) {
-      sum += sq((f.minutesPeakToEnd - input.minutesSincePeak) / SIM_SCALES.minutesSincePeak)
-    }
-    const dist = Math.sqrt(sum)
-    if (dist <= SIM_MAX_DIST) scored.push({ dist, drop: f.dropFromPeakMmol, outcome: v.outcome })
-  }
-  if (scored.length < 3) return null
-
-  scored.sort((a, b) => a.dist - b.dist)
-  const top = scored.slice(0, SIM_K)
-  let wsum = 0
-  let wdrop = 0
-  let hypoCount = 0
-  for (const s of top) {
-    const w = 1 / (1 + s.dist)
-    wsum += w
-    wdrop += w * (Number.isFinite(s.drop) ? s.drop : 0)
-    if (s.outcome === 'hypo' || s.outcome === 'near_hypo') hypoCount += 1
-  }
-  const weightedDrop = wsum > 0 ? wdrop / wsum : 0
-  return {
-    count: top.length,
-    hypoCount,
-    hypoRatio: top.length ? hypoCount / top.length : 0,
-    correction: Math.max(0, weightedDrop * 0.18),
   }
 }
 

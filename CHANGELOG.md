@@ -5,7 +5,28 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ## [Unreleased]
 
+### Gewijzigd
+
+- **Train/serve-pariteit voor V2 (component 6 / patternScore)** — de episode-similarity
+  is verhuisd naar de gedeelde module `scripts/lib/episode-similarity.mjs`
+  (`findSimilarEpisodes` + nieuwe `patternFromFeatures`). De backtest
+  (`scripts/evaluate-hypo-detector.mjs`) en de auto-tuner
+  (`scripts/tune-reactive-hypo-v2.mjs`) laden nu `episode_vectors` en voeden V2 per punt
+  hetzelfde `pattern`-object als de live-sync. Voorheen kreeg V2 in de backtest/tuner
+  géén pattern, waardoor we op een andere score tunede dan we serveren. Dit was de
+  blokkerende stap vóór M6-activatie (zie `hypo.md`).
+
 ### Toegevoegd
+
+- **Meal-onset detector (Laag 8, `hypo.md`)** — vroege heads-up al in de stijgende
+  fase i.p.v. pas bij de daling (~10-15 min extra voorlooptijd). Nieuw in
+  `scripts/lib/hypo-features.mjs`: `mealOnset` (sterke stijging vanaf een bodem ≥ 15 min
+  geleden), `riseFromTroughMmol`, `minutesSinceTrough`. In
+  `scripts/lib/reactive-hypo-detector.mjs` zet component 8 een lage `watch` als
+  **risk-floor** (geen score-bijdrage, dus nooit zelf een `likely`/`urgent`-alarm —
+  `watch` zit niet in de V2-alarmset). Regressie:
+  `scripts/fixtures/meal-onset-rising.json`. Loopt automatisch mee in live-sync én
+  backtest omdat beide dezelfde featurebuilder gebruiken.
 
 - **Slimmere detector-features (verbeterd voorspellingsplan, `hypo.md`)** — in
   `scripts/lib/hypo-features.mjs`:

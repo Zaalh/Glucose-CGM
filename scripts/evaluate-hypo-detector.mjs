@@ -17,12 +17,17 @@ import { MongoClient } from 'mongodb'
 import { buildHypoFeatures, MGDL_PER_MMOL } from './lib/hypo-features.mjs'
 import { evaluateReactiveHypoRiskV2 } from './lib/reactive-hypo-detector.mjs'
 import { evaluateRiskRuleV1 } from './lib/legacy-risk-v1.mjs'
+import { patternFromFeatures } from './lib/episode-similarity.mjs'
 
 const MS_PER_MIN = 60_000
 const WINDOW_MIN = Number(process.env.HYPO_BACKTEST_WINDOW_MIN ?? 30)
 const MERGE_GAP_MIN = 15
 const WARMUP_MIN = 15
-const SUSTAIN_MIN = Number(process.env.HYPO_BACKTEST_SUSTAIN_MIN ?? 10) // hypo telt pas bij >= N min onder grens
+// Reactieve hypo = korte scherpe dip (~30-40 min na de piek), vaak maar enkele minuten
+// onder de grens. Daarom nadir-gebaseerd met een lage sustain die enkel enkel-sample
+// sensorruis afwijst, niet de korte dips die de gebruiker echt voelt. (Diabetes-CGM
+// gebruikt ~10-15 min sustained; dat ondertelt reactieve hypo's structureel.)
+const SUSTAIN_MIN = Number(process.env.HYPO_BACKTEST_SUSTAIN_MIN ?? 2) // hypo telt al bij >= N min onder grens
 const HYPO_MMOL = 4.0
 const NEAR_MMOL = 4.5
 
@@ -45,8 +50,9 @@ function round(v, d) {
   return Math.round(v * f) / f
 }
 
-// "Sustained" downward crossing: telt alleen als glucose >= sustainMs onder de
-// grens blijft (filtert sensorruis/korte dips). Refractory tot herstel.
+// Nadir-gebaseerde downward crossing: telt als glucose >= sustainMs onder de grens
+// blijft. sustainMs is bewust laag (default 2 min) zodat alleen enkel-sample sensorruis
+// wordt afgewezen — korte reactieve dips tellen wel mee. Refractory tot herstel.
 function findOnsets(timeline, threshold, recover, sustainMs) {
   const onsets = []
   let i = 1
@@ -180,7 +186,12 @@ export function buildReplayContext(timeline, options = {}) {
   const hypoOnsets = findOnsets(timeline, HYPO_MMOL, NEAR_MMOL, sustainMs).filter(inRange)
   const nearOnsets = findOnsets(timeline, NEAR_MMOL, NEAR_MMOL + 0.3, sustainMs).filter(inRange)
 
-  return { timeline, points, hypoOnsets, nearOnsets, windowMs, mergeGapMs, predictiveFloor, sustainMin: options.sustainMin ?? SUSTAIN_MIN }
+  // episode_vectors voor component 6 / patternScore (train/serve-pariteit met de
+  // live-sync). De live-sync gebruikt de volledige vectorset, dus de backtest doet
+  // dat ook; null => geen pattern (V2 valt terug op patternScore 0, zoals voorheen).
+  const episodeVectors = options.episodeVectors ?? null
+
+  return { timeline, points, hypoOnsets, nearOnsets, windowMs, mergeGapMs, predictiveFloor, sustainMin: options.sustainMin ?? SUSTAIN_MIN, episodeVectors }
 }
 
 export function evaluateV1(ctx) {
@@ -203,7 +214,8 @@ export function evaluateV1(ctx) {
 
 export function evaluateV2(ctx, params) {
   const pts = ctx.points.map((p) => {
-    const r = evaluateReactiveHypoRiskV2(p.features, { params })
+    const pattern = ctx.episodeVectors ? patternFromFeatures(p.features, ctx.episodeVectors) : null
+    const r = evaluateReactiveHypoRiskV2(p.features, { params, pattern })
     return {
       idx: p.idx,
       date: p.date,
@@ -267,6 +279,21 @@ function stripInternal(m) {
   return rest
 }
 
+// episode_vectors laden voor component 6 / patternScore. Gedeeld door de backtest-CLI
+// en de auto-tuner zodat beide V2 hetzelfde pattern voeden als de live-sync.
+export async function loadEpisodeVectors(client) {
+  try {
+    return await client
+      .db()
+      .collection('episode_vectors')
+      .find({}, { projection: { featureVector: 1, outcome: 1, eventType: 1 } })
+      .limit(2000)
+      .toArray()
+  } catch {
+    return []
+  }
+}
+
 // --- runners -------------------------------------------------------------
 function syntheticTimeline() {
   const now = Date.UTC(2026, 5, 1, 12, 0, 0)
@@ -305,7 +332,8 @@ async function main() {
       .find({ type: 'sgv', sgv: { $exists: true } }, { projection: { _id: 0, date: 1, dateString: 1, sgv: 1 } })
       .sort({ date: 1 })
       .toArray()
-    console.log(JSON.stringify(replayAndEvaluate(entries), null, 2))
+    const episodeVectors = await loadEpisodeVectors(client)
+    console.log(JSON.stringify(replayAndEvaluate(entries, { episodeVectors }), null, 2))
   } finally {
     await client.close().catch(() => undefined)
   }

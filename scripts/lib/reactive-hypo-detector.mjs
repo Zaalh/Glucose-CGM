@@ -242,6 +242,20 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
   }
   components.patternScore = patternScore
 
+  // 8. Meal-onset (Laag 8): de sterkste vroege voorspelling is niet "er daalt iets"
+  // maar "er is een maaltijdpiek begonnen die op een reactieve-hypo-curve lijkt".
+  // Geeft ~10-15 min extra voorlooptijd door al in de stijgende fase een lage
+  // 'watch' te zetten. Werkt als risk-floor (net als de worst-case override), NIET
+  // als score-bijdrage: meal-onset mag nooit zelf tot een alarm (likely/urgent)
+  // leiden — dat blijft voorbehouden aan de dalende fase.
+  let mealOnsetScore = 0
+  const mealOnsetActive = Boolean(f.mealOnset) && peak >= 7.5 && rate10m >= 0.04 && blended > 0
+  if (mealOnsetActive) {
+    mealOnsetScore = 3
+    reasons.push('Maaltijdpiek begonnen — reactieve daling kan binnen 30-60 min volgen')
+  }
+  components.mealOnsetScore = mealOnsetScore
+
   // 7. Demping voor veilig/stabiel patroon
   let dampingScore = 0
   if (current >= 7.0 && steepest > TH.fastFall) dampingScore += 3
@@ -269,6 +283,8 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
   }
   components.dampingScore = dampingScore
 
+  // mealOnsetScore telt bewust NIET mee in de score: het is een risk-floor (watch),
+  // geen bewijs richting urgent. Zo kan een stijgende fase nooit een alarm worden.
   const rawScore =
     currentScore + rateScore + reactiveScore + forecastScore + lagScore + patternScore - dampingScore
   const score = Math.max(0, rawScore)
@@ -292,6 +308,11 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
     risk = atLeast(risk, 'watch')
     reasons.push('Worst-case onder 4.5 bij wisselend patroon')
   }
+
+  // Meal-onset: gegarandeerd minimaal 'watch' (informatief, geen alarm). De damping
+  // voor stijgend patroon zou de losse punten anders wegstrepen; als risk-floor
+  // overleeft de vroege heads-up. Nooit hoger dan watch via deze weg.
+  if (mealOnsetActive) risk = atLeast(risk, 'watch')
 
   // Onzekerheid: spreiding scenario's + ontbrekende/oude data.
   let uncertainty = scenarios.uncertaintyWidth / 2

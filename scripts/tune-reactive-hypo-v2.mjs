@@ -18,13 +18,15 @@ import { dirname, join } from 'node:path'
 import { MongoClient } from 'mongodb'
 import { MGDL_PER_MMOL } from './lib/hypo-features.mjs'
 import { DEFAULT_PARAMS } from './lib/reactive-hypo-detector.mjs'
-import { buildReplayContext, evaluateV1, evaluateV2 } from './evaluate-hypo-detector.mjs'
+import { buildReplayContext, evaluateV1, evaluateV2, loadEpisodeVectors } from './evaluate-hypo-detector.mjs'
 
 const MS_PER_MIN = 60_000
 const TRAIN_FRACTION = Number(process.env.HYPO_TUNE_TRAIN_FRACTION ?? 0.7)
 // Onder dit aantal hypo-events in train/test is een split statistisch zinloos;
 // dan schrijven we GEEN state-file (anders lijkt default ten onrechte "getuned").
-const MIN_EVENTS = Number(process.env.HYPO_TUNE_MIN_EVENTS ?? 3)
+// Met de nadir-gebaseerde (korte-dip) event-definitie geeft een 70/30-split bij ~4
+// dagen data ~12/4 events; 2 per helft is het minimum waarbij de gate eerlijk blijft.
+const MIN_EVENTS = Number(process.env.HYPO_TUNE_MIN_EVENTS ?? 2)
 const STATE_PATH = join(dirname(fileURLToPath(import.meta.url)), 'reactive-hypo-v2-state.json')
 
 // Parameterruimte (klein en uitlegbaar; de FP-gevoelige knoppen).
@@ -77,7 +79,10 @@ function tune(timeline, options = {}) {
   const t0 = timeline[0].date
   const t1 = timeline[timeline.length - 1].date
   const splitMs = t0 + (t1 - t0) * (options.trainFraction ?? TRAIN_FRACTION)
-  const ctxOpts = { sustainMin: options.sustainMin }
+  // episode_vectors meegeven zodat V2 in train/test hetzelfde pattern (component 6 /
+  // patternScore) krijgt als de live-sync — anders tunen we op een andere score dan
+  // we serveren. Matcht de live-sync, die de volledige vectorset gebruikt.
+  const ctxOpts = { sustainMin: options.sustainMin, episodeVectors: options.episodeVectors ?? null }
 
   const trainCtx = buildReplayContext(timeline, { ...ctxOpts, toMs: splitMs })
   const testCtx = buildReplayContext(timeline, { ...ctxOpts, fromMs: splitMs })
@@ -168,6 +173,7 @@ function selfTimeline() {
 async function main() {
   const selfTest = process.argv.includes('--self-test')
   let timeline
+  let episodeVectors = null
   let client = null
   if (selfTest) {
     timeline = selfTimeline()
@@ -181,10 +187,11 @@ async function main() {
       .find({ type: 'sgv', sgv: { $exists: true } }, { projection: { _id: 0, date: 1, dateString: 1, sgv: 1 } })
       .sort({ date: 1 })
       .toArray()
+    episodeVectors = await loadEpisodeVectors(client)
   }
 
   try {
-    const result = tune(timeline, selfTest ? { sustainMin: 5, minEvents: 1 } : {})
+    const result = tune(timeline, selfTest ? { sustainMin: 5, minEvents: 1 } : { episodeVectors })
     if (!result.ok) {
       console.log(JSON.stringify(result))
       process.exit(1)

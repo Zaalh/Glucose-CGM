@@ -1,0 +1,17 @@
+{
+  "name": "meal-onset-rising",
+  "description": "Maaltijdpiek begonnen: bodem ~5.2 mmol/L, daarna snelle stijging naar ~8.6 over ~25 min (rate10m ~+0.10). Detector moet al in de stijgende fase een lage 'watch' geven (stap 8), ruim voor de reactieve daling.",
+  "expect": { "atLeast": "watch", "atMost": "watch" },
+  "readings": [
+    { "minutesAgo": 45, "mmol": 5.4 },
+    { "minutesAgo": 40, "mmol": 5.3 },
+    { "minutesAgo": 35, "mmol": 5.2 },
+    { "minutesAgo": 30, "mmol": 5.2 },
+    { "minutesAgo": 25, "mmol": 5.5 },
+    { "minutesAgo": 20, "mmol": 6.1 },
+    { "minutesAgo": 15, "mmol": 6.9 },
+    { "minutesAgo": 10, "mmol": 7.6 },
+    { "minutesAgo": 5, "mmol": 8.1 },
+    { "minutesAgo": 0, "mmol": 8.6 }
+  ]
+}

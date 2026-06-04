@@ -17,6 +17,12 @@ const PEAK_WINDOW_MINUTES = 120
 const FALL_RATE_WINDOWS = [5, 10, 15, 20, 30]
 const DEFAULT_LAG_MINUTES = 5
 
+// Stap 8 — meal-onset: een maaltijdrespons is begonnen als de glucose duidelijk
+// stijgt vanaf een lokale bodem die al ≥ 15 min geleden ligt (geen 1-punts blip).
+const MEAL_TROUGH_WINDOW_MINUTES = 60
+const MEAL_ONSET_RISE_MMOL = 0.8 // stijging in laatste 15 min én vanaf de bodem
+const MEAL_ONSET_MIN_TROUGH_AGE = 15 // lokale bodem ≥ 15 min geleden
+
 // Variabele CGM-lag: bij snelle daling loopt de sensor meer achter op het
 // echte bloed. Waarden gebaseerd op CGM-literatuur + jouw episode-data.
 function effectiveLagMinutes(rate10m) {
@@ -100,6 +106,20 @@ function findPeak(timeline, latestIndex, windowMinutes) {
   return peak
 }
 
+// Laagste meting binnen het maaltijdvenster vóór (en inclusief) nu. Bij gelijke
+// bodems houden we de meest recente aan, zodat minutesSinceTrough de tijd sinds
+// het begin van de huidige stijging weergeeft.
+function findTrough(timeline, latestIndex, windowMinutes) {
+  const latest = timeline[latestIndex]
+  const from = latest.date - windowMinutes * 60_000
+  let trough = timeline[latestIndex]
+  for (let i = latestIndex; i >= 0; i -= 1) {
+    if (timeline[i].date < from) break
+    if (Number(timeline[i].sgv) < Number(trough.sgv)) trough = timeline[i]
+  }
+  return trough
+}
+
 function postPeakWindow(minutesSincePeak, dropFromPeakMmol) {
   if (dropFromPeakMmol < 0.5) return 'none'
   if (minutesSincePeak <= 15) return 'early'
@@ -169,13 +189,28 @@ export function buildHypoFeatures(timeline, idx, options = {}) {
   const effLag = Number.isFinite(options.lagMinutes) ? options.lagMinutes : effectiveLagMinutes(rate10m)
   const lagAdjustedMmol = currentMmol + blendedRate * effLag
 
+  // Stap 8 — meal-onset detector: herken dat een maaltijdpiek is begonnen (sterke
+  // stijging vanaf een bodem ≥ 15 min geleden) zodat de detector al in de stijgende
+  // fase kan waarschuwen i.p.v. pas als de reactieve daling begint.
+  const delta15m = calcDelta(timeline, idx, 15)
+  const trough = findTrough(timeline, idx, MEAL_TROUGH_WINDOW_MINUTES)
+  const minutesSinceTrough = (latest.date - trough.date) / 60_000
+  const riseFromTroughMmol = currentMmol - toMmol(trough.sgv)
+  const rising = blendedRate > 0 || (Number.isFinite(rate10m) && rate10m > 0)
+  const mealOnset =
+    Number.isFinite(delta15m) &&
+    delta15m >= MEAL_ONSET_RISE_MMOL &&
+    minutesSinceTrough >= MEAL_ONSET_MIN_TROUGH_AGE &&
+    riseFromTroughMmol >= MEAL_ONSET_RISE_MMOL &&
+    rising
+
   return {
     // raw
     currentMmol: round(currentMmol, 3),
     previousMmol: previousMmol === null ? null : round(previousMmol, 3),
     delta5m: round(calcDelta(timeline, idx, 5), 3),
     delta10m: round(calcDelta(timeline, idx, 10), 3),
-    delta15m: round(calcDelta(timeline, idx, 15), 3),
+    delta15m: round(delta15m, 3),
     ageSeconds: nowMs === null ? null : Math.max(0, Math.round((nowMs - latest.date) / 1000)),
     // speed
     rate5m: round(rate5m, 4),
@@ -198,6 +233,10 @@ export function buildHypoFeatures(timeline, idx, options = {}) {
     dropFromPeakPercent: round(dropFromPeakPercent, 1),
     peakToCurrentSlope: round(peakToCurrentSlope, 4),
     postPeakWindow: postPeakWindow(minutesSincePeak, dropFromPeakMmol),
+    // meal-onset (stap 8)
+    mealOnset,
+    riseFromTroughMmol: round(riseFromTroughMmol, 3),
+    minutesSinceTrough: round(minutesSinceTrough, 1),
     // forecast (deterministisch)
     minutesTo45: minutesTo45 === null ? null : round(minutesTo45, 1),
     minutesTo40: minutesTo40 === null ? null : round(minutesTo40, 1),
