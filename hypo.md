@@ -72,6 +72,13 @@ echte blocker.
   `patternFromFeatures`), en de backtest (`evaluate-hypo-detector.mjs`) én de auto-tuner
   (`tune-reactive-hypo-v2.mjs`) laden `episode_vectors` en voeden V2 per punt hetzelfde
   pattern als de live-sync. Daarmee tunen we op dezelfde score als we serveren.
+  Ook de live-sync bouwt het V2-`pattern` nu via `patternFromFeatures` op exact dezelfde
+  featureset die V2 ziet — zo verschilt `minutesSincePeak` niet meer door de tie-break in
+  de piekselectie (live `>` = nieuwste piek vs. builder `>=` = oudste). Pariteit is dus
+  100%, niet bij benadering. (Het `similar`-object voedt nog wel de forecast-correctie en
+  de V1-reden.) **Bekende beperking:** de tuner geeft de volledige vectorset aan train én
+  test, dus component 6 heeft een lichte look-ahead; effect is klein (max 2 punten) en de
+  M6-gate is sowieso datagelimiteerd. Een tijd-gefilterde vectorset is een latere verfijning.
   De overlay-kaart toont V1 en V2 naast elkaar (`niveau · score`, bij V2 ook `confidence %`
   en `✓` bij getunede params; V1 zonder `%`, want het regelmodel kent geen confidence),
   met de redenen per model in de hover-tooltip.

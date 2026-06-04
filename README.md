@@ -275,17 +275,21 @@ Reactieve-hypo detector V2 (`hypo.md`):
   en variabele CGM-lag (`effectiveLagMinutes` 7/5/3/0 min)
 - V1- én V2-regel naast elkaar in de hypo-kaart (V2 met `confidence %`, redenen in tooltip);
   sync-risk mag het kaart-alarm escaleren (nooit verlagen)
-- V2 krijgt dezelfde persoonlijke episode-vergelijking (`pattern`) als V1 in de live-sync
+- V2 krijgt dezelfde persoonlijke episode-vergelijking (`pattern`) als V1 in de live-sync;
+  sinds 2026-06-04 ook in backtest en auto-tuner (gedeelde `scripts/lib/episode-similarity.mjs`),
+  zodat train/serve gelijk zijn
 
 Verbeterd voorspellingsplan: `hypo.md` beschrijft 8 voorgestelde lagen (nadir-schatting,
-curvevorm-match, dagdeel-context, weekdag-patroon, meal-onset detector). Stap 1+2+6 zijn
-gebouwd; de rest staat klaar als plan.
+curvevorm-match, dagdeel-context, weekdag-patroon, meal-onset detector). Stap 1+2+6+8 zijn
+gebouwd; de rest staat klaar als plan. Stap 8 (meal-onset) waarschuwt al in de stijgende
+fase: een lage `watch` zodra een maaltijdpiek begint (~10-15 min eerder dan de daling).
 
 Nog open (databottleneck, niet code):
 
 - De kwaliteitsgate slaagt pas met ~1–2 weken dichte 1-min data verspreid over tijd
   (nu zitten alle hypo-events in één recente cluster). Tot dan blijft V1 de alarmbron.
-- Stap 3-5, 7-8 uit het verbeterd voorspellingsplan (curvevorm-match, meal-onset, etc.)
+- Stap 3-5 en 7 uit het verbeterd voorspellingsplan (nadir-schatting, curvevorm-match,
+  dagdeel-context, weekdag-patroon) — stap 8 (meal-onset) is af
 - AI-laag (`ai_observations` / `ai_questions`): uitleg/context/vragen — komt later, neemt nooit de live alarmbeslissing
 - `episode_vectors` similarity ook in de UI-redenen tonen
 

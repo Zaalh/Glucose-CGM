@@ -5,6 +5,11 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ## [Unreleased]
 
+> **Live gedeployed (2026-06-04)** op de Nightscout-stack (iMac). `libreview-sync`
+> herstart op commit `f280478`; verse `prediction_snapshots` bevatten de nieuwe
+> `mealOnset`/`minutesSinceTrough`/`riseFromTroughMmol`-features. Meal-onset draait in
+> V2 (shadow); de actieve V1-alarmen blijven ongemoeid tot de M6-gate slaagt.
+
 ### Gewijzigd
 
 - **Train/serve-pariteit voor V2 (component 6 / patternScore)** — de episode-similarity
@@ -15,6 +20,12 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   hetzelfde `pattern`-object als de live-sync. Voorheen kreeg V2 in de backtest/tuner
   géén pattern, waardoor we op een andere score tunede dan we serveren. Dit was de
   blokkerende stap vóór M6-activatie (zie `hypo.md`).
+  - De live-sync bouwt het V2-`pattern` nu óók via `patternFromFeatures` op dezelfde
+    featureset die V2 ziet, zodat `minutesSincePeak` niet meer afwijkt door de tie-break
+    in de piekselectie (live hield de nieuwste piek aan, de builder de oudste). Pariteit
+    is daarmee exact i.p.v. ~99%.
+  - Bekende beperking: de tuner geeft de volledige vectorset aan train én test (lichte
+    look-ahead in component 6); klein effect, latere verfijning.
 
 ### Toegevoegd
 
