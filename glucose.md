@@ -28,10 +28,11 @@ Nederlands.
 
 ## Nog open (bewust)
 
-1. **AI-laag** (`ai_observations` / `ai_questions` via gemini-mcp): uitleg, context en vragen
-   bovenop de voorspelling. Komt later en neemt **nooit** de live alarmbeslissing.
+1. **AI-laag activeren**: de OpenAI-compatible chatvoorbereiding staat klaar via
+   `npm run ai:review`, maar blijft uit tot `AI_CHAT_BASE_URL`, `AI_CHAT_API_KEY` en
+   `AI_CHAT_MODEL` zijn gezet. Schrijft alleen `ai_observations` / `ai_questions` en
+   neemt **nooit** de live alarmbeslissing.
 2. Fine-tuning van thresholds/policies op een langere dataperiode (optioneel).
-3. `episode_vectors`-similarity ook tonen in de UI-redenen.
 
 ## Werkwijze
 

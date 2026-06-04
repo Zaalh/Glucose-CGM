@@ -29,6 +29,7 @@
     "hypo:tune": "docker compose -f docker-compose.nightscout.yml --profile libre run --rm libreview-sync node scripts/tune-reactive-hypo-v2.mjs",
     "hypo:report": "docker compose -f docker-compose.nightscout.yml --profile libre run --rm libreview-sync node scripts/hypo-report.mjs",
     "hypo:patterns": "docker compose -f docker-compose.nightscout.yml --profile libre run --rm libreview-sync node scripts/hypo-patterns.mjs",
+    "ai:review": "node scripts/ai-review.mjs",
     "detector:fixtures": "node scripts/run-detector-fixtures.mjs",
     "episodes:check": "node scripts/run-episode-builder-check.mjs",
     "model:retrain:balanced": "TRAIN_POLICY=balanced node scripts/retrain-and-export-model.mjs",

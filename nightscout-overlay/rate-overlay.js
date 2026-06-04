@@ -1190,14 +1190,40 @@
     return '<div class="hypo-line hypo-models">' + v1 + v2 + '</div>';
   }
 
+  function dbPatternLineText() {
+    var p = latestDbPrediction;
+    if (!p || !p.pattern) return '';
+    if (latestReading && p.entryIdentifier && p.entryIdentifier !== latestReading.identifier) return '';
+    var pattern = p.pattern;
+    var count = Number(pattern.similarEpisodeCount);
+    var hypoCount = Number(pattern.similarHypoCount);
+    if (!Number.isFinite(count) || count < 3) return '';
+    var ratio = Number(pattern.similarHypoRatio);
+    var ratioText = Number.isFinite(ratio) ? ' · ' + Math.round(ratio * 100) + '%' : '';
+    var hypoText = Number.isFinite(hypoCount) ? hypoCount : '?';
+    var line = 'vergelijkbaar: ' + count + ' episodes · ' + hypoText + ' onder 4.5' + ratioText;
+    var curveCount = Number(pattern.curveMatchCount);
+    if (Number.isFinite(curveCount) && curveCount >= 3) {
+      var curveHypo = Number(pattern.curveHypoCount);
+      var curveRatio = Number(pattern.curveHypoRatio);
+      line += ' · curve: ' + curveCount + '/' + (Number.isFinite(curveHypo) ? curveHypo : '?');
+      if (Number.isFinite(curveRatio)) line += ' (' + Math.round(curveRatio * 100) + '%)';
+    }
+    if (pattern.weekdayRiskHigh && pattern.weekday) {
+      line += ' · ' + pattern.weekday + ' riskanter';
+    }
+    return line;
+  }
+
   function renderHypoAlert(risk) {
     var alert = ensureHypoAlert();
     currentHypoRisk = risk;
     var patternLine = currentPatternCorrection
       ? 'patrooncorr: -' + currentPatternCorrection.correction.toFixed(1) + ' (n=' + currentPatternCorrection.episodes + ')'
       : '';
+    var dbPatternLine = dbPatternLineText();
       
-    if (!risk && !patternLine) {
+    if (!risk && !patternLine && !dbPatternLine) {
       alert.style.display = 'none';
       return;
     }
@@ -1233,7 +1259,8 @@
       '<div class="hypo-line"><span class="hypo-average">', averageRateText(true), '</span></div>',
       predictHtml,
       dropLine ? '<div class="hypo-line"><span class="hypo-drop">' + dropLine + '</span></div>' : '',
-      patternLine ? '<div class="hypo-line"><span class="hypo-drop" style="color: #ff9800; font-weight: bold;">' + patternLine + '</span></div>' : ''
+      dbPatternLine ? '<div class="hypo-line"><span class="hypo-drop" style="color: #ff9800; font-weight: bold;">' + escapeHtml(dbPatternLine) + '</span></div>' : '',
+      patternLine ? '<div class="hypo-line"><span class="hypo-drop" style="color: #ff9800; font-weight: bold;">' + escapeHtml(patternLine) + '</span></div>' : ''
     ].join('');
   }
 

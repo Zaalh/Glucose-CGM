@@ -1757,11 +1757,11 @@ detector pas te reageren als de daling begonnen is).
 |---|---|---|---|---|
 | 1 | `acceleration` + `isDecelerating` in features | dempt vals alarm | klein | ✅ af |
 | 2 | `recoverySignal` + `isBottoming` → demping | dempt vals alarm | klein | ✅ af |
-| 3 | Nadir-schatting via vergelijkbare episodes | preciezere worst-case | middel | — |
-| 4 | `timeOfDay` context in features + detector | nacht/dagdeel-bewust | klein | — |
-| 5 | Curvegemiddelde-vergelijking (curvevorm-score) | sterkste signaal | groot | — |
+| 3 | Nadir-schatting via vergelijkbare episodes | preciezere worst-case | middel | ✅ af |
+| 4 | `timeOfDay` context in features + detector | nacht/dagdeel-bewust | klein | ✅ af |
+| 5 | Curvegemiddelde-vergelijking (curvevorm-score) | sterkste signaal | groot | ✅ af |
 | 6 | Variabele sensorlag | realistischer CGM-lag | klein | ✅ af |
-| 7 | Weekdag-patroon terugkoppelen | patroon-bewust | middel | — |
+| 7 | Weekdag-patroon terugkoppelen | patroon-bewust | middel | ✅ af |
 | 8 | Meal-onset vroege detector | 10-15 min eerder | groot | ✅ af |
 
 Stap 1-2 en 6 zijn kleine wijzigingen in `hypo-features.mjs` en de detector,

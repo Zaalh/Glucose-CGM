@@ -137,6 +137,15 @@ npm run snapshots:live
 Maakt één live `prediction_snapshots` record op basis van de meest recente Nightscout entry (idempotent per `entryId`).
 
 ```bash
+npm run ai:review -- --dry-run
+```
+
+Optionele AI-laag. Leest recente `prediction_snapshots` en schrijft, als `--dry-run`
+weg is, alleen naar `ai_observations` en `ai_questions`. Staat standaard uit totdat
+`AI_CHAT_BASE_URL`, `AI_CHAT_API_KEY` en `AI_CHAT_MODEL` zijn gezet. Gebruikt een
+OpenAI-compatible `/v1/chat/completions` endpoint en neemt nooit alarmbeslissingen.
+
+```bash
 npm run patterns:analyze
 ```
 
@@ -271,8 +280,8 @@ Reactieve-hypo detector V2 (`hypo.md`):
 - Sync past geleerde params toe op V2 shadow (`shadowTuned`)
 - M6 auto-activatie met kwaliteitsgate (gewapend; activeert vanzelf zodra V2 ≥ V1 op
   out-of-sample data en genoeg events)
-- Slimmere features (stap 1+2+6): `acceleration`, herstelsignalen die vals alarm dempen,
-  en variabele CGM-lag (`effectiveLagMinutes` 7/5/3/0 min)
+- Slimmere features (stap 1 t/m 8): `acceleration`, herstelsignalen, persoonlijke
+  nadir/curve/weekdag-patronen, dagdeel-context en variabele CGM-lag
 - V1- én V2-regel naast elkaar in de hypo-kaart (V2 met `confidence %`, redenen in tooltip);
   sync-risk mag het kaart-alarm escaleren (nooit verlagen)
 - V2 krijgt dezelfde persoonlijke episode-vergelijking (`pattern`) als V1 in de live-sync;
@@ -280,18 +289,15 @@ Reactieve-hypo detector V2 (`hypo.md`):
   zodat train/serve gelijk zijn
 
 Verbeterd voorspellingsplan: `hypo.md` beschrijft 8 voorgestelde lagen (nadir-schatting,
-curvevorm-match, dagdeel-context, weekdag-patroon, meal-onset detector). Stap 1+2+6+8 zijn
-gebouwd; de rest staat klaar als plan. Stap 8 (meal-onset) waarschuwt al in de stijgende
+curvevorm-match, dagdeel-context, weekdag-patroon, meal-onset detector). Stap 1 t/m 8 zijn
+gebouwd. Stap 8 (meal-onset) waarschuwt al in de stijgende
 fase: een lage `watch` zodra een maaltijdpiek begint (~10-15 min eerder dan de daling).
 
 Nog open (databottleneck, niet code):
 
 - De kwaliteitsgate slaagt pas met ~1–2 weken dichte 1-min data verspreid over tijd
   (nu zitten alle hypo-events in één recente cluster). Tot dan blijft V1 de alarmbron.
-- Stap 3-5 en 7 uit het verbeterd voorspellingsplan (nadir-schatting, curvevorm-match,
-  dagdeel-context, weekdag-patroon) — stap 8 (meal-onset) is af
-- AI-laag (`ai_observations` / `ai_questions`): uitleg/context/vragen — komt later, neemt nooit de live alarmbeslissing
-- `episode_vectors` similarity ook in de UI-redenen tonen
+- AI-laag is voorbereid maar staat uit tot er een API-key, endpoint en model zijn.
 
 ## Environment Files
 

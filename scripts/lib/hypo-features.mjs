@@ -16,6 +16,10 @@ const BLEND_WEIGHTS = { r5: 0.5, r10: 0.33, r15: 0.17 }
 const PEAK_WINDOW_MINUTES = 120
 const FALL_RATE_WINDOWS = [5, 10, 15, 20, 30]
 const DEFAULT_LAG_MINUTES = 5
+const DEFAULT_TIME_ZONE = 'Europe/Amsterdam'
+const CURVE_PRE_PEAK_MINUTES = 20
+const CURVE_TOTAL_MINUTES = 60
+const CURVE_TOTAL_POINTS = 24
 
 // Stap 8 — meal-onset: een maaltijdrespons is begonnen als de glucose duidelijk
 // stijgt vanaf een lokale bodem die al ≥ 15 min geleden ligt (geen 1-punts blip).
@@ -120,6 +124,47 @@ function findTrough(timeline, latestIndex, windowMinutes) {
   return trough
 }
 
+function resampleCurve(timeline, fromMs, toMs, points) {
+  if (!timeline.length || points < 2 || toMs <= fromMs) return null
+  const out = []
+  const span = toMs - fromMs
+  for (let k = 0; k < points; k += 1) {
+    const target = fromMs + (span * k) / (points - 1)
+    let best = null
+    let bestDiff = Infinity
+    for (const entry of timeline) {
+      if (entry.date < fromMs || entry.date > toMs) continue
+      const diff = Math.abs(entry.date - target)
+      if (diff < bestDiff) {
+        best = entry
+        bestDiff = diff
+      }
+    }
+    if (!best) return null
+    out.push(toMmol(best.sgv))
+  }
+  return out
+}
+
+function normalizeShape(values) {
+  if (!values || !values.length) return null
+  const mean = values.reduce((sum, v) => sum + v, 0) / values.length
+  const centered = values.map((v) => v - mean)
+  const norm = Math.sqrt(centered.reduce((sum, v) => sum + v * v, 0))
+  if (norm < 1e-9) return centered.map(() => 0)
+  return centered.map((v) => round(v / norm, 4))
+}
+
+function partialCurveShape(timeline, peak, latest) {
+  const fromMs = peak.date - CURVE_PRE_PEAK_MINUTES * 60_000
+  const toMs = latest.date
+  const elapsedMinutes = (toMs - fromMs) / 60_000
+  if (elapsedMinutes < 15) return null
+  const points = clamp(Math.round((elapsedMinutes / CURVE_TOTAL_MINUTES) * CURVE_TOTAL_POINTS), 6, CURVE_TOTAL_POINTS)
+  const curve = resampleCurve(timeline, fromMs, toMs, points)
+  return normalizeShape(curve)
+}
+
 function postPeakWindow(minutesSincePeak, dropFromPeakMmol) {
   if (dropFromPeakMmol < 0.5) return 'none'
   if (minutesSincePeak <= 15) return 'early'
@@ -128,12 +173,44 @@ function postPeakWindow(minutesSincePeak, dropFromPeakMmol) {
   return 'none'
 }
 
+function localHourOf(ms, timeZone) {
+  try {
+    const parts = new Intl.DateTimeFormat('nl-NL', {
+      hour: '2-digit',
+      hourCycle: 'h23',
+      timeZone,
+    }).formatToParts(new Date(ms))
+    const hour = Number(parts.find((p) => p.type === 'hour')?.value)
+    return Number.isInteger(hour) ? hour : new Date(ms).getUTCHours()
+  } catch {
+    return new Date(ms).getUTCHours()
+  }
+}
+
+function timeOfDayFor(ms, timeZone = DEFAULT_TIME_ZONE) {
+  const hour = localHourOf(ms, timeZone)
+  if (hour < 6) return 'nacht'
+  if (hour < 10) return 'ochtend'
+  if (hour < 15) return 'middag'
+  if (hour < 19) return 'middag2'
+  return 'avond'
+}
+
+function weekdayFor(ms, timeZone = DEFAULT_TIME_ZONE) {
+  try {
+    return new Intl.DateTimeFormat('nl-NL', { weekday: 'long', timeZone }).format(new Date(ms))
+  } catch {
+    return new Intl.DateTimeFormat('nl-NL', { weekday: 'long', timeZone: 'UTC' }).format(new Date(ms))
+  }
+}
+
 // Bouwt de volledige featureset voor één meetpunt (timeline[idx]). Gebruikt
 // uitsluitend data tot en met idx, zodat live en backtest identiek zijn.
 export function buildHypoFeatures(timeline, idx, options = {}) {
   const lagMinutes = Number.isFinite(options.lagMinutes) ? options.lagMinutes : DEFAULT_LAG_MINUTES
   const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : null
   const latest = timeline[idx]
+  const timeZone = options.timeZone || DEFAULT_TIME_ZONE
   const currentMmol = toMmol(latest.sgv)
   const previousMmol = idx > 0 ? toMmol(timeline[idx - 1].sgv) : null
 
@@ -178,6 +255,7 @@ export function buildHypoFeatures(timeline, idx, options = {}) {
   const dropFromPeakMmol = peakMmol120m - currentMmol
   const dropFromPeakPercent = peakMmol120m > 0 ? (dropFromPeakMmol / peakMmol120m) * 100 : 0
   const peakToCurrentSlope = minutesSincePeak > 0 ? dropFromPeakMmol / minutesSincePeak : 0
+  const liveCurveShape = partialCurveShape(timeline, peak, latest)
 
   // Geschatte tijd tot grenswaarden bij huidige (negatieve) blendedRate.
   const fallRate = blendedRate < -0.01 ? Math.abs(blendedRate) : null
@@ -233,6 +311,9 @@ export function buildHypoFeatures(timeline, idx, options = {}) {
     dropFromPeakPercent: round(dropFromPeakPercent, 1),
     peakToCurrentSlope: round(peakToCurrentSlope, 4),
     postPeakWindow: postPeakWindow(minutesSincePeak, dropFromPeakMmol),
+    timeOfDay: timeOfDayFor(latest.date, timeZone),
+    weekday: weekdayFor(latest.date, timeZone),
+    liveCurveShape,
     // meal-onset (stap 8)
     mealOnset,
     riseFromTroughMmol: round(riseFromTroughMmol, 3),

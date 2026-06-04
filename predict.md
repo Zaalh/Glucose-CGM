@@ -41,7 +41,11 @@ Dit plan is deels gebouwd. Onderstaand overzicht houdt bij wat af is en wat nog 
 
 ### Open
 
-- **AI-laag** (`ai_observations` + `ai_questions`, analyse via de lokale gemini-mcp): bewust uitgesteld, komt later. Mag NOOIT de live alarmbeslissing nemen; alleen uitleg, context en vragen.
+- **AI-laag activeren** (`ai_observations` + `ai_questions`): voorbereiding is gebouwd
+  via `scripts/ai-review.mjs` / `npm run ai:review` met een OpenAI-compatible
+  `/v1/chat/completions` endpoint. Staat standaard uit tot `AI_CHAT_BASE_URL`,
+  `AI_CHAT_API_KEY` en `AI_CHAT_MODEL` zijn gezet. Mag NOOIT de live alarmbeslissing
+  nemen; alleen uitleg, context en vragen.
 
 ### Bewust nog niet
 

@@ -12,6 +12,28 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Gewijzigd
 
+- **Overlay toont V2 episode-similarity expliciet** — de hypo-kaart gebruikt nu ook het
+  `pattern`-object uit `/prediction/latest` en toont hoeveel vergelijkbare episodes V2
+  ziet, hoeveel daarvan onder 4.5 gingen en het percentage. Dit maakt de persoonlijke
+  episode-vergelijking zichtbaar in plaats van alleen technisch aanwezig in de snapshot.
+- **Dagdeel-context voor V2 (Laag 4)** — `buildHypoFeatures` levert nu `timeOfDay`
+  (`nacht`/`ochtend`/`middag`/`middag2`/`avond`, Europe/Amsterdam). De detector is 's
+  nachts iets conservatiever tegen vals alarm en geeft bij middag/middag2 alleen een
+  kleine bonus als er al een echte post-piek daling is.
+- **Nadir-schatting uit vergelijkbare episodes (Laag 3)** — `patternFromFeatures` geeft
+  nu `patternNadirMmol` door op basis van de gewogen historische drop. V2 gebruikt dit
+  als aanvullend forecast-bewijs wanneer er genoeg vergelijkbare episodes zijn.
+- **Curvevorm-match voor V2 (Laag 5)** — `buildHypoFeatures` bouwt een genormaliseerde
+  partial curve vanaf 20 min vóór de piek tot nu. `patternFromFeatures` vergelijkt die
+  met het bijpassende prefix van historische `episode_vectors` en geeft
+  `curveMatchCount`/`curveHypoRatio` door; V2 gebruikt dit alleen als extra
+  patroonbewijs bij genoeg matches. De overlay toont de curve-match ook in de
+  patroonregel.
+- **Weekdag-patroon voor V2 (Laag 7)** — `buildHypoFeatures` levert nu `weekday`.
+  `patternFromFeatures` vergelijkt de huidige weekdag met historische
+  `episode_vectors` en geeft een `weekdayRiskHigh`-signaal door als die dag duidelijk
+  riskanter was. V2 gebruikt dit als kleine bonus, alleen bovenop echte post-piek
+  context.
 - **Train/serve-pariteit voor V2 (component 6 / patternScore)** — de episode-similarity
   is verhuisd naar de gedeelde module `scripts/lib/episode-similarity.mjs`
   (`findSimilarEpisodes` + nieuwe `patternFromFeatures`). De backtest
@@ -29,6 +51,12 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Toegevoegd
 
+- **AI-laag voorbereid (`ai_observations` / `ai_questions`)** — nieuw
+  `scripts/ai-review.mjs` + `npm run ai:review`. Het script gebruikt een
+  OpenAI-compatible `/v1/chat/completions` endpoint via `AI_CHAT_BASE_URL`,
+  `AI_CHAT_API_KEY` en `AI_CHAT_MODEL`, vat recente `prediction_snapshots` samen en
+  schrijft alleen naar `ai_observations` en `ai_questions`. Zonder configuratie slaat
+  het veilig over; het zit niet in de live sync-loop en neemt nooit alarmbeslissingen.
 - **Meal-onset detector (Laag 8, `hypo.md`)** — vroege heads-up al in de stijgende
   fase i.p.v. pas bij de daling (~10-15 min extra voorlooptijd). Nieuw in
   `scripts/lib/hypo-features.mjs`: `mealOnset` (sterke stijging vanaf een bodem ≥ 15 min

@@ -202,6 +202,12 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
   }
   if (dropPct >= 30) reactiveScore += 2
   else if (dropPct >= 25) reactiveScore += 1
+  // Laag 4 — dagdeel-context: lunch/middagreacties zijn historisch relevanter,
+  // maar alleen als er al een echte post-piek daling is. Geen zelfstandig alarm.
+  if ((f.timeOfDay === 'middag' || f.timeOfDay === 'middag2') && fastReactive) {
+    reactiveScore += 1
+    reasons.push('Dagdeel past bij reactieve post-maaltijddaling')
+  }
   components.reactiveScore = reactiveScore
 
   // 4. Voorspelling (deterministisch, uit features)
@@ -213,6 +219,17 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
   if (f.minutesTo40 !== null && f.minutesTo40 >= 0 && f.minutesTo40 <= 20) {
     forecastScore += 3
     reasons.push(`Voorspeld onder 4.0 binnen ${Math.round(f.minutesTo40)} min`)
+  }
+  // Laag 1/3 — persoonlijke nadir-schatting uit vergelijkbare episodes. Dit is
+  // aanvullend bewijs naast rate/forecast; zonder genoeg matches blijft het neutraal.
+  if (pattern && num(pattern.similarEpisodeCount, 0) >= 5 && Number.isFinite(pattern.patternNadirMmol)) {
+    if (pattern.patternNadirMmol < TH.low) {
+      forecastScore += 2
+      reasons.push(`Vergelijkbare episodes hadden nadir rond ${pattern.patternNadirMmol} mmol/L`)
+    } else if (pattern.patternNadirMmol < TH.near) {
+      forecastScore += 1
+      reasons.push(`Vergelijkbare episodes kwamen rond ${pattern.patternNadirMmol} mmol/L`)
+    }
   }
   components.forecastScore = forecastScore
 
@@ -239,6 +256,21 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
     } else if (ratio >= 0.4) {
       patternScore = 1
     }
+  }
+  if (pattern && num(pattern.curveMatchCount, 0) >= 5) {
+    const curveRatio = num(pattern.curveHypoRatio, 0)
+    if (curveRatio >= 0.6) {
+      patternScore += 2
+      reasons.push(
+        `Curvevorm lijkt op ${pattern.curveMatchCount} eerdere episodes; ${pattern.curveHypoCount ?? '?'} gingen onder 4.5`,
+      )
+    } else if (curveRatio >= 0.4) {
+      patternScore += 1
+    }
+  }
+  if (pattern && pattern.weekdayRiskHigh && fastReactive) {
+    patternScore += 1
+    reasons.push(`Weekdag ${pattern.weekday} was historisch riskanter`)
   }
   components.patternScore = patternScore
 
@@ -276,6 +308,12 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
   if (f.recoverySignal) {
     dampingScore += 3
     if (current >= TH.near) reasons.push('Daling keert om')
+  }
+  // Nachtmetingen zijn gevoeliger voor compressie/ruis en minder vaak een maaltijdrespons.
+  // Maak V2 daar iets conservatiever, behalve bij duidelijke actuele/voorspelde low.
+  if (f.timeOfDay === 'nacht' && current >= TH.near && steepest > TH.veryFastFall) {
+    dampingScore += 1
+    reasons.push('Nachtcontext: conservatiever voor vals alarm')
   }
   // Niet dempen als het echt risicovol is (veiligheidsklep).
   if (current < TH.near || steepest <= TH.veryFastFall || (f.minutesTo40 !== null && f.minutesTo40 <= 15)) {
