@@ -84,7 +84,6 @@ services:
       - ./nightscout-overlay/certs:/etc/nginx/certs:ro
     ports:
       - "${NIGHTSCOUT_PORT:-1337}:1337"
-      - "443:443"
 
   libreview-sync:
     image: node:20-alpine
