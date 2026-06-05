@@ -106,7 +106,7 @@ Start handmatig dezelfde sync die de `Sync Libre` knop gebruikt.
 
 De `libreview-sync` service (poort 8787) biedt naast `/health` en `/sync`:
 
-- `GET /prediction/latest` — de nieuwste `prediction_snapshots` record. Bevat o.a. `modelVersion` (welk model de alarmbron is: `rules-v1.1` = V1, `reactive-hypo-v2` = V2 actief), `risk`/`riskScore`/`reasons`, `predictedMmol` per horizon 10/15/20/30/60/120/180, kansen `<4.5`/`<4.0`, `features` (incl. `acceleration`, `effectiveLagMinutes`, herstelsignalen, `spikeFiltered`), `rawCurrentMmol` wanneer een ruwe CGM-spike is gladgestreken, `predicted`, `pattern`, de V2 shadow-velden `shadowRisk`/`shadowScore`/`shadowConfidence`/`shadowReasons`/`shadowTuned`, en — als V2 actief is — `legacyRisk`/`legacyScore` (de V1-waarde ter vergelijking).
+- `GET /prediction/latest` — de nieuwste `prediction_snapshots` record. Bevat o.a. `modelVersion` (welk model de alarmbron is: `rules-v1.1` = V1, `reactive-hypo-v2` = V2 actief), `risk`/`riskScore`/`reasons`, `predictedMmol` per horizon 10/15/20/30/60/120/180, kansen `<4.5`/`<4.0`, `features` (incl. `acceleration`, `effectiveLagMinutes`, herstelsignalen, `spikeFiltered`, `dataQuality`), `rawCurrentMmol` wanneer een ruwe CGM-spike is gladgestreken, `predicted`, `pattern`, de V2 shadow-velden `shadowRisk`/`shadowScore`/`shadowConfidence`/`shadowReasons`/`shadowTuned`, en — als V2 actief is — `legacyRisk`/`legacyScore` (de V1-waarde ter vergelijking).
 - `GET /overlay/entries?count=N` — recente entries voor de overlay-grafiek.
 - `POST /feedback` — schrijft `user_feedback` (types: `confirmed`, `false_alarm`, `feels_hypo`, `ate_now`, `fingerstick_confirmed`). Endpoint blijft bestaan; de hypo-kaart heeft sinds kort geen feedbackknoppen meer.
 
@@ -151,6 +151,13 @@ npm run spike-filter:check
 
 Controleert de gedeelde Laag 9 spike-filter met een fixture (`172 -> 154 -> 172`) zodat
 historische single-point sensorartefacten worden gladgestreken zonder ruwe entries te overschrijven.
+
+```bash
+npm run data-quality:check
+```
+
+Controleert de Laag 10 data-quality gate: normale 1-min data, grote gaten, dubbele/out-of-order
+timestamps en oude laatste metingen. V1 en V2 gebruiken dezelfde `features.dataQuality`.
 
 ```bash
 npm run patterns:analyze
@@ -274,7 +281,7 @@ Afgerond:
 - policy-gestuurde training (`balanced` / `precision-first`)
 - forecast-horizons 10/15/20/30/60/120/180 (rate satureert vanaf >30 min)
 - `episode_vectors` + live similarity-correctie op de patrooncorrectie
-- `user_feedback` feedbackknoppen in de overlay-hypokaart
+- `user_feedback` endpoint voor feedbackregistratie
 
 Reactieve-hypo detector V2 (`hypo.md`):
 

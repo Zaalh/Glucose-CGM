@@ -21,9 +21,11 @@ Nederlands.
 - Voorspelling: weighted linear regression (geen quadratic), in de sync en overlay.
 - Predictie-pipeline (`scripts/`): `entry_features` → `pattern_events` → `prediction_snapshots`
   → evaluatie → modeltraining → export naar `scripts/risk-model-state.json`.
-- `episode_vectors` + live similarity-correctie en `user_feedback`-knoppen in de overlay-hypokaart.
+- `episode_vectors` + live similarity-correctie; `user_feedback` blijft als sync-endpoint bestaan.
 - Laag 9 spike-filter: gedeelde median-of-3 cleaning in sync, featurebuilder, backtest en tuner;
   ruwe Nightscout/LibreView entries worden niet overschreven.
+- Laag 10 data-quality gate: gedeelde `features.dataQuality` voor V1 en V2, zodat rommelige
+  timestamps/gaten escalaties dempen zonder actuele lage glucose te verbergen.
 
 > De oude React/Vite-frontend (`src/`) en Supabase-laag (`supabase/`) zijn verwijderd. Niet
 > opnieuw introduceren; bouw op de Nightscout/MongoDB-flow.
@@ -41,3 +43,4 @@ Nederlands.
 - Houd wijzigingen gericht op de Nightscout/MongoDB-flow.
 - Geen build-stap; check scripts met `node --check scripts/<file>.mjs`.
 - Pipeline-scripts draaien tegen de live MongoDB op de iMac (zie deployment-notities).
+- UI-tekst blijft Nederlands; de app is single-user.

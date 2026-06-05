@@ -41,8 +41,8 @@ mediaan **25 min** (snelste 16), onder 4.0 na **~22 min**. Kritieke venster: **e
   Daarom geen grove 3-venster-blend maar een **weighted linear regression over de laatste
   ~10-15 één-minuut-`sgv`-punten** (echte timestamps → een gemiste minuut deert niet),
   met median-guardrail tegen één-punts-ruis. De precomputed 5/10/15-vensters blijven als
-  goedkope fallback/cross-check. Geen kwadratische fit ([CLAUDE.md](CLAUDE.md) waarschuwt
-  daar terecht voor).
+  goedkope fallback/cross-check. Geen kwadratische fit; zie de projectafspraak in
+  [CGM.md](CGM.md) en [predict.md](predict.md).
 
 ### 2.2 Versnellingsterm (de kern van "snelheid klopt")
 - Echte versnelling, dimensioneel correct: `accel = (rate5m − rate15m) / Δt` in
@@ -153,7 +153,7 @@ trend én context sterk zijn* (predict.md-regel).
 **Evaluatie — `scripts/evaluate-predictions.mjs`**
 - hyper-uitkomsten (`gt100`/`gt139`) en lead-time **per meal-state** meten
 
-**Docs — [CLAUDE.md](CLAUDE.md), [predict.md](predict.md)**
+**Docs — [CGM.md](CGM.md), [predict.md](predict.md)**
 - live-flow = sync + overlay; meal-state, hyper-probs en model-state-lezen documenteren
 
 ## 4. Fasering

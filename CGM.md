@@ -100,9 +100,11 @@ Reactieve-hypo detector V2 (`hypo.md`): bouwt `reactive_hypo_episodes`, draait d
 ```bash
 npm run detector:fixtures
 npm run episodes:check
+npm run spike-filter:check
+npm run data-quality:check
 ```
 
-Lokale sanity-checks zonder database: de V2-detector op fixtures en de episode-builder op een synthetische timeline (`node --check`-vriendelijk).
+Lokale sanity-checks zonder database: de V2-detector op fixtures, de episode-builder op een synthetische timeline, de Laag 9 spike-filter en de Laag 10 data-quality gate (`node --check`-vriendelijk).
 
 ```bash
 npm run hypo:report -- --days 1      # dagrapport
@@ -257,6 +259,7 @@ De live setup is geverifieerd met InfluxDB `1.8.10`, Grafana `11.5.2`, datasourc
 - `scripts/libreview-nightscout-sync.mjs`: Lokale sync van LibreView naar Nightscout; schrijft `prediction_snapshots` (V1 + V2 shadow) en glucose/rate naar InfluxDB.
 - `scripts/lib/hypo-features.mjs`: Pure featurebuilder (`buildHypoFeatures`), gedeeld door live en backtest.
 - `scripts/run-spike-filter-check.mjs`: regressiecheck voor Laag 9 (`172 -> 154 -> 172` single-point spike).
+- `scripts/run-data-quality-check.mjs`: regressiecheck voor Laag 10 (gaten, dubbele/out-of-order timestamps, stale data).
 - `scripts/lib/reactive-hypo-detector.mjs`: V2 reactieve-hypo detector (`evaluateReactiveHypoRiskV2`), tunebaar via params.
 - `scripts/lib/episode-similarity.mjs`: gedeelde episode-similarity (`findSimilarEpisodes` + `patternFromFeatures`); voedt het `pattern`-object (component 6 / `patternScore`) in live-sync, backtest én tuner identiek.
 - `scripts/lib/episode-builder.mjs` + `scripts/build-reactive-hypo-episodes.mjs`: bouwt `reactive_hypo_episodes`.
