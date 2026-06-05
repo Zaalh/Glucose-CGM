@@ -15,7 +15,7 @@ Belangrijk voor onze voorspelling:
 - De relevante horizon is vooral 10, 15, 20, 30 en 60 minuten, met 120 en 180 minuten als secundaire vensters.
 - Een "bijna hypo" is ook belangrijk, bijvoorbeeld onder 4.5 mmol/L, omdat jouw data al laat zien dat dit vaak voorafgaat aan echte hypo's.
 
-## Implementatiestatus (bijgewerkt 2026-05-30)
+## Implementatiestatus (bijgewerkt 2026-06-05)
 
 Dit plan is deels gebouwd. Onderstaand overzicht houdt bij wat af is en wat nog open staat. De rest van dit document blijft de volledige specificatie/roadmap.
 
@@ -29,6 +29,9 @@ Dit plan is deels gebouwd. Onderstaand overzicht houdt bij wat af is en wat nog 
 - **`daily_summaries`**: aggregatie via `scripts/summarize-days.mjs`.
 - **Regelgebaseerde risicoscore (uitlegbaar)**: `evaluateRiskRuleV1` in de sync (`scripts/libreview-nightscout-sync.mjs`). Niveaus low/watch/high/urgent, met drempels uit `model_state` / `scripts/risk-model-state.json`.
 - **Live UI**: nginx-overlay `nightscout-overlay/rate-overlay.js` toont rates, forecast-lijn, hypo-risico (peak-drop watch/high/urgent) en forecast-calibratie op poort 1337.
+- **Reactieve-hypo V2 in shadow-mode**: gedeelde featurebuilder/detector met persoonlijke nadir-, curve-, dagdeel- en weekday-context; V1 blijft alarmbron tot de kwaliteitsgate slaagt.
+- **Laag 9 spike-filter**: gedeelde median-of-3 cleaning voor single-point sensorartefacten in sync, features, backtest en tuner. Ruwe CGM-entries worden niet overschreven; snapshots tonen `spikeFiltered` en waar nodig `rawCurrentMmol`.
+- **AI-review voorbereid**: `scripts/ai-review.mjs` / `npm run ai:review` gebruikt een OpenAI-compatible `/v1/chat/completions` endpoint zodra `AI_CHAT_BASE_URL`, `AI_CHAT_API_KEY` en `AI_CHAT_MODEL` gezet zijn. Schrijft alleen observaties/vragen.
 
 ### Recent afgemaakt (2026-05-30)
 

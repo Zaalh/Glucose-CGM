@@ -22,6 +22,8 @@ Nederlands.
 - Predictie-pipeline (`scripts/`): `entry_features` → `pattern_events` → `prediction_snapshots`
   → evaluatie → modeltraining → export naar `scripts/risk-model-state.json`.
 - `episode_vectors` + live similarity-correctie en `user_feedback`-knoppen in de overlay-hypokaart.
+- Laag 9 spike-filter: gedeelde median-of-3 cleaning in sync, featurebuilder, backtest en tuner;
+  ruwe Nightscout/LibreView entries worden niet overschreven.
 
 > De oude React/Vite-frontend (`src/`) en Supabase-laag (`supabase/`) zijn verwijderd. Niet
 > opnieuw introduceren; bouw op de Nightscout/MongoDB-flow.

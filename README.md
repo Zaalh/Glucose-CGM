@@ -106,7 +106,7 @@ Start handmatig dezelfde sync die de `Sync Libre` knop gebruikt.
 
 De `libreview-sync` service (poort 8787) biedt naast `/health` en `/sync`:
 
-- `GET /prediction/latest` — de nieuwste `prediction_snapshots` record. Bevat o.a. `modelVersion` (welk model de alarmbron is: `rules-v1.1` = V1, `reactive-hypo-v2` = V2 actief), `risk`/`riskScore`/`reasons`, `predictedMmol` per horizon 10/15/20/30/60/120/180, kansen `<4.5`/`<4.0`, `features` (incl. `acceleration`, `effectiveLagMinutes`, herstelsignalen), `predicted`, `pattern`, de V2 shadow-velden `shadowRisk`/`shadowScore`/`shadowConfidence`/`shadowReasons`/`shadowTuned`, en — als V2 actief is — `legacyRisk`/`legacyScore` (de V1-waarde ter vergelijking).
+- `GET /prediction/latest` — de nieuwste `prediction_snapshots` record. Bevat o.a. `modelVersion` (welk model de alarmbron is: `rules-v1.1` = V1, `reactive-hypo-v2` = V2 actief), `risk`/`riskScore`/`reasons`, `predictedMmol` per horizon 10/15/20/30/60/120/180, kansen `<4.5`/`<4.0`, `features` (incl. `acceleration`, `effectiveLagMinutes`, herstelsignalen, `spikeFiltered`), `rawCurrentMmol` wanneer een ruwe CGM-spike is gladgestreken, `predicted`, `pattern`, de V2 shadow-velden `shadowRisk`/`shadowScore`/`shadowConfidence`/`shadowReasons`/`shadowTuned`, en — als V2 actief is — `legacyRisk`/`legacyScore` (de V1-waarde ter vergelijking).
 - `GET /overlay/entries?count=N` — recente entries voor de overlay-grafiek.
 - `POST /feedback` — schrijft `user_feedback` (types: `confirmed`, `false_alarm`, `feels_hypo`, `ate_now`, `fingerstick_confirmed`). Endpoint blijft bestaan; de hypo-kaart heeft sinds kort geen feedbackknoppen meer.
 
@@ -144,6 +144,13 @@ Optionele AI-laag. Leest recente `prediction_snapshots` en schrijft, als `--dry-
 weg is, alleen naar `ai_observations` en `ai_questions`. Staat standaard uit totdat
 `AI_CHAT_BASE_URL`, `AI_CHAT_API_KEY` en `AI_CHAT_MODEL` zijn gezet. Gebruikt een
 OpenAI-compatible `/v1/chat/completions` endpoint en neemt nooit alarmbeslissingen.
+
+```bash
+npm run spike-filter:check
+```
+
+Controleert de gedeelde Laag 9 spike-filter met een fixture (`172 -> 154 -> 172`) zodat
+historische single-point sensorartefacten worden gladgestreken zonder ruwe entries te overschrijven.
 
 ```bash
 npm run patterns:analyze
@@ -280,18 +287,21 @@ Reactieve-hypo detector V2 (`hypo.md`):
 - Sync past geleerde params toe op V2 shadow (`shadowTuned`)
 - M6 auto-activatie met kwaliteitsgate (gewapend; activeert vanzelf zodra V2 ≥ V1 op
   out-of-sample data en genoeg events)
-- Slimmere features (stap 1 t/m 8): `acceleration`, herstelsignalen, persoonlijke
-  nadir/curve/weekdag-patronen, dagdeel-context en variabele CGM-lag
+- Slimmere features (stap 1 t/m 9): `acceleration`, herstelsignalen, persoonlijke
+  nadir/curve/weekdag-patronen, dagdeel-context, variabele CGM-lag en gedeelde
+  median-of-3 spike-filter
 - V1- én V2-regel naast elkaar in de hypo-kaart (V2 met `confidence %`, redenen in tooltip);
   sync-risk mag het kaart-alarm escaleren (nooit verlagen)
 - V2 krijgt dezelfde persoonlijke episode-vergelijking (`pattern`) als V1 in de live-sync;
   sinds 2026-06-04 ook in backtest en auto-tuner (gedeelde `scripts/lib/episode-similarity.mjs`),
   zodat train/serve gelijk zijn
 
-Verbeterd voorspellingsplan: `hypo.md` beschrijft 8 voorgestelde lagen (nadir-schatting,
-curvevorm-match, dagdeel-context, weekdag-patroon, meal-onset detector). Stap 1 t/m 8 zijn
-gebouwd. Stap 8 (meal-onset) waarschuwt al in de stijgende
-fase: een lage `watch` zodra een maaltijdpiek begint (~10-15 min eerder dan de daling).
+Verbeterd voorspellingsplan: `hypo.md` beschrijft 9 gebouwde lagen (nadir-schatting,
+curvevorm-match, dagdeel-context, weekdag-patroon, meal-onset detector en spike-filter).
+Stap 9 filtert single-point ruispieken met een gedeelde median-of-3 cleaning in sync,
+features, backtest en tuner; ruwe CGM-entries blijven ongewijzigd. Stap 8 (meal-onset)
+waarschuwt al in de stijgende fase: een lage `watch` zodra een maaltijdpiek begint
+(~10-15 min eerder dan de daling).
 
 Nog open (databottleneck, niet code):
 
