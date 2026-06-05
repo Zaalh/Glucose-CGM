@@ -76,9 +76,15 @@ function pickBest(results) {
 
 function tune(timeline, options = {}) {
   if (timeline.length < 20) return { ok: false, reason: 'te weinig data' }
-  const t0 = timeline[0].date
-  const t1 = timeline[timeline.length - 1].date
-  const splitMs = t0 + (t1 - t0) * (options.trainFraction ?? TRAIN_FRACTION)
+  // Split op reading-index, niet op kalendertijd. De datadichtheid is sterk
+  // ongelijk (sparse history-backfill in april vs. dichte 1-min-stroom vanaf eind
+  // mei), dus 70% van de wandklok kan bijna geen metingen — en 0 hypo-events —
+  // bevatten, waardoor de gate degenereert. 70% van de gesorteerde readings houdt
+  // de split temporeel (één tijdsgrens, geen leakage) maar verdeelt de events
+  // evenredig met de datadichtheid, zodat train én test events krijgen.
+  const frac = options.trainFraction ?? TRAIN_FRACTION
+  const splitIdx = Math.min(timeline.length - 1, Math.max(1, Math.floor(timeline.length * frac)))
+  const splitMs = timeline[splitIdx].date
   // episode_vectors meegeven zodat V2 in train/test hetzelfde pattern (component 6 /
   // patternScore) krijgt als de live-sync — anders tunen we op een andere score dan
   // we serveren. Matcht de live-sync, die de volledige vectorset gebruikt.
@@ -108,6 +114,9 @@ function tune(timeline, options = {}) {
     degenerate,
     split: {
       at: new Date(splitMs).toISOString(),
+      by: 'reading-index',
+      splitIndex: splitIdx,
+      totalReadings: timeline.length,
       trainFraction: options.trainFraction ?? TRAIN_FRACTION,
       trainHypoOnsets: trainCtx.hypoOnsets.length,
       testHypoOnsets: testCtx.hypoOnsets.length,
