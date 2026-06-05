@@ -1798,16 +1798,34 @@ echte snelle daling (die blijft de minuut erna staan).
 
 **Hard principe:** nooit `entries.sgv` overschrijven — de ruwe meting blijft de bron
 van waarheid. Het filter werkt alleen op de **werk-timeline** die rates en features
-voedt (`addRateFields`/`calculateRates` in `libreview-nightscout-sync.mjs`).
+voedt. In live zijn dat minimaal drie paden:
+
+- `addRateFields` / `calculateRates` in `libreview-nightscout-sync.mjs`
+  (`glucoseRateMmolPerMin`, overlay/Influx/diagnostiek, incl. `rate1m`);
+- `calcRateFromTimeline` in `libreview-nightscout-sync.mjs` (V1/snapshot-forecast);
+- `buildHypoFeatures` / `calcRate` in `hypo-features.mjs` (V2 live, backtest en tuner).
+
+De filter moet dus vóór al deze rate-berekeningen op dezelfde werk-timeline worden
+toegepast; anders kan de overlay schoner/vuiler zijn dan V1/V2.
 
 **Train/serve-pariteit (verplicht):** exact hetzelfde filter, dezelfde drempel en
-dezelfde median-logica moeten ook offline draaien in `hypo-features.mjs` en in de
-backfill, anders test de backtest schonere/vuilere data dan live. Eén gedeelde functie,
-in beide paden aangeroepen.
+dezelfde median-logica moeten live, backtest en tuner gebruiken. Praktisch betekent
+dit: één gedeelde Node/ESM-helper voor de live sync en `hypo-features.mjs`. Legacy
+Mongo-shell backfill-scripts kunnen die ESM-helper niet direct importeren; voor echte
+backfill-pariteit zijn er twee veilige opties:
+
+1. backfill naar Node migreren en dezelfde helper gebruiken; of
+2. legacy backfill ongemoeid laten en Laag 9 expliciet beperken tot live snapshots +
+   V2 backtest/tuner, totdat die scripts gemigreerd zijn.
+
+Geen derde, afwijkende median-implementatie in Mongo-shell kopiëren tenzij er een
+regressietest is die live/offline/backfill exact vergelijkt.
 
 **Acceptatie:** het artefact 172→154→172 produceert na filtering geen `|rate1m| > 0.5`
-en flipt `isAcceleratingDown` niet; backtest-precision en -recall blijven gelijk of
-beter (we verwachten minder vals alarm, geen extra gemiste hypo's).
+in de algemene rate-output, veroorzaakt geen valse `rate5m`/`rate10m`-drop, trekt
+`maxFallRate30m` niet kunstmatig omlaag en flipt `isAcceleratingDown` niet. De V2
+fixtures en backtest blijven op recall gelijk en precision gelijk of beter (we
+verwachten minder vals alarm, geen extra gemiste hypo's).
 
 ### Bouwen in deze volgorde
 
