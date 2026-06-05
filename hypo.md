@@ -607,6 +607,15 @@ offline in de backtest worden gebruikt, anders testen we iets anders dan live.
 - `isAcceleratingDown`: daling wordt sneller.
 - `isRecovering`: rate wordt minder negatief of positief.
 
+> **Ruisnuance (gemeten op live data, 4 uur / 229 readings):** de korte vensters
+> zijn ruis-gedomineerd. Gemeten spreiding van de rate per venster:
+> 1m sd ≈ 0.16, 5m ≈ 0.11, 15m ≈ 0.08, 30m ≈ 0.06, 60m ≈ 0.04 mmol/L/min — het
+> 60m-venster is ~4× rustiger dan 1m. De `sgv` wordt als heel getal mg/dL opgeslagen,
+> dus de kwantisatie-vloer op 1m is al ~0.055 mmol/L/min; de rest is sensor-jitter.
+> Conclusie: gebruik `rate1m`/`rate2m` alleen voor *richtingskentering*, nooit als
+> losse helling. `blendedRate` moet de lange vensters zwaarder wegen, en
+> `isAcceleratingDown` mag niet op één 1m-stap kunnen omklappen. Zie Laag 9.
+
 ### Piek/drop features
 
 - `peakMmol120m`: hoogste waarde in laatste 120 minuten.
@@ -1608,7 +1617,7 @@ Op basis van de episode-data:
 5. **Nacht verschilt van dag**: compressie-lows, sensorlag en geen maaltijden
    vragen een andere gevoeligheid.
 
-### Verbeteringen: 8 concrete lagen
+### Verbeteringen: 9 concrete lagen
 
 #### Laag 1 — Nadir-voorspelling in plaats van lineaire extrapolatie
 
@@ -1751,6 +1760,55 @@ Dan al in de stijgende fase een lage `watch` geven als:
 Dit geeft je 10-15 min extra voorlooptijd ten opzichte van nu (nu begint de
 detector pas te reageren als de daling begonnen is).
 
+#### Laag 9 — Input-cleaning: single-point spike-filter vóór de rate-berekening
+
+Alle lagen hierboven nemen schone invoer aan. Maar de ruwe LibreLink-stream bevat
+**single-point artefacten** die de korte rates laten ontploffen. Gemeten op live data:
+
+```
+22:04:36   172 → 154   (−18 mg/dL in 1 min)
+22:05:36   154 → 172   (+18 mg/dL in 1 min)
+```
+
+Eén losse meting (154) tussen twee correcte waarden (172) — fysiologisch onmogelijk
+om in 1 min ~1 mmol/L te dalen en in de minuut erna exact terug te veren. Dat ene
+punt levert al een `rate1m` van ±0.98 mmol/L/min op. Slechts ~5 van de 239 sprongen
+waren ≥ 8 mg/dL, maar die paar punten domineren de spreiding (1m sd 0.17 vs
+kwantisatie-vloer 0.055). Onbehandeld kan zo'n dropout een vals alarm of een valse
+`isAcceleratingDown` triggeren.
+
+**Filter (historische punten — niet-causaal, buren bestaan):**
+
+```
+Voor punt p met buur-voor a en buur-na c, alle ~1 min uit elkaar:
+  med     = median(a, p, c)
+  isSpike = |p - med| > SPIKE_THRESHOLD_MGDL (≈ 8 mg/dL)
+            EN |a - c| < SPIKE_THRESHOLD_MGDL          # buren zijn het eens
+  → p telt niet mee als baseline/eindpunt voor rates/features;
+    gebruik in de werk-timeline med (of lineaire interpolatie a→c) i.p.v. p.
+```
+
+**Filter (huidige punt — causaal, geen toekomst):** voor de laatste meting bestaat
+nog geen buur-na. Regel "bevestigen vóór vertrouwen": als de nieuwste waarde een
+verdachte sprong is t.o.v. het recente niveau (`|p − baseline| > SPIKE_THRESHOLD`)
+terwijl de rate dáárvoor vlak was, **upgrade dan niet** naar een nieuw/zwaarder alarm
+en zet `isAcceleratingDown` niet op één stap; wacht de volgende reading (≈ 1 min) af
+die het bevestigt of verwerpt. Zo reageren we niet op een dropout én missen we geen
+echte snelle daling (die blijft de minuut erna staan).
+
+**Hard principe:** nooit `entries.sgv` overschrijven — de ruwe meting blijft de bron
+van waarheid. Het filter werkt alleen op de **werk-timeline** die rates en features
+voedt (`addRateFields`/`calculateRates` in `libreview-nightscout-sync.mjs`).
+
+**Train/serve-pariteit (verplicht):** exact hetzelfde filter, dezelfde drempel en
+dezelfde median-logica moeten ook offline draaien in `hypo-features.mjs` en in de
+backfill, anders test de backtest schonere/vuilere data dan live. Eén gedeelde functie,
+in beide paden aangeroepen.
+
+**Acceptatie:** het artefact 172→154→172 produceert na filtering geen `|rate1m| > 0.5`
+en flipt `isAcceleratingDown` niet; backtest-precision en -recall blijven gelijk of
+beter (we verwachten minder vals alarm, geen extra gemiste hypo's).
+
 ### Bouwen in deze volgorde
 
 | Stap | Onderdeel | Impact | Werk | Status |
@@ -1763,10 +1821,13 @@ detector pas te reageren als de daling begonnen is).
 | 6 | Variabele sensorlag | realistischer CGM-lag | klein | ✅ af |
 | 7 | Weekdag-patroon terugkoppelen | patroon-bewust | middel | ✅ af |
 | 8 | Meal-onset vroege detector | 10-15 min eerder | groot | ✅ af |
+| 9 | Spike-filter op ruwe glucose (input-cleaning) | dempt vals alarm + ruis | klein | ⬜ voorstel |
 
 Stap 1-2 en 6 zijn kleine wijzigingen in `hypo-features.mjs` en de detector,
 geen database-werk. Stap 3 en 5 vereisen curve-vergelijking live; bouwen na
-stap 1-2 zodat de precision al omhoog is.
+stap 1-2 zodat de precision al omhoog is. Stap 9 is foundationeel — alle andere
+lagen nemen schone invoer aan — en klein qua werk; het is de logische volgende stap
+nu 1-8 af zijn.
 
 ### Acceptatiecriterium
 
