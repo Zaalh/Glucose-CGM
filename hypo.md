@@ -1833,6 +1833,32 @@ in de algemene rate-output, veroorzaakt geen valse `rate5m`/`rate10m`-drop, trek
 fixtures en backtest blijven op recall gelijk en precision gelijk of beter (we
 verwachten minder vals alarm, geen extra gemiste hypo's).
 
+#### Laag 10 — Data-quality gate vóór V1 en V2 — **GEBOUWD**
+
+> **Status: af.** `hypo-features.mjs` levert nu `features.dataQuality` via
+> `assessTimelineQuality`. De live sync geeft dezelfde quality-info aan V1 en V2.
+> Actuele lage glucose blijft altijd leidend; alleen rate-/forecast-/context-escalatie
+> wordt conservatiever als de data `watch` of `degraded` is. Regressie:
+> `npm run data-quality:check`.
+
+De gate kijkt naar de kwaliteit van de recente tijdreeks, niet naar de medische
+betekenis van de waarde zelf. Flags:
+
+- `stale`: laatste LibreView-meting is ouder dan de ingestelde grens;
+- `largeGap`: groot gat in recente timestamps;
+- `duplicateTimestamp`: twee meetpunten met exact dezelfde timestamp;
+- `outOfOrder`: timestamps lopen niet strikt op;
+- `sparseRecentData`: te weinig punten over een langere recente span;
+- `futureTimestamp`: timestamp ligt duidelijk in de toekomst.
+
+De output bevat `level` (`good`/`watch`/`degraded`), `score`, `reasons`,
+`recentCount`, `recentSpanMinutes`, `largestGapSeconds`, `medianIntervalSeconds`,
+`expectedIntervalSeconds` en `ageSeconds`.
+
+**Gedrag:** V1 en V2 mogen bij slechte datakwaliteit nog steeds waarschuwen, maar
+geen harde escalatie baseren op alleen een twijfelachtige rate of context. Een
+actuele waarde onder 4.5/4.0 mmol/L wordt niet weggedempt door deze gate.
+
 ### Bouwen in deze volgorde
 
 | Stap | Onderdeel | Impact | Werk | Status |
@@ -1846,12 +1872,13 @@ verwachten minder vals alarm, geen extra gemiste hypo's).
 | 7 | Weekdag-patroon terugkoppelen | patroon-bewust | middel | ✅ af |
 | 8 | Meal-onset vroege detector | 10-15 min eerder | groot | ✅ af |
 | 9 | Spike-filter op ruwe glucose (input-cleaning) | dempt vals alarm + ruis | klein | ✅ af |
+| 10 | Data-quality gate voor V1 + V2 | dempt escalatie bij rommelige timestamps | klein | ✅ af |
 
 Stap 1-2 en 6 zijn kleine wijzigingen in `hypo-features.mjs` en de detector,
 geen database-werk. Stap 3 en 5 vereisen curve-vergelijking live; bouwen na
 stap 1-2 zodat de precision al omhoog is. Stap 9 is foundationeel — alle andere
-lagen nemen schone invoer aan — en klein qua werk; het is de logische volgende stap
-nu 1-8 af zijn.
+lagen nemen schone invoer aan. Stap 10 beschermt V1 en V2 tegen rommelige
+LibreView-timestamps zonder echte lage waarden te onderdrukken.
 
 ### Acceptatiecriterium
 

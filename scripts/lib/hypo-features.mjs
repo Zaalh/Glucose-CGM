@@ -23,6 +23,10 @@ const CURVE_TOTAL_POINTS = 24
 export const SPIKE_FILTER_THRESHOLD_MGDL = 8
 const SPIKE_FILTER_MIN_GAP_MS = 30_000
 const SPIKE_FILTER_MAX_GAP_MS = 150_000
+const QUALITY_EXPECTED_INTERVAL_MS = 60_000
+const QUALITY_MAX_NORMAL_GAP_MS = 150_000
+const QUALITY_MAX_STALE_SECONDS = 10 * 60
+const QUALITY_RECENT_WINDOW_MINUTES = 30
 
 // Stap 8 — meal-onset: een maaltijdrespons is begonnen als de glucose duidelijk
 // stijgt vanaf een lokale bodem die al ≥ 15 min geleden ligt (geen 1-punts blip).
@@ -97,6 +101,117 @@ export function cleanGlucoseTimeline(timeline, options = {}) {
       spikeFiltered: true,
     }
   })
+}
+
+export function assessTimelineQuality(timeline, latestIndex, options = {}) {
+  const latest = timeline[latestIndex]
+  if (!latest) {
+    return {
+      level: 'degraded',
+      score: 0,
+      reasons: ['Geen laatste meting beschikbaar'],
+      flags: { missingLatest: true },
+    }
+  }
+
+  const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : null
+  const recentWindowMinutes = Number.isFinite(options.recentWindowMinutes)
+    ? options.recentWindowMinutes
+    : QUALITY_RECENT_WINDOW_MINUTES
+  const maxNormalGapMs = Number.isFinite(options.maxNormalGapMs)
+    ? options.maxNormalGapMs
+    : QUALITY_MAX_NORMAL_GAP_MS
+  const maxStaleSeconds = Number.isFinite(options.maxStaleSeconds)
+    ? options.maxStaleSeconds
+    : QUALITY_MAX_STALE_SECONDS
+
+  const fromMs = latest.date - recentWindowMinutes * 60_000
+  const recent = []
+  for (let i = 0; i <= latestIndex; i += 1) {
+    const entry = timeline[i]
+    if (!entry || !Number.isFinite(Number(entry.date))) continue
+    if (entry.date >= fromMs && entry.date <= latest.date) recent.push(entry)
+  }
+
+  const flags = {
+    missingLatest: false,
+    stale: false,
+    duplicateTimestamp: false,
+    outOfOrder: false,
+    largeGap: false,
+    sparseRecentData: false,
+    futureTimestamp: false,
+  }
+  const reasons = []
+  let largestGapSeconds = 0
+  let medianIntervalSeconds = null
+  const intervals = []
+  const seen = new Set()
+
+  for (let i = 0; i < recent.length; i += 1) {
+    const time = Number(recent[i].date)
+    if (seen.has(time)) flags.duplicateTimestamp = true
+    seen.add(time)
+    if (i > 0) {
+      const prev = Number(recent[i - 1].date)
+      const gap = time - prev
+      if (gap <= 0) flags.outOfOrder = true
+      else {
+        intervals.push(gap / 1000)
+        largestGapSeconds = Math.max(largestGapSeconds, gap / 1000)
+        if (gap > maxNormalGapMs) flags.largeGap = true
+      }
+    }
+  }
+
+  if (intervals.length) {
+    const sorted = [...intervals].sort((a, b) => a - b)
+    medianIntervalSeconds = sorted[Math.floor(sorted.length / 2)]
+  }
+
+  const recentSpanMinutes = recent.length > 1
+    ? (Number(recent[recent.length - 1].date) - Number(recent[0].date)) / 60_000
+    : 0
+  if (recentSpanMinutes >= 10 && recent.length < Math.max(5, Math.floor(recentSpanMinutes / 2))) {
+    flags.sparseRecentData = true
+  }
+
+  let ageSeconds = null
+  if (nowMs !== null) {
+    ageSeconds = Math.round((nowMs - latest.date) / 1000)
+    if (ageSeconds > maxStaleSeconds) flags.stale = true
+    if (ageSeconds < -120) flags.futureTimestamp = true
+  }
+
+  if (flags.stale) reasons.push('Laatste LibreView-meting is oud')
+  if (flags.futureTimestamp) reasons.push('Laatste timestamp ligt in de toekomst')
+  if (flags.largeGap) reasons.push(`Gat in recente metingen (${Math.round(largestGapSeconds)} sec)`)
+  if (flags.duplicateTimestamp) reasons.push('Dubbele timestamp in recente metingen')
+  if (flags.outOfOrder) reasons.push('Timestamps lopen niet oplopend')
+  if (flags.sparseRecentData) reasons.push('Weinig recente metingen voor betrouwbare trend')
+
+  let score = 1
+  if (flags.stale || flags.futureTimestamp || flags.outOfOrder) score -= 0.45
+  if (flags.largeGap) score -= 0.25
+  if (flags.duplicateTimestamp) score -= 0.2
+  if (flags.sparseRecentData) score -= 0.15
+  score = clamp(score, 0, 1)
+
+  const level = score >= 0.85 ? 'good' : score >= 0.6 ? 'watch' : 'degraded'
+
+  return {
+    level,
+    score: round(score, 3),
+    reasons,
+    flags,
+    recentCount: recent.length,
+    recentWindowMinutes,
+    recentSpanMinutes: round(recentSpanMinutes, 1),
+    largestGapSeconds: round(largestGapSeconds, 1),
+    medianIntervalSeconds: medianIntervalSeconds === null ? null : round(medianIntervalSeconds, 1),
+    expectedIntervalSeconds: round(QUALITY_EXPECTED_INTERVAL_MS / 1000, 0),
+    ageSeconds,
+  }
 }
 
 // Slope in mmol/L/min over ~minutesBack, gemeten vanaf de meting op-of-vóór het
@@ -262,6 +377,7 @@ export function buildHypoFeatures(timeline, idx, options = {}) {
   const timeZone = options.timeZone || DEFAULT_TIME_ZONE
   const currentMmol = toMmol(latest.sgv)
   const previousMmol = idx > 0 ? toMmol(workTimeline[idx - 1].sgv) : null
+  const dataQuality = assessTimelineQuality(workTimeline, idx, { nowMs, ...options.dataQuality })
 
   const rate5m = calcRate(workTimeline, idx, 5)
   const rate10m = calcRate(workTimeline, idx, 10)
@@ -341,6 +457,7 @@ export function buildHypoFeatures(timeline, idx, options = {}) {
     spikeFiltered: Boolean(latest.spikeFiltered),
     rawSgv: latest.rawSgv ?? null,
     ageSeconds: nowMs === null ? null : Math.max(0, Math.round((nowMs - latest.date) / 1000)),
+    dataQuality,
     // speed
     rate5m: round(rate5m, 4),
     rate10m: round(rate10m, 4),

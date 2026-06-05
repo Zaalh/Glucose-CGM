@@ -287,21 +287,24 @@ Reactieve-hypo detector V2 (`hypo.md`):
 - Sync past geleerde params toe op V2 shadow (`shadowTuned`)
 - M6 auto-activatie met kwaliteitsgate (gewapend; activeert vanzelf zodra V2 ≥ V1 op
   out-of-sample data en genoeg events)
-- Slimmere features (stap 1 t/m 9): `acceleration`, herstelsignalen, persoonlijke
+- Slimmere features (stap 1 t/m 10): `acceleration`, herstelsignalen, persoonlijke
   nadir/curve/weekdag-patronen, dagdeel-context, variabele CGM-lag en gedeelde
-  median-of-3 spike-filter
+  median-of-3 spike-filter plus datakwaliteitsflags
 - V1- én V2-regel naast elkaar in de hypo-kaart (V2 met `confidence %`, redenen in tooltip);
   sync-risk mag het kaart-alarm escaleren (nooit verlagen)
 - V2 krijgt dezelfde persoonlijke episode-vergelijking (`pattern`) als V1 in de live-sync;
   sinds 2026-06-04 ook in backtest en auto-tuner (gedeelde `scripts/lib/episode-similarity.mjs`),
   zodat train/serve gelijk zijn
 
-Verbeterd voorspellingsplan: `hypo.md` beschrijft 9 gebouwde lagen (nadir-schatting,
-curvevorm-match, dagdeel-context, weekdag-patroon, meal-onset detector en spike-filter).
+Verbeterd voorspellingsplan: `hypo.md` beschrijft 10 gebouwde lagen (nadir-schatting,
+curvevorm-match, dagdeel-context, weekdag-patroon, meal-onset detector, spike-filter
+en data-quality gate).
 Stap 9 filtert single-point ruispieken met een gedeelde median-of-3 cleaning in sync,
-features, backtest en tuner; ruwe CGM-entries blijven ongewijzigd. Stap 8 (meal-onset)
-waarschuwt al in de stijgende fase: een lage `watch` zodra een maaltijdpiek begint
-(~10-15 min eerder dan de daling).
+features, backtest en tuner; ruwe CGM-entries blijven ongewijzigd. Stap 10 markeert
+timestamp-/datakwaliteit en dempt V1/V2 escalatie als de input twijfelachtig is,
+zonder actuele lage glucose te verbergen. Stap 8 (meal-onset) waarschuwt al in de
+stijgende fase: een lage `watch` zodra een maaltijdpiek begint (~10-15 min eerder
+dan de daling).
 
 Nog open (databottleneck, niet code):
 

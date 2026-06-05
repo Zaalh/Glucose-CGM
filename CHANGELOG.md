@@ -12,6 +12,12 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Gewijzigd
 
+- **Data-quality gate voor V1 + V2 (Laag 10)** — `hypo-features.mjs` levert nu
+  `features.dataQuality` met flags voor oude metingen, grote gaten, dubbele
+  timestamps, out-of-order timestamps, sparse recente data en toekomsttimestamps.
+  V1 en V2 lezen dezelfde quality-info: actuele lage glucose blijft altijd leidend,
+  maar rate-/forecast-/context-escalaties worden conservatiever bij `watch` of
+  `degraded` datakwaliteit. Regressie: `npm run data-quality:check`.
 - **Spike-filter voor ruwe glucose-invoer (Laag 9)** — gedeelde
   `cleanGlucoseTimeline` / `isSinglePointSpike` in `hypo-features.mjs` filtert
   single-point artefacten met median-of-3 op de werk-timeline. De live sync gebruikt

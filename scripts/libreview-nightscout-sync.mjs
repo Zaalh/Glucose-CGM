@@ -211,6 +211,9 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
       ? findSimilarEpisodes({ peakMmol, dropFromPeakMmol, minutesSincePeak }, episodeVectors)
       : null
 
+    const shadowFeaturesFull = buildHypoFeatures(workTimeline, idx, { nowMs: entry.date, cleanTimeline: false })
+    const features = shadowFeaturesFull
+
     const risk = evaluateRiskRuleV1({
       currentMmol,
       rate5m,
@@ -220,6 +223,7 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
       minutesSincePeak,
       dropFromPeakMmol,
       dropFromPeakPercent,
+      dataQuality: features.dataQuality,
     })
     if (similar && similar.count >= 3 && similar.hypoRatio >= 0.5) {
       risk.reasons = risk.reasons.concat(
@@ -243,13 +247,6 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
     const lagAdjustedMmol = Number.isFinite(blendedRate)
       ? round(currentMmol + blendedRate * CGM_LAG_MINUTES, 3)
       : null
-
-    // Vlakke featureset naast de ruwe snapshot — live en (later) backtest delen
-    // straks dezelfde featurebuilder; voor nu leggen we vast wat al berekend is.
-    // Gebruik de gedeelde featurebuilder zodat snapshot en V2-shadow
-    // altijd dezelfde features bevatten (inclusief acceleration, isDecelerating, etc).
-    const shadowFeaturesFull = buildHypoFeatures(workTimeline, idx, { nowMs: entry.date, cleanTimeline: false })
-    const features = shadowFeaturesFull
 
     const predicted = {
       mmol10: forecast.predictedMmol['10'] ?? null,
@@ -491,6 +488,10 @@ function evaluateRiskRuleV1(input) {
   const rate5m = Number.isFinite(input.rate5m) ? input.rate5m : null
   const rate10m = Number.isFinite(input.rate10m) ? input.rate10m : null
   const rate15m = Number.isFinite(input.rate15m) ? input.rate15m : null
+  const dataQuality = input.dataQuality || null
+  const qualityLevel = dataQuality?.level || 'good'
+  const qualityDegraded = qualityLevel === 'degraded'
+  const qualityWatch = qualityLevel === 'watch'
   const blendedRate = blendRate(rate5m, rate10m, rate15m)
   const minutesTo40 = blendedRate < -0.01 ? (currentMmol - 4.0) / Math.abs(blendedRate) : null
   const minutesTo45 = blendedRate < -0.01 ? (currentMmol - 4.5) / Math.abs(blendedRate) : null
@@ -551,6 +552,19 @@ function evaluateRiskRuleV1(input) {
     risk = 'watch'
     reasons.push('High gedempt: nog hoog zonder duidelijke post-piek dropcontext')
   }
+  if ((qualityDegraded || qualityWatch) && currentMmol >= 4.5) {
+    const rateOnlyOrContextOnly = !(minutesTo40 !== null && minutesTo40 >= 0 && minutesTo40 <= 15)
+    if (qualityDegraded && risk === 'urgent' && rateOnlyOrContextOnly) {
+      risk = 'high'
+      reasons.push('Urgent gedempt: datakwaliteit onvoldoende voor harde escalatie')
+    } else if (qualityDegraded && risk === 'high' && rateOnlyOrContextOnly) {
+      risk = 'watch'
+      reasons.push('High gedempt: datakwaliteit onvoldoende voor harde escalatie')
+    } else if (qualityWatch && risk === 'urgent' && rateOnlyOrContextOnly) {
+      risk = 'high'
+      reasons.push('Urgent gedempt: datakwaliteit is watch')
+    }
+  }
   return {
     score,
     risk,
@@ -561,6 +575,7 @@ function evaluateRiskRuleV1(input) {
       minutesTo45: minutesTo45 === null ? null : round(minutesTo45, 1),
       isRealDropContext,
       isFastReactiveContext,
+      dataQualityLevel: qualityLevel,
     },
   }
 }

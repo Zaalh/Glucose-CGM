@@ -137,6 +137,10 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
   const minSincePeak = num(f.minutesSincePeak, 999)
   const lagAdjusted = num(f.lagAdjustedMmol, current)
   const ageSeconds = Number.isFinite(f.ageSeconds) ? f.ageSeconds : 0
+  const dataQuality = f.dataQuality || null
+  const qualityLevel = dataQuality?.level || 'good'
+  const qualityDegraded = qualityLevel === 'degraded'
+  const qualityWatch = qualityLevel === 'watch'
 
   const falling = blended < -0.005
   const fastReactive = drop >= 2 && minSincePeak <= 45 && rate10m <= -0.04
@@ -315,6 +319,13 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
     dampingScore += 1
     reasons.push('Nachtcontext: conservatiever voor vals alarm')
   }
+  if (qualityDegraded && current >= TH.near) {
+    dampingScore += 2
+    reasons.push('Datakwaliteit onvoldoende: conservatiever voor trend-alarm')
+  } else if (qualityWatch && current >= TH.near) {
+    dampingScore += 1
+    reasons.push('Datakwaliteit watch: trend-alarm minder zeker')
+  }
   // Niet dempen als het echt risicovol is (veiligheidsklep).
   if (current < TH.near || steepest <= TH.veryFastFall || (f.minutesTo40 !== null && f.minutesTo40 <= 15)) {
     dampingScore = 0
@@ -352,10 +363,26 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
   // overleeft de vroege heads-up. Nooit hoger dan watch via deze weg.
   if (mealOnsetActive) risk = atLeast(risk, 'watch')
 
+  if ((qualityDegraded || qualityWatch) && current >= TH.near) {
+    const hardNearTermLow = f.minutesTo40 !== null && f.minutesTo40 >= 0 && f.minutesTo40 <= 10
+    if (qualityDegraded && risk === 'urgent' && !hardNearTermLow) {
+      risk = 'likely'
+      reasons.push('Urgent gedempt door datakwaliteit')
+    } else if (qualityDegraded && risk === 'likely' && !fastReactive && !hardNearTermLow) {
+      risk = 'watch'
+      reasons.push('Likely gedempt door datakwaliteit')
+    } else if (qualityWatch && risk === 'urgent' && !hardNearTermLow) {
+      risk = 'likely'
+      reasons.push('Urgent gedempt door datakwaliteit watch')
+    }
+  }
+
   // Onzekerheid: spreiding scenario's + ontbrekende/oude data.
   let uncertainty = scenarios.uncertaintyWidth / 2
   if (!Number.isFinite(f.rate10m)) uncertainty += 0.3
   if (ageSeconds > 600) uncertainty += 0.3
+  if (qualityWatch) uncertainty += 0.15
+  if (qualityDegraded) uncertainty += 0.3
   if (pattern && num(pattern.similarEpisodeCount, 0) >= 5) uncertainty -= 0.2
   uncertainty = round(clamp(uncertainty, 0, 1), 3)
 
@@ -363,6 +390,8 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
   let confidence = 0.5 + scenarios.scenarioAgreement * 0.3
   if (pattern && num(pattern.similarEpisodeCount, 0) >= 5) confidence += 0.15
   if (ageSeconds > 600) confidence -= 0.2
+  if (qualityWatch) confidence -= 0.1
+  if (qualityDegraded) confidence -= 0.25
   if (!Number.isFinite(f.rate10m)) confidence -= 0.2
   confidence = round(clamp(confidence, 0, 1), 3)
 
