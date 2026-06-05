@@ -12,6 +12,12 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Gewijzigd
 
+- **Spike-filter voor ruwe glucose-invoer (Laag 9)** — gedeelde
+  `cleanGlucoseTimeline` / `isSinglePointSpike` in `hypo-features.mjs` filtert
+  single-point artefacten met median-of-3 op de werk-timeline. De live sync gebruikt
+  dezelfde schoongemaakte timeline voor `calculateRates`, `calcRateFromTimeline` en
+  V2 `buildHypoFeatures`; ruwe `entries.sgv` blijft ongemoeid. Regressie:
+  `npm run spike-filter:check`.
 - **Overlay toont V2 episode-similarity expliciet** — de hypo-kaart gebruikt nu ook het
   `pattern`-object uit `/prediction/latest` en toont hoeveel vergelijkbare episodes V2
   ziet, hoeveel daarvan onder 4.5 gingen en het percentage. Dit maakt de persoonlijke

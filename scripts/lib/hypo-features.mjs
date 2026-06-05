@@ -20,6 +20,9 @@ const DEFAULT_TIME_ZONE = 'Europe/Amsterdam'
 const CURVE_PRE_PEAK_MINUTES = 20
 const CURVE_TOTAL_MINUTES = 60
 const CURVE_TOTAL_POINTS = 24
+export const SPIKE_FILTER_THRESHOLD_MGDL = 8
+const SPIKE_FILTER_MIN_GAP_MS = 30_000
+const SPIKE_FILTER_MAX_GAP_MS = 150_000
 
 // Stap 8 — meal-onset: een maaltijdrespons is begonnen als de glucose duidelijk
 // stijgt vanaf een lokale bodem die al ≥ 15 min geleden ligt (geen 1-punts blip).
@@ -49,6 +52,51 @@ export function clamp(value, lo, hi) {
 
 function toMmol(sgv) {
   return Number(sgv) / MGDL_PER_MMOL
+}
+
+function median3(a, b, c) {
+  return [a, b, c].sort((x, y) => x - y)[1]
+}
+
+function isOneMinuteNeighborGap(ms) {
+  return ms >= SPIKE_FILTER_MIN_GAP_MS && ms <= SPIKE_FILTER_MAX_GAP_MS
+}
+
+export function isSinglePointSpike(prev, current, next, thresholdMgdl = SPIKE_FILTER_THRESHOLD_MGDL) {
+  if (!prev || !current || !next) return false
+  const a = Number(prev.sgv)
+  const p = Number(current.sgv)
+  const c = Number(next.sgv)
+  const ta = Number(prev.date)
+  const tp = Number(current.date)
+  const tc = Number(next.date)
+  if (![a, p, c, ta, tp, tc].every(Number.isFinite)) return false
+  if (!isOneMinuteNeighborGap(tp - ta) || !isOneMinuteNeighborGap(tc - tp)) return false
+  const med = median3(a, p, c)
+  return Math.abs(p - med) > thresholdMgdl && Math.abs(a - c) < thresholdMgdl
+}
+
+// Laag 9 — werk-timeline cleaning: single-point artefacten dempen vóór rates/features.
+// Ruwe entries blijven ongemoeid; alleen de geretourneerde timeline gebruikt een
+// median-of-3 vervanging. De laatste meting heeft geen buur-na en wordt causally
+// niet aangepast; een verdachte laatste sprong moet door de volgende reading worden
+// bevestigd voordat hij via historische cleaning verdwijnt.
+export function cleanGlucoseTimeline(timeline, options = {}) {
+  const thresholdMgdl = Number.isFinite(options.thresholdMgdl)
+    ? options.thresholdMgdl
+    : SPIKE_FILTER_THRESHOLD_MGDL
+  return timeline.map((entry, index) => {
+    const prev = timeline[index - 1]
+    const next = timeline[index + 1]
+    if (!isSinglePointSpike(prev, entry, next, thresholdMgdl)) return entry
+    const cleanedSgv = median3(Number(prev.sgv), Number(entry.sgv), Number(next.sgv))
+    return {
+      ...entry,
+      rawSgv: entry.rawSgv ?? entry.sgv,
+      sgv: cleanedSgv,
+      spikeFiltered: true,
+    }
+  })
 }
 
 // Slope in mmol/L/min over ~minutesBack, gemeten vanaf de meting op-of-vóór het
@@ -207,23 +255,24 @@ function weekdayFor(ms, timeZone = DEFAULT_TIME_ZONE) {
 // Bouwt de volledige featureset voor één meetpunt (timeline[idx]). Gebruikt
 // uitsluitend data tot en met idx, zodat live en backtest identiek zijn.
 export function buildHypoFeatures(timeline, idx, options = {}) {
+  const workTimeline = options.cleanTimeline === false ? timeline : cleanGlucoseTimeline(timeline, options)
   const lagMinutes = Number.isFinite(options.lagMinutes) ? options.lagMinutes : DEFAULT_LAG_MINUTES
   const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : null
-  const latest = timeline[idx]
+  const latest = workTimeline[idx]
   const timeZone = options.timeZone || DEFAULT_TIME_ZONE
   const currentMmol = toMmol(latest.sgv)
-  const previousMmol = idx > 0 ? toMmol(timeline[idx - 1].sgv) : null
+  const previousMmol = idx > 0 ? toMmol(workTimeline[idx - 1].sgv) : null
 
-  const rate5m = calcRate(timeline, idx, 5)
-  const rate10m = calcRate(timeline, idx, 10)
-  const rate15m = calcRate(timeline, idx, 15)
-  const rate30m = calcRate(timeline, idx, 30)
+  const rate5m = calcRate(workTimeline, idx, 5)
+  const rate10m = calcRate(workTimeline, idx, 10)
+  const rate15m = calcRate(workTimeline, idx, 15)
+  const rate30m = calcRate(workTimeline, idx, 30)
   const blendedRate = blendedRateFrom(rate5m, rate10m, rate15m)
 
   // Steilste daling in de laatste 30 min: meest negatieve window-rate.
   let maxFallRate30m = 0
   for (const w of FALL_RATE_WINDOWS) {
-    const r = calcRate(timeline, idx, w)
+    const r = calcRate(workTimeline, idx, w)
     if (Number.isFinite(r) && r < maxFallRate30m) maxFallRate30m = r
   }
 
@@ -249,13 +298,13 @@ export function buildHypoFeatures(timeline, idx, options = {}) {
   const recoverySignal =
     Number.isFinite(rate5m) && rate5m > 0 && Number.isFinite(rate10m) && rate10m < 0
 
-  const peak = findPeak(timeline, idx, PEAK_WINDOW_MINUTES)
+  const peak = findPeak(workTimeline, idx, PEAK_WINDOW_MINUTES)
   const peakMmol120m = toMmol(peak.sgv)
   const minutesSincePeak = (latest.date - peak.date) / 60_000
   const dropFromPeakMmol = peakMmol120m - currentMmol
   const dropFromPeakPercent = peakMmol120m > 0 ? (dropFromPeakMmol / peakMmol120m) * 100 : 0
   const peakToCurrentSlope = minutesSincePeak > 0 ? dropFromPeakMmol / minutesSincePeak : 0
-  const liveCurveShape = partialCurveShape(timeline, peak, latest)
+  const liveCurveShape = partialCurveShape(workTimeline, peak, latest)
 
   // Geschatte tijd tot grenswaarden bij huidige (negatieve) blendedRate.
   const fallRate = blendedRate < -0.01 ? Math.abs(blendedRate) : null
@@ -270,8 +319,8 @@ export function buildHypoFeatures(timeline, idx, options = {}) {
   // Stap 8 — meal-onset detector: herken dat een maaltijdpiek is begonnen (sterke
   // stijging vanaf een bodem ≥ 15 min geleden) zodat de detector al in de stijgende
   // fase kan waarschuwen i.p.v. pas als de reactieve daling begint.
-  const delta15m = calcDelta(timeline, idx, 15)
-  const trough = findTrough(timeline, idx, MEAL_TROUGH_WINDOW_MINUTES)
+  const delta15m = calcDelta(workTimeline, idx, 15)
+  const trough = findTrough(workTimeline, idx, MEAL_TROUGH_WINDOW_MINUTES)
   const minutesSinceTrough = (latest.date - trough.date) / 60_000
   const riseFromTroughMmol = currentMmol - toMmol(trough.sgv)
   const rising = blendedRate > 0 || (Number.isFinite(rate10m) && rate10m > 0)
@@ -286,9 +335,11 @@ export function buildHypoFeatures(timeline, idx, options = {}) {
     // raw
     currentMmol: round(currentMmol, 3),
     previousMmol: previousMmol === null ? null : round(previousMmol, 3),
-    delta5m: round(calcDelta(timeline, idx, 5), 3),
-    delta10m: round(calcDelta(timeline, idx, 10), 3),
+    delta5m: round(calcDelta(workTimeline, idx, 5), 3),
+    delta10m: round(calcDelta(workTimeline, idx, 10), 3),
     delta15m: round(delta15m, 3),
+    spikeFiltered: Boolean(latest.spikeFiltered),
+    rawSgv: latest.rawSgv ?? null,
     ageSeconds: nowMs === null ? null : Math.max(0, Math.round((nowMs - latest.date) / 1000)),
     // speed
     rate5m: round(rate5m, 4),

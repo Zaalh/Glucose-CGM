@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { MongoClient } from 'mongodb'
-import { buildHypoFeatures } from './lib/hypo-features.mjs'
+import { buildHypoFeatures, cleanGlucoseTimeline } from './lib/hypo-features.mjs'
 import { evaluateReactiveHypoRiskV2 } from './lib/reactive-hypo-detector.mjs'
 import { findSimilarEpisodes, patternFromFeatures } from './lib/episode-similarity.mjs'
 
@@ -176,30 +176,32 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
   const timeline = [...previousEntries, ...entries]
     .filter((entry) => Number.isFinite(Number(entry.sgv)) && Number.isFinite(Number(entry.date)))
     .sort((a, b) => a.date - b.date)
+  const workTimeline = cleanGlucoseTimeline(timeline)
 
   const episodes = await loadPatternEpisodes()
   const episodeVectors = await loadEpisodeVectors()
   const v2State = loadReactiveHypoV2State() // geleerde params (of null -> defaults)
   const snapshots = entries.map((entry) => {
-    const idx = timeline.findIndex((candidate) => candidate.identifier === entry.identifier)
+    const idx = workTimeline.findIndex((candidate) => candidate.identifier === entry.identifier)
     if (idx < 0) return null
 
     const windowStart = entry.date - 120 * 60_000
-    let peak = entry
+    const currentEntry = workTimeline[idx]
+    let peak = currentEntry
     for (let i = idx; i >= 0; i -= 1) {
-      if (timeline[i].date < windowStart) break
-      if (timeline[i].sgv > peak.sgv) peak = timeline[i]
+      if (workTimeline[i].date < windowStart) break
+      if (workTimeline[i].sgv > peak.sgv) peak = workTimeline[i]
     }
 
-    const currentMmol = Number(entry.sgv) / MGDL_PER_MMOL
+    const currentMmol = Number(currentEntry.sgv) / MGDL_PER_MMOL
     const peakMmol = Number(peak.sgv) / MGDL_PER_MMOL
     const dropFromPeakMmol = peakMmol - currentMmol
     const dropFromPeakPercent = peakMmol > 0 ? (dropFromPeakMmol / peakMmol) * 100 : 0
     const minutesSincePeak = (entry.date - peak.date) / 60_000
 
-    const rate5m = calcRateFromTimeline(timeline, idx, 5)
-    const rate10m = calcRateFromTimeline(timeline, idx, 10)
-    const rate15m = calcRateFromTimeline(timeline, idx, 15)
+    const rate5m = calcRateFromTimeline(workTimeline, idx, 5)
+    const rate10m = calcRateFromTimeline(workTimeline, idx, 10)
+    const rate15m = calcRateFromTimeline(workTimeline, idx, 15)
 
     // Alleen vergelijken bij een echte recente post-piek daling. pattern_events
     // bevat enkel drops/hypo's, dus bij stabiele/stijgende metingen zou similarity
@@ -246,7 +248,7 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
     // straks dezelfde featurebuilder; voor nu leggen we vast wat al berekend is.
     // Gebruik de gedeelde featurebuilder zodat snapshot en V2-shadow
     // altijd dezelfde features bevatten (inclusief acceleration, isDecelerating, etc).
-    const shadowFeaturesFull = buildHypoFeatures(timeline, idx, { nowMs: entry.date })
+    const shadowFeaturesFull = buildHypoFeatures(workTimeline, idx, { nowMs: entry.date, cleanTimeline: false })
     const features = shadowFeaturesFull
 
     const predicted = {
@@ -302,6 +304,8 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
       predictedMmol: forecast.predictedMmol,
       probabilities: forecast.probabilities,
       features,
+      rawCurrentMmol: currentEntry.rawSgv != null ? round(Number(currentEntry.rawSgv) / MGDL_PER_MMOL, 3) : null,
+      spikeFiltered: Boolean(currentEntry.spikeFiltered),
       predicted,
       pattern,
       ...(shadow || {}),
@@ -755,7 +759,7 @@ async function getLatestPredictionSnapshot() {
     client = new MongoClient(config.mongoUri)
     await client.connect()
     return await client.db().collection('prediction_snapshots')
-      .find({}, { projection: { createdAt: 1, entryIdentifier: 1, predictedMmol: 1, probabilities: 1, modelVersion: 1, currentMmol: 1, risk: 1, riskScore: 1, reasons: 1, riskDetails: 1, legacyRisk: 1, legacyScore: 1, features: 1, predicted: 1, pattern: 1, shadowModelVersion: 1, shadowRisk: 1, shadowScore: 1, shadowConfidence: 1, shadowReasons: 1, shadowTuned: 1 } })
+      .find({}, { projection: { createdAt: 1, entryIdentifier: 1, predictedMmol: 1, probabilities: 1, modelVersion: 1, currentMmol: 1, rawCurrentMmol: 1, spikeFiltered: 1, risk: 1, riskScore: 1, reasons: 1, riskDetails: 1, legacyRisk: 1, legacyScore: 1, features: 1, predicted: 1, pattern: 1, shadowModelVersion: 1, shadowRisk: 1, shadowScore: 1, shadowConfidence: 1, shadowReasons: 1, shadowTuned: 1 } })
       .sort({ createdAt: -1 })
       .limit(1)
       .next()
@@ -913,11 +917,16 @@ function addRateFields(entries, previousEntries = []) {
   const timeline = [...previousEntries, ...entries]
     .filter((entry) => Number.isFinite(Number(entry.sgv)) && Number.isFinite(Number(entry.date)))
     .sort((a, b) => a.date - b.date)
+  const workTimeline = cleanGlucoseTimeline(timeline)
 
   for (const entry of entries) {
-    const rates = calculateRates(entry, timeline)
+    const workEntry = workTimeline.find((candidate) =>
+      (entry.identifier && candidate.identifier === entry.identifier) || Number(candidate.date) === Number(entry.date)
+    ) ?? entry
+    const rates = calculateRates(workEntry, workTimeline)
     entry.glucoseRate = rates
     entry.glucoseRateMmolPerMin = rates
+    if (workEntry.spikeFiltered) entry.spikeFiltered = true
   }
 }
 

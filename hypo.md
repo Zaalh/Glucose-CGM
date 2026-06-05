@@ -1760,7 +1760,13 @@ Dan al in de stijgende fase een lage `watch` geven als:
 Dit geeft je 10-15 min extra voorlooptijd ten opzichte van nu (nu begint de
 detector pas te reageren als de daling begonnen is).
 
-#### Laag 9 — Input-cleaning: single-point spike-filter vóór de rate-berekening
+#### Laag 9 — Input-cleaning: single-point spike-filter vóór de rate-berekening — **GEBOUWD**
+
+> **Status: af.** `hypo-features.mjs` levert nu `cleanGlucoseTimeline` /
+> `isSinglePointSpike` met een median-of-3 filter (`SPIKE_FILTER_THRESHOLD_MGDL=8`).
+> De live sync gebruikt dezelfde werk-timeline voor `calculateRates`,
+> `calcRateFromTimeline` en `buildHypoFeatures`; ruwe `entries.sgv` blijft ongemoeid.
+> Regressie: `npm run spike-filter:check`.
 
 Alle lagen hierboven nemen schone invoer aan. Maar de ruwe LibreLink-stream bevat
 **single-point artefacten** die de korte rates laten ontploffen. Gemeten op live data:
@@ -1839,7 +1845,7 @@ verwachten minder vals alarm, geen extra gemiste hypo's).
 | 6 | Variabele sensorlag | realistischer CGM-lag | klein | ✅ af |
 | 7 | Weekdag-patroon terugkoppelen | patroon-bewust | middel | ✅ af |
 | 8 | Meal-onset vroege detector | 10-15 min eerder | groot | ✅ af |
-| 9 | Spike-filter op ruwe glucose (input-cleaning) | dempt vals alarm + ruis | klein | ⬜ voorstel |
+| 9 | Spike-filter op ruwe glucose (input-cleaning) | dempt vals alarm + ruis | klein | ✅ af |
 
 Stap 1-2 en 6 zijn kleine wijzigingen in `hypo-features.mjs` en de detector,
 geen database-werk. Stap 3 en 5 vereisen curve-vergelijking live; bouwen na
