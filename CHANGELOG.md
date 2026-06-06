@@ -12,6 +12,12 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Gewijzigd
 
+- **V2 component-breakdown auditbaar in snapshots** — de sync persisteert nu
+  `v2Components` (per-component scores incl. `patternScore`, `reactiveScore`,
+  `recentLowScore`, `dampingScore`, …) en `v2Uncertainty` per `prediction_snapshot`,
+  en `/prediction/latest` geeft ze terug. Zo is achteraf zichtbaar hoeveel de
+  patroonherkenning (en elke andere component) aan de V2-score bijdroeg; voorheen
+  stond alleen `riskDetails` (V1) en de pattern-tellingen in het snapshot.
 - **Post-hypo instabiliteit voor V2** — `buildHypoFeatures` levert nu
   `recentLowMmol`, `minutesSinceRecentLow`, `reboundFromRecentLowMmol`,
   `recentLevel1Hypo` en `recentLevel2Hypo`. `evaluateReactiveHypoRiskV2` gebruikt die

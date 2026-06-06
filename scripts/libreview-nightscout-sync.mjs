@@ -305,6 +305,10 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
       spikeFiltered: Boolean(currentEntry.spikeFiltered),
       predicted,
       pattern,
+      // V2 component-breakdown (incl. patternScore) + onzekerheid persisteren zodat de
+      // patroon-bijdrage achteraf auditbaar is per snapshot. confidence zit al in shadow.
+      v2Components: v2 ? v2.components : null,
+      v2Uncertainty: v2 ? v2.uncertainty : null,
       ...(shadow || {}),
       modelVersion: primary.modelVersion,
       outcomeEvaluated: false,
@@ -335,6 +339,8 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
             features: snapshot.features,
             predicted: snapshot.predicted,
             pattern: snapshot.pattern,
+            v2Components: snapshot.v2Components ?? null,
+            v2Uncertainty: snapshot.v2Uncertainty ?? null,
             shadowModelVersion: snapshot.shadowModelVersion ?? null,
             shadowRisk: snapshot.shadowRisk ?? null,
             shadowScore: snapshot.shadowScore ?? null,
@@ -774,7 +780,7 @@ async function getLatestPredictionSnapshot() {
     client = new MongoClient(config.mongoUri)
     await client.connect()
     return await client.db().collection('prediction_snapshots')
-      .find({}, { projection: { createdAt: 1, entryIdentifier: 1, predictedMmol: 1, probabilities: 1, modelVersion: 1, currentMmol: 1, rawCurrentMmol: 1, spikeFiltered: 1, risk: 1, riskScore: 1, reasons: 1, riskDetails: 1, legacyRisk: 1, legacyScore: 1, features: 1, predicted: 1, pattern: 1, shadowModelVersion: 1, shadowRisk: 1, shadowScore: 1, shadowConfidence: 1, shadowReasons: 1, shadowTuned: 1 } })
+      .find({}, { projection: { createdAt: 1, entryIdentifier: 1, predictedMmol: 1, probabilities: 1, modelVersion: 1, currentMmol: 1, rawCurrentMmol: 1, spikeFiltered: 1, risk: 1, riskScore: 1, reasons: 1, riskDetails: 1, legacyRisk: 1, legacyScore: 1, features: 1, predicted: 1, pattern: 1, v2Components: 1, v2Uncertainty: 1, shadowModelVersion: 1, shadowRisk: 1, shadowScore: 1, shadowConfidence: 1, shadowReasons: 1, shadowTuned: 1 } })
       .sort({ createdAt: -1 })
       .limit(1)
       .next()
