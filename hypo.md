@@ -15,6 +15,37 @@ blijft een vingerprik/medisch advies belangrijk.
 
 ## Implementatiestatus (bijgewerkt 2026-06-02)
 
+> **Update 2026-06-05 — M6-gate geslaagd, V2 LIVE geactiveerd.** Met ~8 weken data
+> (13.652 readings, 33 nadir-gebaseerde hypo-onsets) bleek de auto-tuner een
+> degenererende train/test-split te hebben: hij splitste op **kalendertijd**, terwijl
+> de datadichtheid extreem ongelijk is (lege LibreView-history-backfill in april ↔
+> dichte 1-min-stroom vanaf eind mei). 70% van de wandklok bevatte daardoor 0 events
+> (train 0 / test 33) en de gate kon nooit eerlijk draaien. **Fix:** de split is nu
+> **reading-index-gebaseerd** (70% van de gesorteerde metingen i.p.v. van de tijd) —
+> nog steeds temporeel (één tijdsgrens, geen leakage), maar robuust tegen dichtheid.
+> Split nu gezond: train 16 / test 18 onsets. Out-of-sample slaagt V2-tuned op de
+> volledige gate: **recall 1.0** (0 gemist) en **precision 0.197** vs V1 0.833 / 0.162,
+> lead-time 15 min (≥ V1). De tuner schreef `active: true`; de sync draait V2 nu als
+> primaire `risk` met V1 als `legacyRisk` (live geverifieerd). Getunede params:
+> `likely≥7, urgent≥8, accelDownBonus=0, worstCaseToLikely=false`. Open: absolute
+> precision blijft laag (~1 op 5 alarmen echt — wel beter dan V1); lead-time haalt de
+> ≥20-min-ambitie nog niet (de gate eist dat niet). De vroegere "precision ~0.05 /
+> databottleneck ~4-5 dagen"-diagnose hieronder is daarmee achterhaald.
+
+> **Update 2026-06-05 laat — post-hypo instabiliteit toegevoegd en live gezet.**
+> Live voorbeeld: na een piek rond **12.0 mmol/L** zakte de glucose naar **2.94 mmol/L**
+> en veerde daarna tijdelijk op naar ~4.5 mmol/L. Rond 23:48-23:50 leek de waarde even
+> stabiel op **4.55**, maar binnen enkele minuten zakte hij alsnog door naar **4.05** en
+> bleef de trend wisselend/dalend. Conclusie: bij dit persoonlijke patroon mag het
+> hypo-risico niet verdwijnen zodra één of twee CGM-punten net boven 4.5 komen.
+> `buildHypoFeatures` levert daarom nu recente-low context (`recentLowMmol`,
+> `minutesSinceRecentLow`, `reboundFromRecentLowMmol`, `recentLevel1Hypo`,
+> `recentLevel2Hypo`). V2 gebruikt die als extra component (`recentLowScore`) en als
+> veiligheids-override: na een recente diepe hypo (<3.0) blijft risico minimaal hoog,
+> en bij opnieuw dalen rond laag gebied blijft het urgent. Geverifieerd lokaal én remote
+> met `scripts/fixtures/post-hypo-unstable-fall.json`; de live sync is herstart en nieuwe
+> snapshots bevatten `recentLowMmol: 2.941`, `recentLevel2Hypo: true`, `risk: urgent`.
+
 De V2-laag uit dit plan is gebouwd, gedeployed op de iMac en getest op echte data.
 Stand van zaken per mijlpaal:
 
@@ -24,7 +55,8 @@ Stand van zaken per mijlpaal:
 - **M2 — gedeelde detector-lib (af):** `scripts/lib/hypo-features.mjs`
   (`buildHypoFeatures`) en `scripts/lib/reactive-hypo-detector.mjs`
   (`evaluateReactiveHypoRiskV2`, component-scores + scenario's + overrides, tunebaar via
-  `context.params`). Fixtures in `scripts/fixtures/`.
+  `context.params`). Inclusief post-hypo instabiliteit: recente nadir, tijd sinds nadir
+  en rebound bepalen mee of herstel echt stabiel is. Fixtures in `scripts/fixtures/`.
 - **M3 — episode-builder (af):** `scripts/lib/episode-builder.mjs` +
   `scripts/build-reactive-hypo-episodes.mjs` → collectie `reactive_hypo_episodes`
   (198 episodes uit 7501 entries).
@@ -115,6 +147,13 @@ eerder, met een daling van 4.0–7.8 mmol/L de hypo in (nadir 2.9–3.4). Dit be
 piek→drop-context (component die V2 op `dropFromPeakMmol` / `minutesSincePeak` bouwt) de
 juiste voorspeller is, en dat een korte-dip (nadir-gebaseerde) event-definitie nodig is.
 Tijd onder 3.9 ≈ 2.7%, onder 3.0 ≈ 0.36%.
+
+**Aanvulling — instabiel herstel na hypo:** het live patroon laat zien dat herstel niet
+binair is. Een CGM-reeks kan na een diepe dip kort opveren naar 4.5-5.0 en daarna alsnog
+opnieuw dalen. Door CGM-lag en de snelle wisseling is "actuele waarde net boven 4.5" dus
+onvoldoende bewijs dat het risico voorbij is. V2 schaalt pas af als er stabiel herstel is:
+geen recente diepe nadir, voldoende rebound vanaf de nadir, geen dalende trend en geen
+lag-adjusted waarde in/onder het near-low gebied.
 
 ## Huidige situatie
 
