@@ -12,6 +12,15 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Gewijzigd
 
+- **Precision-knop `safeNadirDamping` (tunebaar, gevalideerd, live)** — nieuwe V2-param:
+  als de actuele waarde ≥ 4.5 is én zelfs het pessimistische scenario (`worstCaseMin30`)
+  boven 4.5 blijft, escaleert drop-from-peak-context niet langer naar high/urgent maar
+  naar `watch` (alle hard-low veiligheidskleppen blijven). Toegevoegd aan de tuner-grid;
+  de tuner koos hem op de vaste out-of-sample split en de M6-gate slaagde: tuned V2 ging
+  van recall 0.824→**0.941** (mist 1 i.p.v. 3) en precision 0.083→**0.145** (boven V1
+  0.130). Default uit; alleen actief via getunede params. Reden dat dit eerder "niet
+  werkte": een losse in-sample live backtest is te ruisig (data drift tussen runs);
+  beoordeel FP-knoppen op de bevroren tuner-split.
 - **Patroon-collecties dagelijks herbouwd + idempotentie-fix** — `daily-hypo-tune.sh`
   ververst nu ook `pattern_events` (`analyze-patterns.mjs`) en `episode_vectors`
   (`build-episode-vectors.mjs`) vóór de tuner, zodat de V2-patroonherkenning meeleert

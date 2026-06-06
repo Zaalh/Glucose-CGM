@@ -46,6 +46,39 @@ blijft een vingerprik/medisch advies belangrijk.
 > met `scripts/fixtures/post-hypo-unstable-fall.json`; de live sync is herstart en nieuwe
 > snapshots bevatten `recentLowMmol: 2.941`, `recentLevel2Hypo: true`, `risk: urgent`.
 
+> **Update 2026-06-06 — zelflerende patronen, auditbaarheid, en precision in onderzoek.**
+> Drie dingen live gezet (gecommit, draaiend):
+> 1. **Patroon-collecties dagelijks herbouwd.** `daily-hypo-tune.sh` ververst nu ook
+>    `pattern_events` + `episode_vectors` vóór de tuner. Daarbij bleek `analyze-patterns.mjs`
+>    **niet idempotent** (kale inserts → elke run dupliceerde alle events en trok de live
+>    `findSimilarEpisodes`-tellingen scheef); nu leegt het de collectie eerst. Schoon
+>    resultaat: `pattern_events` 1956, `episode_vectors` van 34 statisch → 257 vers.
+> 2. **V2 component-breakdown auditbaar.** Snapshots + `/prediction/latest` bevatten nu
+>    `v2Components` (per-component scores incl. `patternScore`) en `v2Uncertainty`, zodat de
+>    patroon-bijdrage achteraf te herleiden is.
+> 3. **Live bewijs dat het werkt.** Echte hypo tot **2.94 mmol/L om 13:21**; V2 gaf
+>    **17 min vooraf** `urgent` (bij nog 5.66 mmol) en bleef urgent door alle 20 metingen
+>    <4.0. Datastroom gezond (~1/min), geen sync-fouten.
+>
+> **Open punt — precision / alarmmoeheid.** Live meet V2 ~40% van de tijd high/urgent.
+> Gericht onderzocht: van de high/urgent-alarmen terwijl glucose nog ≥4.5 was, bleef
+> **67% (1813/2717 over 7 dagen)** veilig ≥4.5 (vals alarm). Het is **niet** vooral nacht
+> (1354 dag vs 459 nacht), maar de **reactieve drop-from-peak context die overvuurt
+> terwijl de absolute waarde veilig blijft** (top-reden: "relatieve piekdaling ≥30%").
+> **Methodeles:** een losse in-sample live backtest is hiervoor te ruisig — data drift
+> tussen runs maakt twee runs onvergelijkbaar (identieke FP=456 verraadde het confound).
+> De juiste route: de FP-knop **`safeNadirDamping`** (demp drop-context naar `watch` als
+> zelfs `worstCaseMin30 ≥ 4.5`, met behoud van alle hard-low veiligheidskleppen) als
+> **tunebare param** toevoegen en op de **vaste out-of-sample split** door de tuner laten
+> beoordelen. Staat **default uit**; wordt alleen live als de tuner 'm kiest én de gate
+> (recall + precision ≥ V1) slaagt.
+> **Uitkomst (tuner, vaste split train 21 / test 17):** de tuner **koos
+> `safeNadirDamping: true`** en de gate slaagde. Out-of-sample tuned V2: **recall 0.941**
+> (mist 1 i.p.v. 3) en **precision 0.145** — bijna verdubbeld t.o.v. V2-default (0.083) en
+> boven V1 (0.130). Dit bevestigt dat de losse in-sample backtest misleidde: op de
+> bevroren split helpt de demping wél, zonder recall-verlies. Getunede set:
+> `likely≥7, urgent≥8, accelDownBonus=0, worstCaseToLikely=false, safeNadirDamping=true`.
+
 De V2-laag uit dit plan is gebouwd, gedeployed op de iMac en getest op echte data.
 Stand van zaken per mijlpaal:
 

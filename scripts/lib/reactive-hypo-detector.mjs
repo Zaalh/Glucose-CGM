@@ -25,6 +25,7 @@ export const DEFAULT_PARAMS = {
   scoreCut: { urgent: 8, likely: 5, watch: 3 }, // score -> risk grenzen
   accelDownBonus: 1, // extra rate-punt bij versnellende daling (FP-gevoelig)
   worstCaseToLikely: true, // worst-case <4.0 dwingt minimaal 'likely'
+  safeNadirDamping: false, // demp drop-context naar 'watch' als zelfs worst-case >=4.5 blijft
 }
 
 function mergeParams(params) {
@@ -34,6 +35,8 @@ function mergeParams(params) {
     accelDownBonus: Number.isFinite(p.accelDownBonus) ? p.accelDownBonus : DEFAULT_PARAMS.accelDownBonus,
     worstCaseToLikely:
       typeof p.worstCaseToLikely === 'boolean' ? p.worstCaseToLikely : DEFAULT_PARAMS.worstCaseToLikely,
+    safeNadirDamping:
+      typeof p.safeNadirDamping === 'boolean' ? p.safeNadirDamping : DEFAULT_PARAMS.safeNadirDamping,
   }
 }
 
@@ -391,6 +394,30 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
   } else if (scenarios.worstCaseMin30 < TH.near && scenarios.uncertaintyWidth >= 1.0) {
     risk = atLeast(risk, 'watch')
     reasons.push('Worst-case onder 4.5 bij wisselend patroon')
+  }
+
+  // --- Veilige-bodem demping (precision, tunebaar; default uit) ---
+  // Grootste gemeten bron van vals alarm: een reële piekdaling/snelle rate die tóch
+  // veilig uitbodemt. Als de actuele waarde >= 4.5 is én zelfs het pessimistische
+  // scenario (worstCaseMin30) boven 4.5 blijft, mag drop-context alleen niet naar
+  // high/urgent escaleren -> terug naar 'watch'. Alle hard-low triggers (actuele/
+  // voorspelde low, post-hypo-instabiliteit) worden expliciet uitgesloten. Alleen
+  // actief als de auto-tuner deze param op true zet en de out-of-sample gate slaagt.
+  if (P.safeNadirDamping === true) {
+    const hardLowActive =
+      current < TH.near ||
+      (f.minutesTo40 !== null && f.minutesTo40 >= 0 && f.minutesTo40 <= 15) ||
+      (recentDeepHypo && falling) ||
+      (recentHypo && falling && lagAdjusted < TH.low)
+    if (
+      !hardLowActive &&
+      current >= TH.near &&
+      scenarios.worstCaseMin30 >= TH.near &&
+      (risk === 'likely' || risk === 'urgent')
+    ) {
+      risk = 'watch'
+      reasons.push('Veilig uitbodemend: piekdaling maar voorspelde bodem blijft boven 4.5')
+    }
   }
 
   // Meal-onset: gegarandeerd minimaal 'watch' (informatief, geen alarm). De damping

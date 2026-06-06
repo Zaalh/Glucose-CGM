@@ -37,7 +37,9 @@ function paramGrid() {
       if (urgent <= likely) continue
       for (const accelDownBonus of [0, 1]) {
         for (const worstCaseToLikely of [true, false]) {
-          grid.push({ scoreCut: { watch: 3, likely, urgent }, accelDownBonus, worstCaseToLikely })
+          for (const safeNadirDamping of [false, true]) {
+            grid.push({ scoreCut: { watch: 3, likely, urgent }, accelDownBonus, worstCaseToLikely, safeNadirDamping })
+          }
         }
       }
     }
