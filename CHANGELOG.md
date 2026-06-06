@@ -12,6 +12,13 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Gewijzigd
 
+- **Patroon-collecties dagelijks herbouwd + idempotentie-fix** — `daily-hypo-tune.sh`
+  ververst nu ook `pattern_events` (`analyze-patterns.mjs`) en `episode_vectors`
+  (`build-episode-vectors.mjs`) vóór de tuner, zodat de V2-patroonherkenning meeleert
+  met nieuwe episodes (voorheen bleef de vectorset statisch op 34). Daarbij bleek
+  `analyze-patterns.mjs` **niet idempotent**: het deed kale inserts, dus elke run
+  dupliceerde alle events en trok de live `findSimilarEpisodes`-tellingen scheef. Nu
+  leegt het de collectie eerst en herbouwt volledig uit `entries`.
 - **V2 component-breakdown auditbaar in snapshots** — de sync persisteert nu
   `v2Components` (per-component scores incl. `patternScore`, `reactiveScore`,
   `recentLowScore`, `dampingScore`, …) en `v2Uncertainty` per `prediction_snapshot`,

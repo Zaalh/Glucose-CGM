@@ -20,6 +20,11 @@ var entries = db.entries.find(
   { _id: 1, identifier: 1, date: 1, dateString: 1, sgv: 1, glucoseRateMmolPerMin: 1 }
 ).sort({ date: 1 }).toArray()
 
+// Idempotent: leeg de collectie eerst zodat herhaald draaien (bv. de dagelijkse cron)
+// geen duplicaten opbouwt. pattern_events wordt elke run volledig herbouwd uit entries.
+// Zonder dit dupliceert elke run alle events -> scheef getrokken live similar-counts.
+db.pattern_events.remove({})
+
 var bulk = db.pattern_events.initializeUnorderedBulkOp()
 var created = 0
 

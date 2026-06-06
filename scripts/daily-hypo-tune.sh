@@ -26,6 +26,15 @@ echo "[$(date '+%F %T')] auto-tune + rapport start"
 # 0) episodes verversen zodat de patroon-analyse de laatste dagen meeneemt
 "${COMPOSE[@]}" scripts/build-reactive-hypo-episodes.mjs >"$LOGDIR/${STAMP}.episodes.log" 2>>"$ERR"
 
+# 0b) pattern_events + episode_vectors herbouwen (mongo-shell) zodat de V2-patroon-
+#     component (loadEpisodeVectors) ook de nieuwste episodes meeneemt. vectors:build
+#     hangt af van pattern_events, dus eerst analyze, dan vectors. Voor de tuner draaien
+#     zodat die op verse vectors tuned. Voedt entries -> analysis-collecties; raakt de
+#     ruwe entries en het live alarm niet aan.
+MONGO=("$DOCKER" compose -f docker-compose.nightscout.yml exec -T nightscout-mongo sh -lc "mongo nightscout --quiet")
+"${MONGO[@]}" <scripts/analyze-patterns.mjs       >"$LOGDIR/${STAMP}.patterns-analyze.log" 2>>"$ERR"
+"${MONGO[@]}" <scripts/build-episode-vectors.mjs  >"$LOGDIR/${STAMP}.vectors.log"          2>>"$ERR"
+
 # 1) leren: tuner schrijft geleerde params (of niets bij te weinig events)
 "${COMPOSE[@]}" scripts/tune-reactive-hypo-v2.mjs   >"$LOGDIR/${STAMP}.tune.log"  2>>"$ERR"
 cp "$LOGDIR/${STAMP}.tune.log" "$LOGDIR/latest.tune.log" 2>/dev/null || true
