@@ -79,6 +79,31 @@ blijft een vingerprik/medisch advies belangrijk.
 > bevroren split helpt de demping wél, zonder recall-verlies. Getunede set:
 > `likely≥7, urgent≥8, accelDownBonus=0, worstCaseToLikely=false, safeNadirDamping=true`.
 
+> **Update 2026-06-06 — Laag 5 (curve) en Laag 7 (weekdag) bleken inert; root-cause gefixt.**
+> Bij controle van het vector-gedeelte bleek dat `loadEpisodeVectors` (live sync én
+> tuner/backtest) alleen `featureVector/outcome/eventType` projecteerde. Daardoor:
+> `findCurveMatches` kreeg nooit `v.vector` (de 24-punts curve) → `curveMatchCount` altijd 0
+> → het detector-blok `curveMatchCount ≥ 5 → patternScore +1/+2` vuurde nooit; en
+> `weekdayOfVector` kreeg nooit een datum → `weekdayRiskHigh` nooit waar. Beide "afgemelde"
+> lagen droegen dus **niets** bij. Omdat het in live én tuner identiek uit stond, klopte de
+> train/serve-pariteit en blijven de eerdere gate-cijfers geldig. **Fix:** de projectie
+> (op beide plekken, identiek voor pariteit) laadt nu ook `vector` + `peakDate`/`startDate`,
+> zodat curve-shape matching en weekdag-risico data krijgen. Dit **wijzigt `patternScore`**,
+> dus het is — net als `safeNadirDamping` — eerst op de **vaste out-of-sample split** door
+> de tuner getoetst (recall/precision ≥ V1) vóór een eventuele live-zet.
+> **Uitkomst (zelfde split train 21 / test 17, apples-to-apples):** curve+weekdag **aan**
+> geeft V2 recall 0.941 / **precision 0.129**, tegenover curve+weekdag **uit** 0.941 / **0.145**.
+> De precision **zakt** (0.145→0.129, onder V1's 0.132) → gate `precisionNotWorse: false` →
+> de tuner activeert niet. De curve- en weekdag-bonussen voegen dus vals alarm toe zonder
+> recall-winst. **Besluit: Laag 5 + 7 blijven bewust UIT** — de projectie is teruggezet naar
+> `featureVector/outcome/eventType`. De detector-code voor curve/weekdag blijft staan maar
+> inert (vuurt alleen als de data ooit wél netto helpt). Bijvangst: de tuner-replay cachet
+> de pattern nu één keer per punt i.p.v. per param-combo (factor sneller) — die optimalisatie
+> is los bruikbaar als curve-matching later opnieuw wordt geprobeerd.
+> **Methodeles 2:** "gebouwd" ≠ "helpt". Een afgemelde laag kan stil inert zijn (geen data)
+> én, eenmaal aangezet, de score juist verslechteren. Toets elke patroon-laag op de
+> bevroren split vóór activatie.
+
 De V2-laag uit dit plan is gebouwd, gedeployed op de iMac en getest op echte data.
 Stand van zaken per mijlpaal:
 
