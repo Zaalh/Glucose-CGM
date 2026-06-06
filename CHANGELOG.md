@@ -12,6 +12,15 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Gewijzigd
 
+- **Post-hypo instabiliteit voor V2** — `buildHypoFeatures` levert nu
+  `recentLowMmol`, `minutesSinceRecentLow`, `reboundFromRecentLowMmol`,
+  `recentLevel1Hypo` en `recentLevel2Hypo`. `evaluateReactiveHypoRiskV2` gebruikt die
+  als `recentLowScore` en veiligheids-override: na een recente diepe hypo (<3.0) blijft
+  risico hoog, en bij opnieuw dalen rond laag gebied blijft het urgent. Dit voorkomt dat
+  het alarm verdwijnt doordat de CGM kort boven 4.5 komt terwijl herstel nog instabiel
+  is. Nieuwe regressiefixture: `scripts/fixtures/post-hypo-unstable-fall.json`. Lokaal
+  en op de Docker-machine geverifieerd met `npm run detector:fixtures`; live sync
+  herstart en nieuwe snapshots bevatten de recent-low features.
 - **Data-quality gate voor V1 + V2 (Laag 10)** — `hypo-features.mjs` levert nu
   `features.dataQuality` met flags voor oude metingen, grote gaten, dubbele
   timestamps, out-of-order timestamps, sparse recente data en toekomsttimestamps.

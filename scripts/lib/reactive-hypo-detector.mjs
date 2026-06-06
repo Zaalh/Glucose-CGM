@@ -136,6 +136,9 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
   const peak = num(f.peakMmol120m, 0)
   const minSincePeak = num(f.minutesSincePeak, 999)
   const lagAdjusted = num(f.lagAdjustedMmol, current)
+  const recentLow = num(f.recentLowMmol, current)
+  const minutesSinceRecentLow = num(f.minutesSinceRecentLow, 999)
+  const reboundFromRecentLow = num(f.reboundFromRecentLowMmol, 0)
   const ageSeconds = Number.isFinite(f.ageSeconds) ? f.ageSeconds : 0
   const dataQuality = f.dataQuality || null
   const qualityLevel = dataQuality?.level || 'good'
@@ -248,7 +251,33 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
   }
   components.lagScore = lagScore
 
-  // 6. Persoonlijke patroonmatch (optioneel; neutraal zonder data)
+  // 6. Recent-hypo context: bij jouw patroon kan de sensor na een diepe dip kort
+  // opveren, maar het risico is pas echt weg als de waarde stabiel boven near-low
+  // blijft. Een recente level-2 dip (<3.0) of level-1 dip met dalende trend houdt
+  // daarom een risicovloer vast.
+  let recentLowScore = 0
+  const recentHypo = recentLow < TH.low && minutesSinceRecentLow <= 120
+  const recentDeepHypo = recentLow < 3.0 && minutesSinceRecentLow <= 120
+  const unstableAfterLow =
+    recentHypo &&
+    minutesSinceRecentLow <= 90 &&
+    (current < 5.5 || falling || lagAdjusted < TH.near || reboundFromRecentLow < 1.2)
+  if (recentDeepHypo) {
+    recentLowScore += 3
+    reasons.push(`Recente diepe hypo: nadir ${recentLow} mmol/L`)
+  } else if (recentHypo && unstableAfterLow) {
+    recentLowScore += 2
+    reasons.push(`Recente hypo: nadir ${recentLow} mmol/L`)
+  } else if (recentHypo && current < 5.5) {
+    recentLowScore += 1
+  }
+  if (unstableAfterLow && falling) {
+    recentLowScore += 1
+    reasons.push('Herstel na hypo is nog instabiel')
+  }
+  components.recentLowScore = recentLowScore
+
+  // 7. Persoonlijke patroonmatch (optioneel; neutraal zonder data)
   let patternScore = 0
   if (pattern && num(pattern.similarEpisodeCount, 0) >= 5) {
     const ratio = num(pattern.similarHypoRatio, 0)
@@ -313,6 +342,9 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
     dampingScore += 3
     if (current >= TH.near) reasons.push('Daling keert om')
   }
+  if (unstableAfterLow) {
+    dampingScore = Math.max(0, dampingScore - 2)
+  }
   // Nachtmetingen zijn gevoeliger voor compressie/ruis en minder vaak een maaltijdrespons.
   // Maak V2 daar iets conservatiever, behalve bij duidelijke actuele/voorspelde low.
   if (f.timeOfDay === 'nacht' && current >= TH.near && steepest > TH.veryFastFall) {
@@ -335,7 +367,7 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
   // mealOnsetScore telt bewust NIET mee in de score: het is een risk-floor (watch),
   // geen bewijs richting urgent. Zo kan een stijgende fase nooit een alarm worden.
   const rawScore =
-    currentScore + rateScore + reactiveScore + forecastScore + lagScore + patternScore - dampingScore
+    currentScore + rateScore + reactiveScore + forecastScore + lagScore + recentLowScore + patternScore - dampingScore
   const score = Math.max(0, rawScore)
 
   const scenarios = buildScenarios(f)
@@ -348,6 +380,9 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
   if (f.minutesTo45 !== null && f.minutesTo45 >= 0 && f.minutesTo45 <= 15 && drop >= 1.5) {
     risk = atLeast(risk, 'likely')
   }
+  if (recentDeepHypo && unstableAfterLow) risk = atLeast(risk, 'likely')
+  if (recentDeepHypo && falling && current < 5.5) risk = atLeast(risk, 'urgent')
+  if (recentHypo && falling && lagAdjusted < TH.low) risk = atLeast(risk, 'urgent')
 
   // --- Onzekerheids-overrides (worst-case scenario) ---
   if (P.worstCaseToLikely && scenarios.worstCaseMin30 < TH.low) {
@@ -365,13 +400,14 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
 
   if ((qualityDegraded || qualityWatch) && current >= TH.near) {
     const hardNearTermLow = f.minutesTo40 !== null && f.minutesTo40 >= 0 && f.minutesTo40 <= 10
-    if (qualityDegraded && risk === 'urgent' && !hardNearTermLow) {
+    const hardPostHypoInstability = recentDeepHypo && unstableAfterLow && falling && current < 5.5
+    if (qualityDegraded && risk === 'urgent' && !hardNearTermLow && !hardPostHypoInstability) {
       risk = 'likely'
       reasons.push('Urgent gedempt door datakwaliteit')
     } else if (qualityDegraded && risk === 'likely' && !fastReactive && !hardNearTermLow) {
       risk = 'watch'
       reasons.push('Likely gedempt door datakwaliteit')
-    } else if (qualityWatch && risk === 'urgent' && !hardNearTermLow) {
+    } else if (qualityWatch && risk === 'urgent' && !hardNearTermLow && !hardPostHypoInstability) {
       risk = 'likely'
       reasons.push('Urgent gedempt door datakwaliteit watch')
     }

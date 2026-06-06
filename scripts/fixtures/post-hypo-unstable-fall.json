@@ -1,0 +1,26 @@
+{
+  "name": "post-hypo-unstable-fall",
+  "description": "Jouw live patroon: piek rond 12, diepe hypo rond 2.9, daarna net boven 4.5 maar opnieuw snel dalend. Risico is niet weg door alleen de actuele waarde.",
+  "expect": { "atLeast": "urgent" },
+  "readings": [
+    { "minutesAgo": 110, "mmol": 8.0 },
+    { "minutesAgo": 100, "mmol": 10.8 },
+    { "minutesAgo": 95, "mmol": 12.0 },
+    { "minutesAgo": 90, "mmol": 11.6 },
+    { "minutesAgo": 80, "mmol": 8.0 },
+    { "minutesAgo": 70, "mmol": 5.5 },
+    { "minutesAgo": 60, "mmol": 3.5 },
+    { "minutesAgo": 55, "mmol": 2.9 },
+    { "minutesAgo": 50, "mmol": 3.2 },
+    { "minutesAgo": 45, "mmol": 3.8 },
+    { "minutesAgo": 40, "mmol": 4.4 },
+    { "minutesAgo": 35, "mmol": 4.9 },
+    { "minutesAgo": 30, "mmol": 5.2 },
+    { "minutesAgo": 25, "mmol": 5.3 },
+    { "minutesAgo": 20, "mmol": 5.25 },
+    { "minutesAgo": 15, "mmol": 5.1 },
+    { "minutesAgo": 10, "mmol": 4.9 },
+    { "minutesAgo": 5, "mmol": 4.7 },
+    { "minutesAgo": 0, "mmol": 4.55 }
+  ]
+}

@@ -14,6 +14,7 @@ export const MGDL_PER_MMOL = 18.0182
 // offline exact gelijk uitvalt.
 const BLEND_WEIGHTS = { r5: 0.5, r10: 0.33, r15: 0.17 }
 const PEAK_WINDOW_MINUTES = 120
+const RECENT_LOW_WINDOW_MINUTES = 120
 const FALL_RATE_WINDOWS = [5, 10, 15, 20, 30]
 const DEFAULT_LAG_MINUTES = 5
 const DEFAULT_TIME_ZONE = 'Europe/Amsterdam'
@@ -287,6 +288,17 @@ function findTrough(timeline, latestIndex, windowMinutes) {
   return trough
 }
 
+function findRecentLow(timeline, latestIndex, windowMinutes) {
+  const latest = timeline[latestIndex]
+  const from = latest.date - windowMinutes * 60_000
+  let low = timeline[latestIndex]
+  for (let i = latestIndex; i >= 0; i -= 1) {
+    if (timeline[i].date < from) break
+    if (Number(timeline[i].sgv) <= Number(low.sgv)) low = timeline[i]
+  }
+  return low
+}
+
 function resampleCurve(timeline, fromMs, toMs, points) {
   if (!timeline.length || points < 2 || toMs <= fromMs) return null
   const out = []
@@ -422,6 +434,11 @@ export function buildHypoFeatures(timeline, idx, options = {}) {
   const peakToCurrentSlope = minutesSincePeak > 0 ? dropFromPeakMmol / minutesSincePeak : 0
   const liveCurveShape = partialCurveShape(workTimeline, peak, latest)
 
+  const recentLow = findRecentLow(workTimeline, idx, RECENT_LOW_WINDOW_MINUTES)
+  const recentLowMmol = toMmol(recentLow.sgv)
+  const minutesSinceRecentLow = (latest.date - recentLow.date) / 60_000
+  const reboundFromRecentLowMmol = currentMmol - recentLowMmol
+
   // Geschatte tijd tot grenswaarden bij huidige (negatieve) blendedRate.
   const fallRate = blendedRate < -0.01 ? Math.abs(blendedRate) : null
   const minutesTo45 = fallRate && currentMmol > 4.5 ? (currentMmol - 4.5) / fallRate : null
@@ -479,6 +496,11 @@ export function buildHypoFeatures(timeline, idx, options = {}) {
     dropFromPeakPercent: round(dropFromPeakPercent, 1),
     peakToCurrentSlope: round(peakToCurrentSlope, 4),
     postPeakWindow: postPeakWindow(minutesSincePeak, dropFromPeakMmol),
+    recentLowMmol: round(recentLowMmol, 3),
+    minutesSinceRecentLow: round(minutesSinceRecentLow, 1),
+    reboundFromRecentLowMmol: round(reboundFromRecentLowMmol, 3),
+    recentLevel1Hypo: recentLowMmol < 3.9 && minutesSinceRecentLow <= RECENT_LOW_WINDOW_MINUTES,
+    recentLevel2Hypo: recentLowMmol < 3.0 && minutesSinceRecentLow <= RECENT_LOW_WINDOW_MINUTES,
     timeOfDay: timeOfDayFor(latest.date, timeZone),
     weekday: weekdayFor(latest.date, timeZone),
     liveCurveShape,
