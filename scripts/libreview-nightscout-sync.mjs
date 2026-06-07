@@ -208,7 +208,11 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
     // ten onrechte matchen en de forecast omlaag trekken.
     const isDropContext = dropFromPeakMmol >= 2 && minutesSincePeak <= 60
     const similar = isDropContext
-      ? findSimilarEpisodes({ peakMmol, dropFromPeakMmol, minutesSincePeak }, episodeVectors)
+      ? findSimilarEpisodes(
+          { peakMmol, dropFromPeakMmol, minutesSincePeak },
+          episodeVectors,
+          { currentMs: entry.date, recencyDays: v2State ? v2State.params?.patternRecencyDays : null },
+        )
       : null
 
     const shadowFeaturesFull = buildHypoFeatures(workTimeline, idx, { nowMs: entry.date, cleanTimeline: false })
@@ -260,7 +264,9 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
     // V2-pattern uit dezelfde featureset die V2 zelf ziet, via de gedeelde helper —
     // zo is het pattern in live én backtest exact gelijk (echte train/serve-pariteit;
     // anders verschilt minutesSincePeak door de tie-break in de piekselectie).
-    const pattern = patternFromFeatures(shadowFeaturesFull, episodeVectors)
+    const pattern = patternFromFeatures(shadowFeaturesFull, episodeVectors, {
+      recencyDays: v2State ? v2State.params?.patternRecencyDays : null,
+    })
 
     // V2 (reactieve detector) berekenen — hergebruik de al gebouwde featureset.
     let shadow = null
@@ -287,6 +293,7 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
     const primary = v2Active
       ? { risk: mapV2Alarm(v2.risk), riskScore: v2.score, reasons: v2.reasons, modelVersion: v2.modelVersion, legacyRisk: risk.risk, legacyScore: risk.score }
       : { risk: risk.risk, riskScore: risk.score, reasons: risk.reasons, modelVersion: 'rules-v1.1', legacyRisk: null, legacyScore: null }
+    const carbAdvice = buildCarbAdvice({ currentMmol, risk: primary, v2, features, pattern })
 
     return {
       createdAt: entry.dateString ?? new Date(entry.date).toISOString(),
@@ -296,6 +303,7 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
       riskScore: primary.riskScore,
       reasons: primary.reasons,
       riskDetails: risk.details,
+      carbAdvice,
       legacyRisk: primary.legacyRisk,
       legacyScore: primary.legacyScore,
       predictedMmol: forecast.predictedMmol,
@@ -332,6 +340,7 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
             riskScore: snapshot.riskScore,
             reasons: snapshot.reasons,
             riskDetails: snapshot.riskDetails,
+            carbAdvice: snapshot.carbAdvice,
             legacyRisk: snapshot.legacyRisk ?? null,
             legacyScore: snapshot.legacyScore ?? null,
             predictedMmol: snapshot.predictedMmol,
@@ -370,6 +379,101 @@ function mapV2Alarm(risk) {
   return risk === 'likely' ? 'high' : risk
 }
 
+function buildCarbAdvice({ currentMmol, risk, v2, features, pattern }) {
+  const f = features || {}
+  const predicted = v2?.predicted || {}
+  const scenarios = v2?.scenarios || null
+  const minutesTo40 = Number.isFinite(predicted.minutesTo40)
+    ? predicted.minutesTo40
+    : Number.isFinite(f.minutesTo40) ? f.minutesTo40 : null
+  const minutesTo45 = Number.isFinite(predicted.minutesTo45)
+    ? predicted.minutesTo45
+    : Number.isFinite(f.minutesTo45) ? f.minutesTo45 : null
+  const current = Number.isFinite(currentMmol) ? currentMmol : Number(f.currentMmol)
+  const blended = Number.isFinite(f.blendedRate) ? f.blendedRate : 0
+  const falling = blended < -0.01
+  const dropContext =
+    Number(f.dropFromPeakMmol) >= 1.5 &&
+    Number(f.minutesSincePeak) <= 90 &&
+    blended < -0.015
+  const patternRisk =
+    pattern &&
+    Number(pattern.similarEpisodeCount) >= 5 &&
+    Number(pattern.similarHypoRatio) >= 0.5
+  const worstCaseMin30 = scenarios && Number.isFinite(scenarios.worstCaseMin30)
+    ? scenarios.worstCaseMin30
+    : null
+
+  let action = 'none'
+  let urgency = 'none'
+  let title = 'Geen suikeradvies'
+  let message = 'Geen aanwijzing om nu suiker te nemen.'
+  let etaMinutes = null
+  const reasons = []
+
+  if (current < 4.0) {
+    action = 'eat_now'
+    urgency = 'urgent'
+    etaMinutes = 0
+    title = 'Neem nu snelle koolhydraten'
+    message = 'Je glucose is al onder 4.0 mmol/L.'
+    reasons.push('actueel onder 4.0')
+  } else if (current < 4.5 && falling) {
+    action = 'eat_now'
+    urgency = 'high'
+    etaMinutes = 0
+    title = 'Neem nu suiker'
+    message = 'Je zit onder 4.5 mmol/L en daalt nog.'
+    reasons.push('onder 4.5 en dalend')
+  } else if (minutesTo40 !== null && minutesTo40 >= 0 && minutesTo40 <= 15) {
+    action = 'eat_now'
+    urgency = 'high'
+    etaMinutes = Math.round(minutesTo40)
+    title = 'Neem nu suiker'
+    message = `Projectie onder 4.0 binnen ${Math.round(minutesTo40)} min.`
+    reasons.push('projectie onder 4.0 binnen 15 min')
+  } else if (minutesTo45 !== null && minutesTo45 >= 0 && minutesTo45 <= 10 && dropContext) {
+    action = 'eat_now'
+    urgency = 'high'
+    etaMinutes = Math.round(minutesTo45)
+    title = 'Neem nu suiker'
+    message = `Projectie onder 4.5 binnen ${Math.round(minutesTo45)} min bij post-piek daling.`
+    reasons.push('projectie onder 4.5 binnen 10 min met post-piek daling')
+  } else if (minutesTo40 !== null && minutesTo40 > 15 && minutesTo40 <= 30) {
+    action = 'prepare'
+    urgency = 'watch'
+    etaMinutes = Math.round(minutesTo40)
+    title = 'Houd suiker klaar'
+    message = `Mogelijk onder 4.0 over ${Math.round(minutesTo40)} min als deze daling doorzet.`
+    reasons.push('projectie onder 4.0 binnen 30 min')
+  } else if (
+    risk &&
+    (risk.risk === 'high' || risk.risk === 'urgent') &&
+    worstCaseMin30 !== null &&
+    worstCaseMin30 < 4.5 &&
+    (falling || dropContext || patternRisk)
+  ) {
+    action = 'prepare'
+    urgency = risk.risk === 'urgent' ? 'high' : 'watch'
+    title = urgency === 'high' ? 'Overweeg nu suiker' : 'Houd suiker klaar'
+    message = `Worst-case voorspelling komt binnen 30 min onder ${worstCaseMin30.toFixed(1)} mmol/L.`
+    reasons.push('worst-case onder 4.5 binnen 30 min')
+  }
+
+  return {
+    action,
+    urgency,
+    title,
+    message,
+    etaMinutes,
+    reasons,
+    minutesTo40: minutesTo40 === null ? null : round(minutesTo40, 1),
+    minutesTo45: minutesTo45 === null ? null : round(minutesTo45, 1),
+    worstCaseMin30: worstCaseMin30 === null ? null : round(worstCaseMin30, 3),
+    generatedAt: new Date().toISOString(),
+  }
+}
+
 // Leest de geleerde V2-parameters van schijf (geschreven door de wekelijkse
 // auto-tuner). Afwezig/ongeldig = null -> V2 draait op defaults.
 function loadReactiveHypoV2State() {
@@ -404,7 +508,7 @@ async function loadEpisodeVectors() {
     client = new MongoClient(config.mongoUri)
     await client.connect()
     return await client.db().collection('episode_vectors')
-      .find({}, { projection: { featureVector: 1, outcome: 1, eventType: 1 } })
+      .find({}, { projection: { featureVector: 1, outcome: 1, eventType: 1, peakDate: 1, startDate: 1, endDate: 1 } })
       .limit(2000)
       .toArray()
   } catch {
@@ -780,7 +884,7 @@ async function getLatestPredictionSnapshot() {
     client = new MongoClient(config.mongoUri)
     await client.connect()
     return await client.db().collection('prediction_snapshots')
-      .find({}, { projection: { createdAt: 1, entryIdentifier: 1, predictedMmol: 1, probabilities: 1, modelVersion: 1, currentMmol: 1, rawCurrentMmol: 1, spikeFiltered: 1, risk: 1, riskScore: 1, reasons: 1, riskDetails: 1, legacyRisk: 1, legacyScore: 1, features: 1, predicted: 1, pattern: 1, v2Components: 1, v2Uncertainty: 1, shadowModelVersion: 1, shadowRisk: 1, shadowScore: 1, shadowConfidence: 1, shadowReasons: 1, shadowTuned: 1 } })
+      .find({}, { projection: { createdAt: 1, entryIdentifier: 1, predictedMmol: 1, probabilities: 1, modelVersion: 1, currentMmol: 1, rawCurrentMmol: 1, spikeFiltered: 1, risk: 1, riskScore: 1, reasons: 1, riskDetails: 1, carbAdvice: 1, legacyRisk: 1, legacyScore: 1, features: 1, predicted: 1, pattern: 1, v2Components: 1, v2Uncertainty: 1, shadowModelVersion: 1, shadowRisk: 1, shadowScore: 1, shadowConfidence: 1, shadowReasons: 1, shadowTuned: 1 } })
       .sort({ createdAt: -1 })
       .limit(1)
       .next()

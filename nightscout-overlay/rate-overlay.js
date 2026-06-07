@@ -757,6 +757,11 @@
       '#cgm-rate-overlay.all .rate-sub{font-size:6px}',
       '#cgm-rate-overlay.all .rate-arrow{right:2px;font-size:12px}',
       '#cgm-hypo-alert{position:absolute!important;z-index:10000!important;left:50%;transform:translateX(-50%);top:174px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;width:max-content;max-width:min(700px,90vw);min-width:320px;border:1px solid rgba(255,255,255,.24);border-radius:7px;padding:8px 14px;font-family:Arial,Helvetica,sans-serif;box-sizing:border-box;box-shadow:0 1px 8px rgba(0,0,0,.5)}',
+      '#cgm-hypo-alert.has-carb{display:grid;grid-template-columns:minmax(0,1fr) 168px;column-gap:10px;align-items:center;max-width:min(700px,90vw)}',
+      '#cgm-hypo-alert .hypo-main{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-width:0}',
+      '#cgm-carb-advice{display:none;min-width:0;border-left:1px solid rgba(0,0,0,.22);padding-left:10px;font-family:Arial,Helvetica,sans-serif;box-sizing:border-box;color:inherit}',
+      '#cgm-carb-advice .carb-title{display:block;font-size:13px;font-weight:900;line-height:1;text-transform:uppercase;white-space:normal}',
+      '#cgm-carb-advice .carb-message{display:block;font-size:10px;font-weight:800;line-height:1.15;margin-top:4px;white-space:normal}',
       '#cgm-hypo-alert .hypo-line{display:flex;align-items:center;justify-content:center;gap:10px;white-space:nowrap}',
       '#cgm-hypo-alert .hypo-line.primary{display:flex;flex-direction:column;gap:2px;align-items:center;justify-content:center}',
       '#cgm-hypo-alert .hypo-title{font-size:15px;font-weight:900;line-height:1;text-transform:uppercase;white-space:nowrap}',
@@ -823,7 +828,8 @@
       '#cgm-rate-overlay .fast-up{color:#faf5ff;border-color:#a855f7;background:linear-gradient(135deg,#c084fc 0%,#9333ea 100%);text-shadow:0 1px 2px rgba(0,0,0,.42)}',
       '#cgm-rate-overlay .very-fast-up{color:#faf5ff;border-color:#7e22ce;background:linear-gradient(135deg,#9333ea 0%,#581c87 100%);text-shadow:0 1px 2px rgba(0,0,0,.52)}',
       '#cgm-rate-overlay .missing{color:#8a8a8a;border-color:rgba(255,255,255,.14);background:rgba(0,0,0,.28)}',
-      '@media(max-width:700px){#cgm-mobile-dock{display:flex!important;flex-direction:column!important;width:100%!important;padding:8px 8px 0!important;box-sizing:border-box!important;gap:6px!important;clear:both!important}#cgm-mobile-dock #cgm-hypo-alert,#cgm-mobile-dock #cgm-rate-overlay,#cgm-mobile-dock #cgm-rate-toggle,#cgm-mobile-dock #cgm-rate-view-toggle,#cgm-mobile-dock #cgm-rate-history-nav{position:static!important;left:auto!important;right:auto!important;top:auto!important;bottom:auto!important;transform:none!important;box-sizing:border-box!important}#cgm-mobile-dock #cgm-hypo-alert{width:100%!important;max-width:100%!important;min-width:0!important;margin:0!important;gap:2px;padding:5px 7px}#cgm-mobile-dock #cgm-rate-overlay,#cgm-mobile-dock #cgm-rate-overlay.classic,#cgm-mobile-dock #cgm-rate-overlay.all{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:3px!important;width:100%!important;align-items:start!important;margin:0!important}#cgm-mobile-dock #cgm-rate-toggle,#cgm-mobile-dock #cgm-rate-view-toggle{display:inline-block!important;width:max-content!important;min-width:58px!important;margin:0 6px 0 0!important;padding:4px 7px!important;font-size:10px!important}#cgm-mobile-dock #cgm-rate-history-nav{width:max-content!important;max-width:100%!important;margin:0!important;font-size:10px!important;padding:2px 5px!important}#cgm-mobile-dock #cgm-hypo-alert .hypo-line{gap:4px;white-space:normal!important;text-align:center}#cgm-mobile-dock #cgm-hypo-alert .hypo-title{font-size:11px}#cgm-mobile-dock #cgm-hypo-alert .hypo-detail{font-size:16px}#cgm-mobile-dock #cgm-hypo-alert .hypo-rate{font-size:12px}#cgm-mobile-dock #cgm-hypo-alert .hypo-average{font-size:10px}#cgm-mobile-dock #cgm-hypo-alert .hypo-predict{font-size:9px;white-space:normal!important}#cgm-mobile-dock #cgm-hypo-alert .hypo-drop{font-size:9px;white-space:normal!important}#cgm-mobile-dock #cgm-rate-overlay .rate-card{padding:3px 16px 3px 5px;min-height:0}#cgm-mobile-dock #cgm-rate-overlay .rate-window{font-size:8px;line-height:1}#cgm-mobile-dock #cgm-rate-overlay .rate-main,#cgm-mobile-dock #cgm-rate-overlay .rate-card.primary .rate-main{font-size:12px;line-height:1.02;margin-top:1px}#cgm-mobile-dock #cgm-rate-overlay .rate-arrow{right:4px;font-size:14px}#cgm-mobile-dock #cgm-rate-overlay .rate-sub{font-size:7px;line-height:1.02;margin-top:1px}#cgm-stats-panel{grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:3px!important;width:98vw!important;padding:4px!important}#cgm-stats-panel .stat{padding:3px 4px}#cgm-stats-panel .stat-label{font-size:8px}#cgm-stats-panel .stat-value{font-size:11px}}'
+      '@media(min-width:701px) and (max-width:1180px){#cgm-hypo-alert.has-carb{grid-template-columns:minmax(0,1fr) 138px;column-gap:8px}#cgm-carb-advice{padding-left:8px}#cgm-carb-advice .carb-title{font-size:11px}#cgm-carb-advice .carb-message{font-size:9px}}',
+      '@media(max-width:700px){#cgm-mobile-dock{display:flex!important;flex-direction:column!important;width:100%!important;padding:8px 8px 0!important;box-sizing:border-box!important;gap:6px!important;clear:both!important}#cgm-mobile-dock #cgm-hypo-alert,#cgm-mobile-dock #cgm-carb-advice,#cgm-mobile-dock #cgm-rate-overlay,#cgm-mobile-dock #cgm-rate-toggle,#cgm-mobile-dock #cgm-rate-view-toggle,#cgm-mobile-dock #cgm-rate-history-nav{position:static!important;left:auto!important;right:auto!important;top:auto!important;bottom:auto!important;transform:none!important;box-sizing:border-box!important}#cgm-mobile-dock #cgm-hypo-alert,#cgm-mobile-dock #cgm-carb-advice{width:100%!important;max-width:100%!important;min-width:0!important;margin:0!important;gap:2px;padding:5px 7px}#cgm-mobile-dock #cgm-carb-advice .carb-title{font-size:12px}#cgm-mobile-dock #cgm-carb-advice .carb-message{font-size:10px;margin-top:2px}#cgm-mobile-dock #cgm-rate-overlay,#cgm-mobile-dock #cgm-rate-overlay.classic,#cgm-mobile-dock #cgm-rate-overlay.all{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:3px!important;width:100%!important;align-items:start!important;margin:0!important}#cgm-mobile-dock #cgm-rate-toggle,#cgm-mobile-dock #cgm-rate-view-toggle{display:inline-block!important;width:max-content!important;min-width:58px!important;margin:0 6px 0 0!important;padding:4px 7px!important;font-size:10px!important}#cgm-mobile-dock #cgm-rate-history-nav{width:max-content!important;max-width:100%!important;margin:0!important;font-size:10px!important;padding:2px 5px!important}#cgm-mobile-dock #cgm-hypo-alert .hypo-line{gap:4px;white-space:normal!important;text-align:center}#cgm-mobile-dock #cgm-hypo-alert .hypo-title{font-size:11px}#cgm-mobile-dock #cgm-hypo-alert .hypo-detail{font-size:16px}#cgm-mobile-dock #cgm-hypo-alert .hypo-rate{font-size:12px}#cgm-mobile-dock #cgm-hypo-alert .hypo-average{font-size:10px}#cgm-mobile-dock #cgm-hypo-alert .hypo-predict{font-size:9px;white-space:normal!important}#cgm-mobile-dock #cgm-hypo-alert .hypo-drop{font-size:9px;white-space:normal!important}#cgm-mobile-dock #cgm-rate-overlay .rate-card{padding:3px 16px 3px 5px;min-height:0}#cgm-mobile-dock #cgm-rate-overlay .rate-window{font-size:8px;line-height:1}#cgm-mobile-dock #cgm-rate-overlay .rate-main,#cgm-mobile-dock #cgm-rate-overlay .rate-card.primary .rate-main{font-size:12px;line-height:1.02;margin-top:1px}#cgm-mobile-dock #cgm-rate-overlay .rate-arrow{right:4px;font-size:14px}#cgm-mobile-dock #cgm-rate-overlay .rate-sub{font-size:7px;line-height:1.02;margin-top:1px}#cgm-stats-panel{grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:3px!important;width:98vw!important;padding:4px!important}#cgm-stats-panel .stat{padding:3px 4px}#cgm-stats-panel .stat-label{font-size:8px}#cgm-stats-panel .stat-value{font-size:11px}}'
     ].join('');
     document.head.appendChild(style);
   }
@@ -1035,6 +1041,20 @@
     return alert;
   }
 
+  function ensureCarbAdvice(parent) {
+    var existing = document.getElementById('cgm-carb-advice');
+    if (existing) {
+      if (parent && existing.parentElement !== parent) parent.appendChild(existing);
+      return existing;
+    }
+
+    var panel = document.createElement('div');
+    panel.id = 'cgm-carb-advice';
+    panel.setAttribute('aria-label', 'Suikeradvies');
+    (parent || document.body).appendChild(panel);
+    return panel;
+  }
+
   function ensurePointTooltip() {
     var existing = document.getElementById('cgm-point-rate-tooltip');
     if (existing) return existing;
@@ -1215,6 +1235,41 @@
     return line;
   }
 
+  function renderCarbAdvice(alert) {
+    var panel = ensureCarbAdvice(alert);
+    var p = latestDbPrediction;
+    if (!p || !p.carbAdvice) {
+      panel.style.display = 'none';
+      if (alert) alert.classList.remove('has-carb');
+      return;
+    }
+    if (latestReading && p.entryIdentifier && p.entryIdentifier !== latestReading.identifier) {
+      panel.style.display = 'none';
+      if (alert) alert.classList.remove('has-carb');
+      return;
+    }
+    var advice = p.carbAdvice;
+    if (!advice.action || advice.action === 'none') {
+      panel.style.display = 'none';
+      if (alert) alert.classList.remove('has-carb');
+      return;
+    }
+    panel.style.display = 'block';
+    panel.className = advice.action === 'eat_now' ? 'urgent' : 'prepare';
+    if (alert) alert.classList.add('has-carb');
+    var title = advice.title || (advice.action === 'eat_now' ? 'Neem nu suiker' : 'Houd suiker klaar');
+    var message = advice.message || '';
+    var titleParts = Array.isArray(advice.reasons) ? advice.reasons.filter(Boolean) : [];
+    if (Number.isFinite(advice.minutesTo40)) titleParts.push('tijd tot 4.0: ' + advice.minutesTo40 + ' min');
+    if (Number.isFinite(advice.minutesTo45)) titleParts.push('tijd tot 4.5: ' + advice.minutesTo45 + ' min');
+    if (titleParts.length) panel.setAttribute('title', titleParts.join(' · '));
+    else panel.removeAttribute('title');
+    panel.innerHTML = [
+      '<span class="carb-title">', escapeHtml(title), '</span>',
+      message ? '<span class="carb-message">' + escapeHtml(message) + '</span>' : ''
+    ].join('');
+  }
+
   function renderHypoAlert(risk) {
     var alert = ensureHypoAlert();
     currentHypoRisk = risk;
@@ -1230,7 +1285,8 @@
 
     alert.style.display = 'flex';
     var safeRisk = risk || { css: 'ok', title: 'HYPO OK', detail: 'Patroon actief', rate: (currentRows && currentRows.length ? getPrimaryRate(currentRows).rateMmol : 0) };
-    alert.className = safeRisk.css;
+    var hadCarb = alert.classList.contains('has-carb');
+    alert.className = safeRisk.css + (hadCarb ? ' has-carb' : '');
     var dropLine = dropFromPeakText(currentReadings);
 
     // Bij lows leest de armsensor te hoog/te traag (interstitieel loopt achter en
@@ -1248,6 +1304,7 @@
       : '<div class="hypo-line"><span class="hypo-predict">verwacht: ' + horizonPredictionText() + ' mmol/L</span></div>';
 
     alert.innerHTML = [
+      '<div class="hypo-main">',
       '<div class="hypo-line primary">',
       '<span class="hypo-title">', safeRisk.title, '</span>',
       '<span class="hypo-valrate">',
@@ -1260,8 +1317,10 @@
       predictHtml,
       dropLine ? '<div class="hypo-line"><span class="hypo-drop">' + dropLine + '</span></div>' : '',
       dbPatternLine ? '<div class="hypo-line"><span class="hypo-drop" style="color: #ff9800; font-weight: bold;">' + escapeHtml(dbPatternLine) + '</span></div>' : '',
-      patternLine ? '<div class="hypo-line"><span class="hypo-drop" style="color: #ff9800; font-weight: bold;">' + escapeHtml(patternLine) + '</span></div>' : ''
+      patternLine ? '<div class="hypo-line"><span class="hypo-drop" style="color: #ff9800; font-weight: bold;">' + escapeHtml(patternLine) + '</span></div>' : '',
+      '</div>'
     ].join('');
+    renderCarbAdvice(alert);
   }
 
   function sendFeedback(type, btn) {
@@ -1837,7 +1896,7 @@
     var target = mutation.target;
     if (!target || !target.closest) return false;
     return Boolean(target.closest(
-      '#cgm-rate-overlay, #cgm-hypo-alert, #cgm-rate-toggle, #cgm-rate-view-toggle, #cgm-rate-history-nav, #cgm-stats-panel, #cgm-point-rate-tooltip'
+      '#cgm-rate-overlay, #cgm-hypo-alert, #cgm-carb-advice, #cgm-rate-toggle, #cgm-rate-view-toggle, #cgm-rate-history-nav, #cgm-stats-panel, #cgm-point-rate-tooltip'
     ));
   }
 
