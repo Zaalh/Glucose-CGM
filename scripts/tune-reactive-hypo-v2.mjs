@@ -12,7 +12,7 @@
 // Lokaal proefdraaien zonder database:
 //   node scripts/tune-reactive-hypo-v2.mjs --self-test
 
-import { writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { MongoClient } from 'mongodb'
@@ -38,13 +38,45 @@ function paramGrid() {
       for (const accelDownBonus of [0, 1]) {
         for (const worstCaseToLikely of [true, false]) {
           for (const safeNadirDamping of [false, true]) {
-            grid.push({ scoreCut: { watch: 3, likely, urgent }, accelDownBonus, worstCaseToLikely, safeNadirDamping })
+            for (const patternRecencyDays of [null, 7, 14, 21]) {
+              grid.push({
+                scoreCut: { watch: 3, likely, urgent },
+                accelDownBonus,
+                worstCaseToLikely,
+                safeNadirDamping,
+                patternRecencyDays,
+                safeUncertaintyDamping: false,
+                recentLowRecoveryDamping: false,
+              })
+            }
           }
         }
       }
     }
   }
   return grid
+}
+
+function dampingRefinementGrid(baseParams) {
+  const base = {
+    ...baseParams,
+    safeUncertaintyDamping: false,
+    recentLowRecoveryDamping: false,
+  }
+  return [
+    base,
+    { ...base, safeUncertaintyDamping: true },
+    { ...base, recentLowRecoveryDamping: true },
+    { ...base, safeUncertaintyDamping: true, recentLowRecoveryDamping: true },
+  ]
+}
+
+function loadState() {
+  try {
+    return JSON.parse(readFileSync(STATE_PATH, 'utf8'))
+  } catch {
+    return null
+  }
 }
 
 function line(m) {
@@ -95,7 +127,9 @@ function tune(timeline, options = {}) {
   const trainCtx = buildReplayContext(timeline, { ...ctxOpts, toMs: splitMs })
   const testCtx = buildReplayContext(timeline, { ...ctxOpts, fromMs: splitMs })
 
-  const grid = paramGrid()
+  const grid = options.refineDamping && options.baseParams
+    ? dampingRefinementGrid(options.baseParams)
+    : paramGrid()
   const results = grid.map((params) => ({
     params,
     train: evaluateV2(trainCtx, params).metrics,
@@ -183,6 +217,8 @@ function selfTimeline() {
 
 async function main() {
   const selfTest = process.argv.includes('--self-test')
+  const refineDamping = process.argv.includes('--refine-damping')
+  const currentState = process.argv.includes('--current-state')
   let timeline
   let episodeVectors = null
   let client = null
@@ -202,7 +238,20 @@ async function main() {
   }
 
   try {
-    const result = tune(timeline, selfTest ? { sustainMin: 5, minEvents: 1 } : { episodeVectors })
+    const baseOptions = selfTest ? { sustainMin: 5, minEvents: 1 } : { episodeVectors }
+    const existingState = currentState ? loadState() : null
+    if (currentState && !existingState?.params) {
+      console.log(JSON.stringify({ ok: false, reason: 'geen huidige state params gevonden' }))
+      process.exit(1)
+    }
+    const baseResult = currentState
+      ? null
+      : tune(timeline, baseOptions)
+    const result = refineDamping && currentState
+      ? tune(timeline, { ...baseOptions, refineDamping: true, baseParams: existingState.params })
+      : refineDamping && baseResult.ok
+        ? tune(timeline, { ...baseOptions, refineDamping: true, baseParams: baseResult.bestParams })
+        : baseResult
     if (!result.ok) {
       console.log(JSON.stringify(result))
       process.exit(1)
@@ -217,9 +266,11 @@ async function main() {
       )
       process.exit(2)
     }
-    if (!selfTest) {
+    if (!selfTest && process.env.HYPO_TUNE_DRY_RUN !== '1') {
       writeFileSync(STATE_PATH, JSON.stringify(state, null, 2) + '\n')
       console.log(`\nstate geschreven: ${STATE_PATH}`)
+    } else if (!selfTest) {
+      console.log('\ndry-run: state niet geschreven')
     } else {
       console.log('\nSELF-TEST OK')
     }

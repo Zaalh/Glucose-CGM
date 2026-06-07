@@ -1,0 +1,21 @@
+{
+  "name": "stable-post-hypo-recovery",
+  "description": "Recente hypo is ruim hersteld: waarde boven 6.0, vlak/stijgend, rebound ruim. Met recovery-demping mag dit geen luid alarm blijven.",
+  "params": { "recentLowRecoveryDamping": true, "safeNadirDamping": true },
+  "readings": [
+    { "minutesAgo": 120, "mmol": 8.8 },
+    { "minutesAgo": 110, "mmol": 8.2 },
+    { "minutesAgo": 100, "mmol": 7.1 },
+    { "minutesAgo": 90, "mmol": 5.8 },
+    { "minutesAgo": 80, "mmol": 4.2 },
+    { "minutesAgo": 70, "mmol": 3.6 },
+    { "minutesAgo": 60, "mmol": 3.7 },
+    { "minutesAgo": 50, "mmol": 4.4 },
+    { "minutesAgo": 40, "mmol": 5.2 },
+    { "minutesAgo": 30, "mmol": 5.8 },
+    { "minutesAgo": 20, "mmol": 6.1 },
+    { "minutesAgo": 10, "mmol": 6.2 },
+    { "minutesAgo": 0, "mmol": 6.2 }
+  ],
+  "expect": { "atMost": "watch" }
+}

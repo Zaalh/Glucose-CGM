@@ -168,6 +168,7 @@ export function buildReplayContext(timeline, options = {}) {
   const denseLookbackMin = options.denseLookbackMin ?? 15
   const denseMinSamples = options.denseMinSamples ?? 4
   const predictiveFloor = options.predictiveFloor ?? HYPO_MMOL
+  const cleanTimeline = options.cleanTimeline !== false
   const fromMs = options.fromMs ?? -Infinity
   const toMs = options.toMs ?? Infinity
   const startMs = timeline.length ? timeline[0].date + warmupMs : 0
@@ -177,7 +178,7 @@ export function buildReplayContext(timeline, options = {}) {
     const t = timeline[i].date
     if (t < startMs || t < fromMs || t > toMs) continue
     if (!denseAt(timeline, i, denseLookbackMin, denseMinSamples)) continue
-    const f = buildHypoFeatures(timeline, i, { nowMs: t })
+    const f = buildHypoFeatures(timeline, i, { nowMs: t, cleanTimeline })
     points.push({ idx: i, date: t, mmol: f.currentMmol, features: f })
   }
 
@@ -191,7 +192,18 @@ export function buildReplayContext(timeline, options = {}) {
   // dat ook; null => geen pattern (V2 valt terug op patternScore 0, zoals voorheen).
   const episodeVectors = options.episodeVectors ?? null
 
-  return { timeline, points, hypoOnsets, nearOnsets, windowMs, mergeGapMs, predictiveFloor, sustainMin: options.sustainMin ?? SUSTAIN_MIN, episodeVectors }
+  return {
+    timeline,
+    points,
+    hypoOnsets,
+    nearOnsets,
+    windowMs,
+    mergeGapMs,
+    predictiveFloor,
+    sustainMin: options.sustainMin ?? SUSTAIN_MIN,
+    episodeVectors,
+    patternCache: new Map(),
+  }
 }
 
 export function evaluateV1(ctx) {
@@ -212,17 +224,38 @@ export function evaluateV1(ctx) {
   return { metrics: scoreModel(pts, ctx.hypoOnsets, ctx.windowMs, ctx.mergeGapMs, ctx.predictiveFloor), points: pts }
 }
 
+function patternKey(recencyDays) {
+  return Number.isFinite(recencyDays) && recencyDays > 0 ? String(recencyDays) : 'all'
+}
+
+function patternsFor(ctx, recencyDays) {
+  if (!ctx.episodeVectors) return null
+  const key = patternKey(recencyDays)
+  if (ctx.patternCache.has(key)) return ctx.patternCache.get(key)
+  const patterns = new Map()
+  for (const p of ctx.points) {
+    const pattern = patternFromFeatures(p.features, ctx.episodeVectors, { recencyDays })
+    if (pattern) patterns.set(p.idx, pattern)
+  }
+  ctx.patternCache.set(key, patterns)
+  return patterns
+}
+
 export function evaluateV2(ctx, params) {
+  const patterns = patternsFor(ctx, params?.patternRecencyDays)
   const pts = ctx.points.map((p) => {
-    const pattern = ctx.episodeVectors ? patternFromFeatures(p.features, ctx.episodeVectors) : null
+    const pattern = patterns ? patterns.get(p.idx) ?? null : null
     const r = evaluateReactiveHypoRiskV2(p.features, { params, pattern })
     return {
       idx: p.idx,
       date: p.date,
       mmol: p.mmol,
       risk: r.risk,
+      score: r.score,
       reasons: r.reasons,
       features: p.features,
+      pattern,
+      components: r.components,
       alert: ALERT_LEVELS.v2.has(r.risk),
     }
   })
@@ -286,7 +319,7 @@ export async function loadEpisodeVectors(client) {
     return await client
       .db()
       .collection('episode_vectors')
-      .find({}, { projection: { featureVector: 1, outcome: 1, eventType: 1 } })
+      .find({}, { projection: { featureVector: 1, outcome: 1, eventType: 1, peakDate: 1, startDate: 1, endDate: 1 } })
       .limit(2000)
       .toArray()
   } catch {

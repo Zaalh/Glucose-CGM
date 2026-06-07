@@ -104,6 +104,51 @@ blijft een vingerprik/medisch advies belangrijk.
 > én, eenmaal aangezet, de score juist verslechteren. Toets elke patroon-laag op de
 > bevroren split vóór activatie.
 
+> **Update 2026-06-07 — Laag 3 pattern-match recency-aware gemaakt, met gate.**
+> Controle van de live database liet zien dat `episode_vectors` technisch gezond zijn
+> (257/257 bruikbare `featureVector`s), maar dat ze alleen de recente dense periode
+> vanaf 2026-05-27 dekken; oudere entries zijn grotendeels 30-minuten-data en dus niet
+> geschikt voor curve-/episodevectors. Omdat het persoonlijke patroon kan wisselen,
+> mag Laag 3 niet blind oude en nieuwe episodes even zwaar blijven tellen. De gedeelde
+> similarity (`scripts/lib/episode-similarity.mjs`) is daarom aangepast:
+> 1. backtest/tuner sluiten nu toekomstige vectors uit per replay-punt (`peakDate` >
+>    huidige feature-datum), zodat component 6 geen look-ahead meer heeft;
+> 2. nieuwe tunebare parameter `patternRecencyDays` weegt recente vergelijkbare
+>    episodes zwaarder met een half-life (`null`, 7, 14 of 21 dagen in de grid);
+> 3. Laag 7 blijft expliciet uit (`enableWeekday` default false), ondanks het laden van
+>    datumvelden voor recency.
+> Default blijft `patternRecencyDays: null`; live verandert dus pas als de tuner de
+> recency-variant kiest én de M6-gate opnieuw slaagt (recall en precision out-of-sample
+> niet slechter dan V1). Dit adresseert patroon-drift zonder de eerder geleerde les te
+> negeren: geen pattern-laag wordt zwaarder zonder harde gate.
+
+> **Update 2026-06-07 — precision-analyse + kandidaat-demping, nog NIET live.**
+> Op de actuele live data is een read-only kwaliteitsanalyse toegevoegd
+> (`scripts/analyze-hypo-quality.mjs`, default `--days 14`, getest op 7 dagen). Laatste
+> 7 dagen: 9371 gescoorde punten, 31 hypo-onsets, 63 near-hypo-onsets. V2 tuned blijft
+> duidelijk veiliger dan V1 (**recall 0.968 vs 0.839**, gemist 1 vs 5) en iets preciezer
+> (**precision 0.133 vs 0.126**), maar false positives blijven hoog (273 over 7 dagen).
+> De hoofdbron is niet Laag 5/7, maar onzekerheids-/rate-/recent-low escalatie
+> (`Worst-case onder 4.5 bij wisselend patroon`, snelle daling, grote piekdaling,
+> instabiel herstel).
+>
+> Twee nieuwe FP-knoppen zijn daarom toegevoegd als **tunebare params, default uit**:
+> `safeUncertaintyDamping` (demp likely/urgent naar watch als alleen een brede worst-case
+> projectie richting 4.5 wijst terwijl actuele, lag-adjusted en 4.0-near-term signalen
+> veilig blijven) en `recentLowRecoveryDamping` (demp post-hypo nasleep als herstel
+> objectief stabiel lijkt: ruim boven 4.5, vlak/stijgend, voldoende rebound). Fixtures
+> dekken zowel stabiel herstel als de bestaande post-hypo-instabiliteit.
+>
+> Analyse-uitkomst: gerichte 7-daagse vergelijking rond de live params:
+> baseline precision 0.133 / recall 0.968 / FP 273; `safeUncertaintyDamping` 0.137 /
+> 0.968 / FP 264; `recentLowRecoveryDamping` 0.135 / 0.968 / FP 270; beide 0.138 /
+> 0.968 / FP 263. Een brede dry-run (niet geschreven) koos
+> `safeUncertaintyDamping: true` en `recentLowRecoveryDamping: false`
+> (test precision 0.131, recall 0.938, missed 1). **Besluit nu:** alleen
+> `safeUncertaintyDamping` is kandidaat voor live activatie; `recentLowRecoveryDamping`
+> blijft uit tot de gate het expliciet kiest. De live state is niet overschreven en de
+> sync is niet herstart.
+
 De V2-laag uit dit plan is gebouwd, gedeployed op de iMac en getest op echte data.
 Stand van zaken per mijlpaal:
 

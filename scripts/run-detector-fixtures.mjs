@@ -23,7 +23,7 @@ for (const file of files) {
   const fixture = JSON.parse(readFileSync(join(fixturesDir, file), 'utf8'))
   const timeline = timelineFromReadings(fixture.readings, NOW)
   const features = buildHypoFeatures(timeline, timeline.length - 1, { nowMs: NOW })
-  const result = evaluateReactiveHypoRiskV2(features, {})
+  const result = evaluateReactiveHypoRiskV2(features, { params: fixture.params })
 
   const checks = []
   if (fixture.expect?.atLeast) {

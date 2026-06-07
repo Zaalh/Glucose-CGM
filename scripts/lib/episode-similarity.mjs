@@ -6,6 +6,7 @@
 const SIM_SCALES = { peakMmol: 4, dropFromPeakMmol: 3, minutesSincePeak: 30 }
 const SIM_MAX_DIST = 1.5
 const SIM_K = 8
+const MS_PER_DAY = 86_400_000
 const CURVE_MIN_POINTS = 8
 const CURVE_MIN_SIMILARITY = 0.8
 const WEEKDAYS = ['maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag', 'zondag']
@@ -47,6 +48,12 @@ function weekdayOfVector(v) {
   }
 }
 
+function vectorTimeMs(v) {
+  const raw = v?.nadirAt || v?.peakAt || v?.peakDate || v?.startDate || v?.endDate || v?.createdAt
+  const ms = Date.parse(raw)
+  return Number.isFinite(ms) ? ms : null
+}
+
 function weekdayRisk(weekday, vectors) {
   if (!weekday || !vectors || !vectors.length) return null
   const counts = Object.fromEntries(WEEKDAYS.map((d) => [d, { total: 0, risky: 0 }]))
@@ -71,12 +78,27 @@ function weekdayRisk(weekday, vectors) {
   }
 }
 
+function recencyWeight(vectorMs, currentMs, recencyDays) {
+  if (!Number.isFinite(vectorMs) || !Number.isFinite(currentMs) || !Number.isFinite(recencyDays) || recencyDays <= 0) {
+    return 1
+  }
+  const ageDays = Math.max(0, (currentMs - vectorMs) / MS_PER_DAY)
+  // Half-life model: current pattern dominates, older dense data remains weak evidence.
+  return Math.pow(0.5, ageDays / recencyDays)
+}
+
 // Vergelijkt de huidige situatie met opgeslagen episode_vectors. Geeft een
 // gewogen drop-correctie en hoeveel vergelijkbare episodes in (near-)hypo eindigden.
-export function findSimilarEpisodes(input, vectors) {
+export function findSimilarEpisodes(input, vectors, options = {}) {
   if (!vectors || !vectors.length) return null
   const scored = []
+  const currentMs = Number.isFinite(options.currentMs) ? options.currentMs : null
+  const recencyDays = Number.isFinite(options.recencyDays) ? options.recencyDays : null
   for (const v of vectors) {
+    const vectorMs = vectorTimeMs(v)
+    // Backtests must not let future episodes inform earlier replay points. Live has
+    // no future vectors, but this keeps train/test parity honest.
+    if (currentMs !== null && vectorMs !== null && vectorMs > currentMs) continue
     const f = v.featureVector
     if (!f || !Number.isFinite(f.peakMmol) || !Number.isFinite(f.dropFromPeakMmol)) continue
     let sum = sq((f.peakMmol - input.peakMmol) / SIM_SCALES.peakMmol)
@@ -85,7 +107,14 @@ export function findSimilarEpisodes(input, vectors) {
       sum += sq((f.minutesPeakToEnd - input.minutesSincePeak) / SIM_SCALES.minutesSincePeak)
     }
     const dist = Math.sqrt(sum)
-    if (dist <= SIM_MAX_DIST) scored.push({ dist, drop: f.dropFromPeakMmol, outcome: v.outcome })
+    if (dist <= SIM_MAX_DIST) {
+      scored.push({
+        dist,
+        drop: f.dropFromPeakMmol,
+        outcome: v.outcome,
+        recencyWeight: recencyWeight(vectorMs, currentMs, recencyDays),
+      })
+    }
   }
   if (scored.length < 3) return null
 
@@ -93,43 +122,60 @@ export function findSimilarEpisodes(input, vectors) {
   const top = scored.slice(0, SIM_K)
   let wsum = 0
   let wdrop = 0
+  let whypo = 0
   let hypoCount = 0
   for (const s of top) {
-    const w = 1 / (1 + s.dist)
+    const w = (1 / (1 + s.dist)) * s.recencyWeight
     wsum += w
     wdrop += w * (Number.isFinite(s.drop) ? s.drop : 0)
-    if (s.outcome === 'hypo' || s.outcome === 'near_hypo') hypoCount += 1
+    if (s.outcome === 'hypo' || s.outcome === 'near_hypo') {
+      hypoCount += 1
+      whypo += w
+    }
   }
   const weightedDrop = wsum > 0 ? wdrop / wsum : 0
   return {
     count: top.length,
     hypoCount,
-    hypoRatio: top.length ? hypoCount / top.length : 0,
+    hypoRatio: wsum > 0 ? whypo / wsum : top.length ? hypoCount / top.length : 0,
     weightedDrop,
     correction: Math.max(0, weightedDrop * 0.18),
   }
 }
 
-export function findCurveMatches(liveCurveShape, vectors) {
+export function findCurveMatches(liveCurveShape, vectors, options = {}) {
   if (!liveCurveShape || liveCurveShape.length < CURVE_MIN_POINTS || !vectors || !vectors.length) return null
   const scored = []
+  const currentMs = Number.isFinite(options.currentMs) ? options.currentMs : null
+  const recencyDays = Number.isFinite(options.recencyDays) ? options.recencyDays : null
   for (const v of vectors) {
+    const vectorMs = vectorTimeMs(v)
+    if (currentMs !== null && vectorMs !== null && vectorMs > currentMs) continue
     if (!Array.isArray(v.vector) || v.vector.length < liveCurveShape.length) continue
     const historicalPrefix = normalize(v.vector.slice(0, liveCurveShape.length))
     const sim = cosine(liveCurveShape, historicalPrefix)
     if (Number.isFinite(sim) && sim >= CURVE_MIN_SIMILARITY) {
-      scored.push({ similarity: sim, outcome: v.outcome })
+      scored.push({ similarity: sim, outcome: v.outcome, recencyWeight: recencyWeight(vectorMs, currentMs, recencyDays) })
     }
   }
   if (scored.length < 3) return null
   scored.sort((a, b) => b.similarity - a.similarity)
   const top = scored.slice(0, SIM_K)
   const hypoCount = top.filter((s) => s.outcome === 'hypo' || s.outcome === 'near_hypo').length
-  const avgSimilarity = top.reduce((sum, s) => sum + s.similarity, 0) / top.length
+  let wsum = 0
+  let whypo = 0
+  let wsim = 0
+  for (const s of top) {
+    const w = s.recencyWeight
+    wsum += w
+    wsim += w * s.similarity
+    if (s.outcome === 'hypo' || s.outcome === 'near_hypo') whypo += w
+  }
+  const avgSimilarity = wsum > 0 ? wsim / wsum : top.reduce((sum, s) => sum + s.similarity, 0) / top.length
   return {
     count: top.length,
     hypoCount,
-    hypoRatio: top.length ? hypoCount / top.length : 0,
+    hypoRatio: wsum > 0 ? whypo / wsum : top.length ? hypoCount / top.length : 0,
     avgSimilarity,
   }
 }
@@ -137,17 +183,22 @@ export function findCurveMatches(liveCurveShape, vectors) {
 // Bouwt het `pattern`-object dat V2 (component 6 / patternScore) verwacht,
 // gedreven door dezelfde featureset die V2 zelf ziet. Zelfde drop-context-gate
 // als de live-sync: alleen bij een echte recente post-piek daling vergelijken.
-export function patternFromFeatures(features, vectors) {
+export function patternFromFeatures(features, vectors, options = {}) {
   if (!features) return null
   const peakMmol = features.peakMmol120m
   const dropFromPeakMmol = features.dropFromPeakMmol
   const minutesSincePeak = features.minutesSincePeak
   const isDropContext = dropFromPeakMmol >= 2 && minutesSincePeak <= 60
   if (!isDropContext) return null
-  const similar = findSimilarEpisodes({ peakMmol, dropFromPeakMmol, minutesSincePeak }, vectors)
+  const currentMs = Number.isFinite(features.date) ? features.date : null
+  const similar = findSimilarEpisodes(
+    { peakMmol, dropFromPeakMmol, minutesSincePeak },
+    vectors,
+    { currentMs, recencyDays: options.recencyDays },
+  )
   if (!similar) return null
-  const curve = findCurveMatches(features.liveCurveShape, vectors)
-  const wday = weekdayRisk(features.weekday, vectors)
+  const curve = findCurveMatches(features.liveCurveShape, vectors, { currentMs, recencyDays: options.recencyDays })
+  const wday = options.enableWeekday ? weekdayRisk(features.weekday, vectors) : null
   return {
     similarEpisodeCount: similar.count,
     similarHypoCount: similar.hypoCount,

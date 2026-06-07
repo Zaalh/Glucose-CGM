@@ -466,6 +466,7 @@ export function buildHypoFeatures(timeline, idx, options = {}) {
 
   return {
     // raw
+    date: latest.date,
     currentMmol: round(currentMmol, 3),
     previousMmol: previousMmol === null ? null : round(previousMmol, 3),
     delta5m: round(calcDelta(workTimeline, idx, 5), 3),

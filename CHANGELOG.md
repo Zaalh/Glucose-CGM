@@ -12,6 +12,23 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Gewijzigd
 
+- **Precision-analyse en kandidaat-dempingen voor V2 (nog niet live geactiveerd)** —
+  toegevoegd: read-only `scripts/analyze-hypo-quality.mjs` voor reproduceerbare
+  kwaliteitsanalyse op de huidige data (datadekking, vector-health, V1/V2 metrics,
+  pattern-bijdrage en false-positive redenen). Laatste 7-daagse analyse: V2 tuned
+  blijft veiliger dan V1 (recall 0.968 vs 0.839, gemist 1 vs 5) en iets preciezer
+  (precision 0.133 vs 0.126), maar false positives blijven hoog. Nieuwe tunable params
+  staan default uit: `safeUncertaintyDamping` en `recentLowRecoveryDamping`. Gerichte
+  7-daagse vergelijking rond de live params: baseline precision 0.133 / FP 273;
+  `safeUncertaintyDamping` 0.137 / FP 264; `recentLowRecoveryDamping` 0.135 / FP 270;
+  beide 0.138 / FP 263, met recall gelijk (0.968). Een brede dry-run koos
+  `safeUncertaintyDamping: true` maar niet `recentLowRecoveryDamping`. De live state is
+  niet overschreven; kandidaat voor live is voorlopig alleen `safeUncertaintyDamping`
+  na expliciete gate/activatie.
+- **Tuner refinement-modus voor FP-knoppen** — `tune-reactive-hypo-v2.mjs` houdt de
+  normale grid beperkt tot de bestaande hoofddrempels en biedt `--refine-damping` voor
+  vier gerichte varianten rond de beste basisparams. Zo testen we nieuwe demping zonder
+  de volledige grid onnodig breed te maken.
 - **Precision-knop `safeNadirDamping` (tunebaar, gevalideerd, live)** — nieuwe V2-param:
   als de actuele waarde ≥ 4.5 is én zelfs het pessimistische scenario (`worstCaseMin30`)
   boven 4.5 blijft, escaleert drop-from-peak-context niet langer naar high/urgent maar

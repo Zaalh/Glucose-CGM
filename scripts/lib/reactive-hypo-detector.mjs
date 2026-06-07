@@ -26,6 +26,9 @@ export const DEFAULT_PARAMS = {
   accelDownBonus: 1, // extra rate-punt bij versnellende daling (FP-gevoelig)
   worstCaseToLikely: true, // worst-case <4.0 dwingt minimaal 'likely'
   safeNadirDamping: false, // demp drop-context naar 'watch' als zelfs worst-case >=4.5 blijft
+  patternRecencyDays: null, // half-life voor persoonlijke pattern-match; null = alle vectors gelijk
+  safeUncertaintyDamping: false, // demp onzekerheids-only escalatie als harde low-signalen ontbreken
+  recentLowRecoveryDamping: false, // demp post-hypo nasleep als herstel objectief stabiel lijkt
 }
 
 function mergeParams(params) {
@@ -37,6 +40,18 @@ function mergeParams(params) {
       typeof p.worstCaseToLikely === 'boolean' ? p.worstCaseToLikely : DEFAULT_PARAMS.worstCaseToLikely,
     safeNadirDamping:
       typeof p.safeNadirDamping === 'boolean' ? p.safeNadirDamping : DEFAULT_PARAMS.safeNadirDamping,
+    patternRecencyDays:
+      Number.isFinite(p.patternRecencyDays) && p.patternRecencyDays > 0
+        ? p.patternRecencyDays
+        : DEFAULT_PARAMS.patternRecencyDays,
+    safeUncertaintyDamping:
+      typeof p.safeUncertaintyDamping === 'boolean'
+        ? p.safeUncertaintyDamping
+        : DEFAULT_PARAMS.safeUncertaintyDamping,
+    recentLowRecoveryDamping:
+      typeof p.recentLowRecoveryDamping === 'boolean'
+        ? p.recentLowRecoveryDamping
+        : DEFAULT_PARAMS.recentLowRecoveryDamping,
   }
 }
 
@@ -417,6 +432,45 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
     ) {
       risk = 'watch'
       reasons.push('Veilig uitbodemend: piekdaling maar voorspelde bodem blijft boven 4.5')
+    }
+  }
+
+  // --- Onzekerheids-only demping (precision, tunebaar; default uit) ---
+  // Meetdata laat veel FP's zien waar het enige near-low bewijs een brede worst-case
+  // projectie is. Houd watch als informatie, maar voorkom likely/urgent als actuele
+  // waarde, lag-adjusted waarde en near-term 4.0-forecast veilig blijven.
+  if (P.safeUncertaintyDamping === true) {
+    const hardNearTermLow = f.minutesTo40 !== null && f.minutesTo40 >= 0 && f.minutesTo40 <= 15
+    const uncertaintyOnlyLow =
+      current >= 5.5 &&
+      lagAdjusted >= TH.near &&
+      !hardNearTermLow &&
+      !recentDeepHypo &&
+      !(recentHypo && falling && lagAdjusted < TH.low) &&
+      scenarios.worstCaseMin30 < TH.near &&
+      scenarios.expectedMin30 >= TH.near &&
+      scenarios.uncertaintyWidth >= 1.0
+    if (uncertaintyOnlyLow && (risk === 'likely' || risk === 'urgent')) {
+      risk = 'watch'
+      reasons.push('Onzekerheidsprojectie gedempt: geen harde near-term low')
+    }
+  }
+
+  // --- Stabiel herstel na recente hypo (precision, tunebaar; default uit) ---
+  // Recent-low context is nodig voor het bekende "opveren en opnieuw dalen" patroon,
+  // maar mag niet te lang luid blijven als herstel ruim boven 4.5 en vlak/stijgend is.
+  if (P.recentLowRecoveryDamping === true) {
+    const stableRecovery =
+      recentHypo &&
+      current >= 5.8 &&
+      blended >= -0.02 &&
+      lagAdjusted >= TH.near &&
+      reboundFromRecentLow >= 1.8 &&
+      minutesSinceRecentLow > 45 &&
+      !(f.minutesTo40 !== null && f.minutesTo40 >= 0 && f.minutesTo40 <= 15)
+    if (stableRecovery && (risk === 'likely' || risk === 'urgent')) {
+      risk = 'watch'
+      reasons.push('Recente hypo gedempt: herstel lijkt stabiel')
     }
   }
 
