@@ -17,7 +17,7 @@
   },
   "editable": true,
   "fiscalYearStartMonth": 0,
-  "graphTooltip": 0,
+  "graphTooltip": 1,
   "id": null,
   "links": [],
   "panels": [
@@ -40,7 +40,7 @@
             "barAlignment": 0,
             "barWidthFactor": 0.6,
             "drawStyle": "line",
-            "fillOpacity": 10,
+            "fillOpacity": 4,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
@@ -48,8 +48,8 @@
               "viz": false
             },
             "insertNulls": false,
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
+            "lineInterpolation": "linear",
+            "lineWidth": 3,
             "pointSize": 4,
             "scaleDistribution": {
               "type": "linear"
@@ -61,23 +61,25 @@
               "mode": "none"
             },
             "thresholdsStyle": {
-              "mode": "line"
-            }
+              "mode": "area"
+            },
+            "axisSoftMin": 3.5,
+            "axisSoftMax": 11
           },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "semi-dark-red",
                 "value": null
               },
               {
-                "color": "green",
+                "color": "semi-dark-green",
                 "value": 4
               },
               {
-                "color": "orange",
+                "color": "semi-dark-orange",
                 "value": 10
               }
             ]
@@ -90,25 +92,25 @@
         "h": 12,
         "w": 24,
         "x": 0,
-        "y": 0
+        "y": 4
       },
       "id": 2,
       "options": {
         "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
           "calcs": [
             "lastNotNull",
             "min",
             "max",
             "mean"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
+          ]
         },
         "tooltip": {
-          "hideZeros": false,
-          "mode": "single",
-          "sort": "none"
+          "mode": "multi",
+          "sort": "none",
+          "hideZeros": false
         }
       },
       "pluginVersion": "11.5.2",
@@ -119,14 +121,18 @@
             "type": "influxdb",
             "uid": "xdrip-influxdb"
           },
-          "query": "SELECT mean(\"value_mmol\") FROM \"glucose\" WHERE $timeFilter GROUP BY time($__interval) fill(previous)",
+          "query": "SELECT \"value_mmol\" FROM \"glucose\" WHERE $timeFilter",
           "rawQuery": true,
           "refId": "A",
           "resultFormat": "time_series"
         }
       ],
-      "title": "Glucose",
-      "type": "timeseries"
+      "title": "Glucose laatste 6 uur",
+      "type": "timeseries",
+      "description": "Ruwe glucosemetingen uit xDrip/Influx, zonder forecast. Gebruik deze voor de echte geschiedenis.",
+      "timeFrom": "6h",
+      "timeShift": null,
+      "hideTimeOverride": false
     },
     {
       "datasource": {
@@ -166,16 +172,16 @@
         "overrides": []
       },
       "gridPos": {
+        "h": 4,
+        "w": 3,
         "x": 0,
-        "y": 27,
-        "w": 4,
-        "h": 4
+        "y": 0
       },
       "id": 1,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
+        "graphMode": "none",
+        "justifyMode": "center",
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
@@ -186,7 +192,7 @@
         },
         "showPercentChange": false,
         "textMode": "auto",
-        "wideLayout": true
+        "wideLayout": false
       },
       "pluginVersion": "11.5.2",
       "targets": [
@@ -203,7 +209,8 @@
         }
       ],
       "title": "Nu",
-      "type": "stat"
+      "type": "stat",
+      "description": "Actuele gemeten glucose; geen voorspelling."
     },
     {
       "datasource": {
@@ -325,16 +332,16 @@
         "overrides": []
       },
       "gridPos": {
-        "x": 4,
-        "y": 27,
-        "w": 4,
-        "h": 4
+        "h": 4,
+        "w": 3,
+        "x": 3,
+        "y": 0
       },
       "id": 3,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
-        "justifyMode": "auto",
+        "justifyMode": "center",
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
@@ -345,7 +352,7 @@
         },
         "showPercentChange": false,
         "textMode": "value_and_name",
-        "wideLayout": true
+        "wideLayout": false
       },
       "pluginVersion": "11.5.2",
       "targets": [
@@ -355,245 +362,15 @@
             "type": "influxdb",
             "uid": "xdrip-influxdb"
           },
-          "query": "SELECT DERIVATIVE(mean(\"value_mmol\"), 1m) FROM \"glucose\" WHERE $timeFilter GROUP BY time(15m) fill(previous)",
+          "query": "SELECT DERIVATIVE(mean(\"value_mmol\"), 1m) FROM \"glucose\" WHERE $timeFilter GROUP BY time(15m) fill(none)",
           "rawQuery": true,
           "refId": "A",
           "resultFormat": "time_series"
         }
       ],
-      "title": "Trendpijl",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "influxdb",
-        "uid": "xdrip-influxdb"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "decimals": 1,
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 3.9
-              },
-              {
-                "color": "green",
-                "value": 4.5
-              },
-              {
-                "color": "orange",
-                "value": 10
-              }
-            ]
-          },
-          "unit": "none"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "x": 8,
-        "y": 27,
-        "w": 4,
-        "h": 4
-      },
-      "id": 18,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "11.5.2",
-      "targets": [
-        {
-          "alias": "+10m mmol/L",
-          "datasource": {
-            "type": "influxdb",
-            "uid": "xdrip-influxdb"
-          },
-          "query": "SELECT last(mean) + 10 * last(derivative) FROM (SELECT mean(\"value_mmol\"), DERIVATIVE(mean(\"value_mmol\"), 1m) FROM \"glucose\" WHERE $timeFilter GROUP BY time(15m) fill(previous))",
-          "rawQuery": true,
-          "refId": "A",
-          "resultFormat": "time_series"
-        }
-      ],
-      "title": "Voorspelling +10m",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "influxdb",
-        "uid": "xdrip-influxdb"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "decimals": 1,
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 3.9
-              },
-              {
-                "color": "green",
-                "value": 4.5
-              },
-              {
-                "color": "orange",
-                "value": 10
-              }
-            ]
-          },
-          "unit": "none"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 27,
-        "w": 4,
-        "h": 4
-      },
-      "id": 19,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "11.5.2",
-      "targets": [
-        {
-          "alias": "+20m mmol/L",
-          "datasource": {
-            "type": "influxdb",
-            "uid": "xdrip-influxdb"
-          },
-          "query": "SELECT last(mean) + 20 * last(derivative) FROM (SELECT mean(\"value_mmol\"), DERIVATIVE(mean(\"value_mmol\"), 1m) FROM \"glucose\" WHERE $timeFilter GROUP BY time(15m) fill(previous))",
-          "rawQuery": true,
-          "refId": "A",
-          "resultFormat": "time_series"
-        }
-      ],
-      "title": "Voorspelling +20m",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "influxdb",
-        "uid": "xdrip-influxdb"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "decimals": 1,
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 3.9
-              },
-              {
-                "color": "green",
-                "value": 4.5
-              },
-              {
-                "color": "orange",
-                "value": 10
-              }
-            ]
-          },
-          "unit": "none"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "x": 16,
-        "y": 27,
-        "w": 4,
-        "h": 4
-      },
-      "id": 20,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "11.5.2",
-      "targets": [
-        {
-          "alias": "+30m mmol/L",
-          "datasource": {
-            "type": "influxdb",
-            "uid": "xdrip-influxdb"
-          },
-          "query": "SELECT last(mean) + 30 * last(derivative) FROM (SELECT mean(\"value_mmol\"), DERIVATIVE(mean(\"value_mmol\"), 1m) FROM \"glucose\" WHERE $timeFilter GROUP BY time(15m) fill(previous))",
-          "rawQuery": true,
-          "refId": "A",
-          "resultFormat": "time_series"
-        }
-      ],
-      "title": "Voorspelling +30m",
-      "type": "stat"
+      "title": "Trend",
+      "type": "stat",
+      "description": "Trend uit gemeten glucose; geen voorspelling."
     },
     {
       "datasource": {
@@ -629,16 +406,16 @@
         "overrides": []
       },
       "gridPos": {
-        "x": 20,
-        "y": 27,
-        "w": 4,
-        "h": 4
+        "h": 4,
+        "w": 3,
+        "x": 21,
+        "y": 0
       },
       "id": 21,
       "options": {
         "colorMode": "value",
         "graphMode": "none",
-        "justifyMode": "auto",
+        "justifyMode": "center",
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
@@ -649,7 +426,7 @@
         },
         "showPercentChange": false,
         "textMode": "auto",
-        "wideLayout": true
+        "wideLayout": false
       },
       "pluginVersion": "11.5.2",
       "targets": [
@@ -659,13 +436,13 @@
             "type": "influxdb",
             "uid": "xdrip-influxdb"
           },
-          "query": "SELECT (last(mean) - 4.0) / -last(derivative) FROM (SELECT mean(\"value_mmol\"), DERIVATIVE(mean(\"value_mmol\"), 1m) FROM \"glucose\" WHERE $timeFilter GROUP BY time(15m) fill(previous))",
+          "query": "SELECT (last(mean) - 4.0) / -last(derivative) FROM (SELECT mean(\"value_mmol\"), DERIVATIVE(mean(\"value_mmol\"), 1m) FROM \"glucose\" WHERE $timeFilter GROUP BY time(15m) fill(none))",
           "rawQuery": true,
           "refId": "A",
           "resultFormat": "time_series"
         }
       ],
-      "title": "Tijd tot 4.0",
+      "title": "Tot 4.0",
       "type": "stat"
     },
     {
@@ -703,7 +480,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 31,
+        "y": 32,
         "w": 4,
         "h": 4
       },
@@ -776,7 +553,7 @@
       },
       "gridPos": {
         "x": 4,
-        "y": 31,
+        "y": 32,
         "w": 4,
         "h": 4
       },
@@ -857,7 +634,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 31,
+        "y": 32,
         "w": 4,
         "h": 4
       },
@@ -886,7 +663,7 @@
             "type": "influxdb",
             "uid": "xdrip-influxdb"
           },
-          "query": "SELECT DERIVATIVE(mean(\"value_mmol\"), 1m) FROM \"glucose\" WHERE $timeFilter GROUP BY time(5m) fill(previous)",
+          "query": "SELECT DERIVATIVE(mean(\"value_mmol\"), 1m) FROM \"glucose\" WHERE $timeFilter GROUP BY time(5m) fill(none)",
           "rawQuery": true,
           "refId": "A",
           "resultFormat": "time_series"
@@ -938,7 +715,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 31,
+        "y": 32,
         "w": 4,
         "h": 4
       },
@@ -967,7 +744,7 @@
             "type": "influxdb",
             "uid": "xdrip-influxdb"
           },
-          "query": "SELECT DERIVATIVE(mean(\"value_mmol\"), 1m) FROM \"glucose\" WHERE $timeFilter GROUP BY time(5m) fill(previous)",
+          "query": "SELECT DERIVATIVE(mean(\"value_mmol\"), 1m) FROM \"glucose\" WHERE $timeFilter GROUP BY time(5m) fill(none)",
           "rawQuery": true,
           "refId": "A",
           "resultFormat": "time_series"
@@ -1012,7 +789,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 31,
+        "y": 36,
         "w": 4,
         "h": 4
       },
@@ -1086,7 +863,7 @@
       },
       "gridPos": {
         "x": 20,
-        "y": 31,
+        "y": 36,
         "w": 4,
         "h": 4
       },
@@ -1159,7 +936,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 35,
+        "y": 36,
         "w": 4,
         "h": 4
       },
@@ -1216,7 +993,7 @@
             "barAlignment": 0,
             "barWidthFactor": 0.6,
             "drawStyle": "line",
-            "fillOpacity": 10,
+            "fillOpacity": 0,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
@@ -1225,7 +1002,7 @@
             },
             "insertNulls": false,
             "lineInterpolation": "linear",
-            "lineWidth": 1,
+            "lineWidth": 2,
             "pointSize": 4,
             "scaleDistribution": {
               "type": "linear"
@@ -1238,7 +1015,9 @@
             },
             "thresholdsStyle": {
               "mode": "line"
-            }
+            },
+            "axisSoftMin": -0.22,
+            "axisSoftMax": 0.22
           },
           "mappings": [],
           "thresholds": {
@@ -1249,12 +1028,20 @@
                 "value": null
               },
               {
+                "color": "orange",
+                "value": -0.111
+              },
+              {
                 "color": "green",
-                "value": 4
+                "value": -0.0555
               },
               {
                 "color": "orange",
-                "value": 10
+                "value": 0.0555
+              },
+              {
+                "color": "red",
+                "value": 0.111
               }
             ]
           },
@@ -1263,46 +1050,49 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 7,
+        "h": 8,
         "w": 24,
         "x": 0,
-        "y": 12
+        "y": 24
       },
       "id": 6,
       "options": {
         "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
           "calcs": [
             "lastNotNull",
             "min",
-            "max",
-            "mean"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
+            "max"
+          ]
         },
         "tooltip": {
-          "hideZeros": false,
           "mode": "single",
-          "sort": "none"
+          "sort": "none",
+          "hideZeros": false
         }
       },
       "pluginVersion": "11.5.2",
       "targets": [
         {
-          "alias": "Snelheid mmol/L/min",
+          "alias": "Rate 5m xDrip",
           "datasource": {
             "type": "influxdb",
             "uid": "xdrip-influxdb"
           },
-          "query": "SELECT DERIVATIVE(mean(\"value_mmol\"), 1m) FROM \"glucose\" WHERE $timeFilter GROUP BY time(5m) fill(previous)",
+          "query": "SELECT \"rate_5m\" FROM \"glucose\" WHERE $timeFilter",
           "rawQuery": true,
           "refId": "A",
           "resultFormat": "time_series"
         }
       ],
-      "title": "Stijgen / Dalen",
-      "type": "timeseries"
+      "title": "Daling / stijging snelheid",
+      "type": "timeseries",
+      "description": "Rate 5m uit xDrip: negatief is daling, positief is stijging. Lijnen markeren snelle en zeer snelle beweging.",
+      "timeFrom": "6h",
+      "timeShift": null,
+      "hideTimeOverride": false
     },
     {
       "datasource": {
@@ -1343,7 +1133,7 @@
       },
       "gridPos": {
         "x": 4,
-        "y": 35,
+        "y": 36,
         "w": 4,
         "h": 4
       },
@@ -1420,7 +1210,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 35,
+        "y": 36,
         "w": 4,
         "h": 4
       },
@@ -1497,7 +1287,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 35,
+        "y": 36,
         "w": 4,
         "h": 4
       },
@@ -1578,7 +1368,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 35,
+        "y": 40,
         "w": 4,
         "h": 4
       },
@@ -1607,7 +1397,7 @@
             "type": "influxdb",
             "uid": "xdrip-influxdb"
           },
-          "query": "SELECT DERIVATIVE(mean(\"value_mmol\"), 5m) FROM \"glucose\" WHERE $timeFilter GROUP BY time(5m) fill(previous)",
+          "query": "SELECT DERIVATIVE(mean(\"value_mmol\"), 5m) FROM \"glucose\" WHERE $timeFilter GROUP BY time(5m) fill(none)",
           "rawQuery": true,
           "refId": "A",
           "resultFormat": "time_series"
@@ -1659,7 +1449,7 @@
       },
       "gridPos": {
         "x": 20,
-        "y": 35,
+        "y": 40,
         "w": 4,
         "h": 4
       },
@@ -1688,7 +1478,7 @@
             "type": "influxdb",
             "uid": "xdrip-influxdb"
           },
-          "query": "SELECT DERIVATIVE(mean(\"value_mmol\"), 1m) FROM \"glucose\" WHERE $timeFilter GROUP BY time(5m) fill(previous)",
+          "query": "SELECT DERIVATIVE(mean(\"value_mmol\"), 1m) FROM \"glucose\" WHERE $timeFilter GROUP BY time(5m) fill(none)",
           "rawQuery": true,
           "refId": "A",
           "resultFormat": "time_series"
@@ -1733,7 +1523,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 39,
+        "y": 40,
         "w": 4,
         "h": 4
       },
@@ -1762,7 +1552,7 @@
             "type": "influxdb",
             "uid": "xdrip-influxdb"
           },
-          "query": "SELECT count(\"derivative\") FROM (SELECT DERIVATIVE(mean(\"value_mmol\"), 1m) FROM \"glucose\" WHERE $timeFilter GROUP BY time(5m) fill(previous)) WHERE \"derivative\" < -0.0555 GROUP BY time($__interval) fill(0)",
+          "query": "SELECT count(\"derivative\") FROM (SELECT DERIVATIVE(mean(\"value_mmol\"), 1m) FROM \"glucose\" WHERE $timeFilter GROUP BY time(5m) fill(none)) WHERE \"derivative\" < -0.0555 GROUP BY time($__interval) fill(0)",
           "rawQuery": true,
           "refId": "A",
           "resultFormat": "time_series"
@@ -1807,7 +1597,7 @@
       },
       "gridPos": {
         "x": 4,
-        "y": 39,
+        "y": 40,
         "w": 4,
         "h": 4
       },
@@ -1836,7 +1626,7 @@
             "type": "influxdb",
             "uid": "xdrip-influxdb"
           },
-          "query": "SELECT count(\"derivative\") FROM (SELECT DERIVATIVE(mean(\"value_mmol\"), 1m) FROM \"glucose\" WHERE $timeFilter GROUP BY time(5m) fill(previous)) WHERE \"derivative\" < -0.111 GROUP BY time($__interval) fill(0)",
+          "query": "SELECT count(\"derivative\") FROM (SELECT DERIVATIVE(mean(\"value_mmol\"), 1m) FROM \"glucose\" WHERE $timeFilter GROUP BY time(5m) fill(none)) WHERE \"derivative\" < -0.111 GROUP BY time($__interval) fill(0)",
           "rawQuery": true,
           "refId": "A",
           "resultFormat": "time_series"
@@ -1881,7 +1671,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 39,
+        "y": 40,
         "w": 4,
         "h": 4
       },
@@ -1910,7 +1700,7 @@
             "type": "influxdb",
             "uid": "xdrip-influxdb"
           },
-          "query": "SELECT count(\"derivative\") FROM (SELECT DERIVATIVE(mean(\"value_mmol\"), 1m) FROM \"glucose\" WHERE $timeFilter GROUP BY time(5m) fill(previous)) WHERE \"derivative\" > 0.0555 GROUP BY time($__interval) fill(0)",
+          "query": "SELECT count(\"derivative\") FROM (SELECT DERIVATIVE(mean(\"value_mmol\"), 1m) FROM \"glucose\" WHERE $timeFilter GROUP BY time(5m) fill(none)) WHERE \"derivative\" > 0.0555 GROUP BY time($__interval) fill(0)",
           "rawQuery": true,
           "refId": "A",
           "resultFormat": "time_series"
@@ -1955,7 +1745,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 39,
+        "y": 40,
         "w": 4,
         "h": 4
       },
@@ -1984,7 +1774,7 @@
             "type": "influxdb",
             "uid": "xdrip-influxdb"
           },
-          "query": "SELECT count(\"derivative\") FROM (SELECT DERIVATIVE(mean(\"value_mmol\"), 1m) FROM \"glucose\" WHERE $timeFilter GROUP BY time(5m) fill(previous)) WHERE \"derivative\" > 0.111 GROUP BY time($__interval) fill(0)",
+          "query": "SELECT count(\"derivative\") FROM (SELECT DERIVATIVE(mean(\"value_mmol\"), 1m) FROM \"glucose\" WHERE $timeFilter GROUP BY time(5m) fill(none)) WHERE \"derivative\" > 0.111 GROUP BY time($__interval) fill(0)",
           "rawQuery": true,
           "refId": "A",
           "resultFormat": "time_series"
@@ -2001,41 +1791,9 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "thresholds"
           },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "mmol/L",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "pointSize": 4,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "line"
-            }
-          },
+          "decimals": 0,
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -2045,8 +1803,497 @@
                 "value": null
               },
               {
+                "color": "orange",
+                "value": 70
+              },
+              {
                 "color": "green",
+                "value": 81
+              },
+              {
+                "color": "orange",
+                "value": 180
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 44
+      },
+      "id": 37,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.5.2",
+      "targets": [
+        {
+          "alias": "mg/dL",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "xdrip-influxdb"
+          },
+          "query": "SELECT last(\"value_mgdl\") FROM \"glucose\" WHERE $timeFilter",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Nu mg/dL",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "xdrip-influxdb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "Flat": {
+                  "text": "Flat",
+                  "color": "green"
+                },
+                "FortyFiveDown": {
+                  "text": "45 down",
+                  "color": "orange"
+                },
+                "SingleDown": {
+                  "text": "down",
+                  "color": "red"
+                },
+                "DoubleDown": {
+                  "text": "double down",
+                  "color": "red"
+                },
+                "FortyFiveUp": {
+                  "text": "45 up",
+                  "color": "orange"
+                },
+                "SingleUp": {
+                  "text": "up",
+                  "color": "orange"
+                },
+                "DoubleUp": {
+                  "text": "double up",
+                  "color": "red"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 44
+      },
+      "id": 38,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.5.2",
+      "targets": [
+        {
+          "alias": "direction",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "xdrip-influxdb"
+          },
+          "query": "SELECT last(\"direction\") FROM \"glucose\" WHERE $timeFilter",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "xDrip richting",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "xdrip-influxdb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 3,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": -0.111
+              },
+              {
+                "color": "green",
+                "value": -0.0555
+              },
+              {
+                "color": "orange",
+                "value": 0.0555
+              },
+              {
+                "color": "red",
+                "value": 0.111
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 44
+      },
+      "id": 39,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.5.2",
+      "targets": [
+        {
+          "alias": "mmol/L/min",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "xdrip-influxdb"
+          },
+          "query": "SELECT last(\"rate_5m\") FROM \"glucose\" WHERE $timeFilter",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Rate 5m live",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "xdrip-influxdb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 2,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": -0.6
+              },
+              {
+                "color": "green",
+                "value": -0.3
+              },
+              {
+                "color": "orange",
+                "value": 0.3
+              },
+              {
+                "color": "red",
+                "value": 0.6
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 44
+      },
+      "id": 40,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.5.2",
+      "targets": [
+        {
+          "alias": "delta",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "xdrip-influxdb"
+          },
+          "query": "SELECT last(\"delta\") FROM \"glucose\" WHERE $timeFilter",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Delta xDrip",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "xdrip-influxdb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 2
+              },
+              {
+                "color": "red",
                 "value": 4
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 44
+      },
+      "id": 41,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.5.2",
+      "targets": [
+        {
+          "alias": "noise",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "xdrip-influxdb"
+          },
+          "query": "SELECT last(\"noise\") FROM \"glucose\" WHERE $timeFilter",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Sensor noise",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "xdrip-influxdb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 12
+              },
+              {
+                "color": "green",
+                "value": 24
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 44
+      },
+      "id": 42,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.5.2",
+      "targets": [
+        {
+          "alias": "4-10 mmol/L",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "xdrip-influxdb"
+          },
+          "query": "SELECT count(\"value_mmol\") FROM \"glucose\" WHERE $timeFilter AND \"value_mmol\" >= 4.0 AND \"value_mmol\" <= 10.0 GROUP BY time($__interval) fill(0)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Doelgebied punten",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "xdrip-influxdb"
+      },
+      "description": "Voorspelling uit glucose_forecast; dit is het enige deel van het dashboard dat vooruit kijkt.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 3.9
+              },
+              {
+                "color": "green",
+                "value": 4.5
               },
               {
                 "color": "orange",
@@ -2059,54 +2306,547 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 19
+        "h": 4,
+        "w": 3,
+        "x": 6,
+        "y": 0
       },
-      "id": 16,
+      "id": 18,
       "options": {
-        "legend": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
           "calcs": [
-            "lastNotNull",
-            "min",
-            "max",
-            "mean"
+            "lastNotNull"
           ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
+          "fields": "",
+          "values": false
         },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "single",
-          "sort": "none"
-        }
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": false
       },
       "pluginVersion": "11.5.2",
       "targets": [
         {
-          "alias": "Glucose rond piek/drop",
+          "alias": "+10m mmol/L",
           "datasource": {
             "type": "influxdb",
             "uid": "xdrip-influxdb"
           },
-          "query": "SELECT mean(\"value_mmol\") FROM \"glucose\" WHERE $timeFilter GROUP BY time(5m) fill(previous)",
+          "query": "SELECT last(\"value_mmol\") FROM \"glucose_forecast\" WHERE time >= now() + 8m AND time <= now() + 12m",
           "rawQuery": true,
           "refId": "A",
           "resultFormat": "time_series"
         }
       ],
-      "title": "Reactieve hypo watch: snelle piek en daling",
-      "type": "timeseries"
+      "title": "+10m",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "xdrip-influxdb"
+      },
+      "description": "Voorspelling uit glucose_forecast; dit is het enige deel van het dashboard dat vooruit kijkt.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 3.9
+              },
+              {
+                "color": "green",
+                "value": 4.5
+              },
+              {
+                "color": "orange",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 9,
+        "y": 0
+      },
+      "id": 19,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": false
+      },
+      "pluginVersion": "11.5.2",
+      "targets": [
+        {
+          "alias": "+20m mmol/L",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "xdrip-influxdb"
+          },
+          "query": "SELECT last(\"value_mmol\") FROM \"glucose_forecast\" WHERE time >= now() + 18m AND time <= now() + 22m",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "+20m",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "xdrip-influxdb"
+      },
+      "description": "Voorspelling uit glucose_forecast; dit is het enige deel van het dashboard dat vooruit kijkt.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 3.9
+              },
+              {
+                "color": "green",
+                "value": 4.5
+              },
+              {
+                "color": "orange",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 12,
+        "y": 0
+      },
+      "id": 20,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": false
+      },
+      "pluginVersion": "11.5.2",
+      "targets": [
+        {
+          "alias": "+30m mmol/L",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "xdrip-influxdb"
+          },
+          "query": "SELECT last(\"value_mmol\") FROM \"glucose_forecast\" WHERE time >= now() + 28m AND time <= now() + 32m",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "+30m",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "xdrip-influxdb"
+      },
+      "description": "Langere voorspelling uit glucose_forecast; trendindicatie, minder betrouwbaar dan 10/20/30m.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 3.9
+              },
+              {
+                "color": "green",
+                "value": 4.5
+              },
+              {
+                "color": "orange",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 15,
+        "y": 0
+      },
+      "id": 45,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": false
+      },
+      "pluginVersion": "11.5.2",
+      "targets": [
+        {
+          "alias": "+45m mmol/L",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "xdrip-influxdb"
+          },
+          "query": "SELECT last(\"value_mmol\") FROM \"glucose_forecast\" WHERE time >= now() + 43m AND time <= now() + 47m",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "+45m",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "xdrip-influxdb"
+      },
+      "description": "Langere voorspelling uit glucose_forecast; trendindicatie, minder betrouwbaar dan 10/20/30m.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 3.9
+              },
+              {
+                "color": "green",
+                "value": 4.5
+              },
+              {
+                "color": "orange",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 18,
+        "y": 0
+      },
+      "id": 46,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": false
+      },
+      "pluginVersion": "11.5.2",
+      "targets": [
+        {
+          "alias": "+60m mmol/L",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "xdrip-influxdb"
+          },
+          "query": "SELECT last(\"value_mmol\") FROM \"glucose_forecast\" WHERE time >= now() + 58m AND time <= now() + 62m",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "+60m",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "xdrip-influxdb"
+      },
+      "description": "Groen is actueel tot nu; oranje stippellijn is alleen de berekende voorspelling tot 60 minuten vooruit.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "mmol/L",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 3,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "area"
+            },
+            "axisSoftMin": 3.5,
+            "axisSoftMax": 11
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "semi-dark-red",
+                "value": null
+              },
+              {
+                "color": "semi-dark-green",
+                "value": 4
+              },
+              {
+                "color": "semi-dark-orange",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Actueel tot nu"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 3
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Forecast +60m"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 4
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    8
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "id": 44,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "min",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none",
+          "hideZeros": false
+        }
+      },
+      "pluginVersion": "11.5.2",
+      "targets": [
+        {
+          "alias": "Actueel tot nu",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "xdrip-influxdb"
+          },
+          "query": "SELECT \"value_mmol\" FROM \"glucose\" WHERE time >= now() - 2h AND time <= now()",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        },
+        {
+          "alias": "Forecast +60m",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "xdrip-influxdb"
+          },
+          "query": "SELECT \"value_mmol\" FROM \"glucose_forecast\" WHERE time >= now() AND time <= now() + 60m",
+          "rawQuery": true,
+          "refId": "B",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Forecast vooruit 60 minuten",
+      "type": "timeseries",
+      "timeFrom": null,
+      "timeShift": null,
+      "hideTimeOverride": false
     }
   ],
   "preload": false,
-  "refresh": "1m",
+  "refresh": "30s",
   "schemaVersion": 40,
   "tags": [
     "xdrip",
-    "glucose"
+    "glucose",
+    "hypo-watch",
+    "quality"
   ],
   "templating": {
     "list": []
@@ -2115,10 +2855,25 @@
     "from": "now-6h",
     "to": "now"
   },
-  "timepicker": {},
+  "timepicker": {
+    "refresh_intervals": [
+      "10s",
+      "30s",
+      "1m",
+      "5m"
+    ],
+    "time_options": [
+      "1h",
+      "3h",
+      "6h",
+      "12h",
+      "24h",
+      "7d"
+    ]
+  },
   "timezone": "browser",
   "title": "xDrip Glucose",
   "uid": "xdrip-glucose",
-  "version": 28,
+  "version": 58,
   "weekStart": ""
 }

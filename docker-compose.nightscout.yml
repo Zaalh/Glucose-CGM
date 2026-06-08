@@ -117,3 +117,26 @@ services:
     command: ["node", "scripts/libreview-nightscout-sync.mjs", "--server", "--loop"]
     ports:
       - "8787:8787"
+
+  forecast-sync:
+    image: node:20-alpine
+    restart: unless-stopped
+    profiles:
+      - libre
+    depends_on:
+      libreview-sync:
+        condition: service_started
+    env_file:
+      - .env.influxdb
+    environment:
+      INFLUX_URL: http://influxdb:8086
+      FORECAST_LOOKBACK_MINUTES: 20
+      FORECAST_MAX_RATE_MMOL_PER_MIN: 0.0555
+      FORECAST_HORIZONS_MINUTES: 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60
+    working_dir: /app
+    volumes:
+      - ./:/app
+    command:
+      - sh
+      - -lc
+      - while true; do node scripts/write-influx-forecast.mjs; sleep 60; done
