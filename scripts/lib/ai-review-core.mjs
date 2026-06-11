@@ -4,10 +4,34 @@
 // Ollama Cloud ondersteunt geen strikte structured outputs (JSON-schema), maar wel
 // JSON-mode via response_format:{type:'json_object'}. Daarom: lage temperature,
 // schema in de prompt benoemd, en bij ongeldige JSON eenmalig opnieuw proberen.
+import { randomUUID } from 'node:crypto'
 import { aiRouterConfigured, callAiRouter, readAiRouterConfig } from './ai-router.mjs'
 
 export const DEFAULT_LIMIT = 24
 const CONFIDENCE = new Set(['low', 'medium', 'high'])
+// Retentie: oudere observaties/vragen worden bij elke run opgeruimd zodat de
+// collecties niet onbegrensd groeien (vooral met de periodieke loop).
+const RETENTION_DAYS = Math.max(1, Number(process.env.AI_REVIEW_RETENTION_DAYS ?? 90))
+
+// Indexen één keer per proces aanmaken (createIndex is idempotent). Versnelt de
+// `/latest` sort en de retentie-prune naarmate de collecties groeien.
+let aiIndexesEnsured = false
+async function ensureAiIndexes(db) {
+  if (aiIndexesEnsured) return
+  await db.collection('ai_observations').createIndex({ createdAt: -1 })
+  await db.collection('ai_observations').createIndex({ runId: 1 })
+  await db.collection('ai_questions').createIndex({ createdAt: -1 })
+  await db.collection('ai_questions').createIndex({ runId: 1 })
+  aiIndexesEnsured = true
+}
+
+async function pruneOldAiDocs(db) {
+  const cutoff = new Date(Date.now() - RETENTION_DAYS * 86_400_000).toISOString()
+  await Promise.all([
+    db.collection('ai_observations').deleteMany({ createdAt: { $lt: cutoff } }),
+    db.collection('ai_questions').deleteMany({ createdAt: { $lt: cutoff } }),
+  ])
+}
 
 // Past een model-override toe op alle providers, zodat per run een ander
 // (Ollama-cloud) model gekozen kan worden zonder de env aan te passen.
@@ -191,10 +215,12 @@ function sourceName(aiResult) {
   return `ai-router:${provider}`
 }
 
-function cleanObservation(raw, now, source) {
+function cleanObservation(raw, now, source, runId, model) {
   const confidence = CONFIDENCE.has(raw?.confidence) ? raw.confidence : 'low'
   return {
     createdAt: now,
+    runId,
+    model,
     source,
     scope: ['episode', 'day', 'week', 'model_review'].includes(raw?.scope) ? raw.scope : 'model_review',
     relatedEventIds: Array.isArray(raw?.relatedEventIds) ? raw.relatedEventIds.slice(0, 10) : [],
@@ -206,9 +232,11 @@ function cleanObservation(raw, now, source) {
   }
 }
 
-function cleanQuestion(raw, now, source) {
+function cleanQuestion(raw, now, source, runId, model) {
   return {
     createdAt: now,
+    runId,
+    model,
     source,
     question: String(raw?.question || '').slice(0, 300),
     reason: String(raw?.reason || '').slice(0, 500),
@@ -251,17 +279,20 @@ export async function runAiReview({ db, aiRouter, dryRun = false, force = false,
   const ai = await callChat(aiRouter, snapshots, feedback)
   const source = sourceName(ai)
   const now = new Date().toISOString()
+  const runId = randomUUID()
   const observations = Array.isArray(ai.parsed?.observations)
-    ? ai.parsed.observations.map((o) => cleanObservation(o, now, source)).filter((o) => o.summary || o.hypothesis).slice(0, 5)
+    ? ai.parsed.observations.map((o) => cleanObservation(o, now, source, runId, ai.model)).filter((o) => o.summary || o.hypothesis).slice(0, 5)
     : []
   const questions = Array.isArray(ai.parsed?.questions)
-    ? ai.parsed.questions.map((q) => cleanQuestion(q, now, source)).filter((q) => q.question).slice(0, 3)
+    ? ai.parsed.questions.map((q) => cleanQuestion(q, now, source, runId, ai.model)).filter((q) => q.question).slice(0, 3)
     : []
 
   if (!dryRun) {
+    await ensureAiIndexes(db)
     if (observations.length) await db.collection('ai_observations').insertMany(observations)
     if (questions.length) await db.collection('ai_questions').insertMany(questions)
+    await pruneOldAiDocs(db)
   }
 
-  return { ok: true, dryRun, provider: ai.provider, model: ai.model, observations, questions }
+  return { ok: true, dryRun, runId, provider: ai.provider, model: ai.model, observations, questions }
 }

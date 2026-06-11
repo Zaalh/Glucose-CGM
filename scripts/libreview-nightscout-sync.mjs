@@ -995,11 +995,17 @@ async function getLatestAiReview(limit) {
     client = new MongoClient(config.mongoUri)
     await client.connect()
     const db = client.db()
+    // Toon alleen de meest recente review-run (op runId), zodat het paneel geen
+    // duplicaten over runs heen stapelt. Fallback op latest-N voor oude docs
+    // zonder runId.
+    const newest = await db.collection('ai_observations').find({}).sort({ createdAt: -1 }).limit(1).next()
+    const runId = newest && newest.runId ? newest.runId : null
+    const filter = runId ? { runId } : {}
     const [observations, questions] = await Promise.all([
-      db.collection('ai_observations').find({}).sort({ createdAt: -1 }).limit(limit).toArray(),
-      db.collection('ai_questions').find({}).sort({ createdAt: -1 }).limit(limit).toArray(),
+      db.collection('ai_observations').find(filter).sort({ createdAt: -1 }).limit(limit).toArray(),
+      db.collection('ai_questions').find(filter).sort({ createdAt: -1 }).limit(limit).toArray(),
     ])
-    return { observations, questions }
+    return { observations, questions, runId }
   } finally {
     if (client) await client.close().catch(() => undefined)
   }
