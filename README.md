@@ -142,8 +142,23 @@ npm run ai:review -- --dry-run
 
 Optionele AI-laag. Leest recente `prediction_snapshots` en schrijft, als `--dry-run`
 weg is, alleen naar `ai_observations` en `ai_questions`. Staat standaard uit totdat
-`AI_CHAT_BASE_URL`, `AI_CHAT_API_KEY` en `AI_CHAT_MODEL` zijn gezet. Gebruikt een
-OpenAI-compatible `/v1/chat/completions` endpoint en neemt nooit alarmbeslissingen.
+een AI-provider is gezet. Gebruikt alleen officiële OpenAI-compatible
+`/v1/chat/completions` endpoints en neemt nooit alarmbeslissingen.
+
+Nieuwe router-config met fallback-volgorde:
+
+```bash
+AI_ROUTER_PROVIDERS=openai,zai
+AI_OPENAI_BASE_URL=https://api.openai.com
+AI_OPENAI_API_KEY=...
+AI_OPENAI_MODEL=gpt-4.1-mini
+AI_ZAI_BASE_URL=https://api.z.ai
+AI_ZAI_API_KEY=...
+AI_ZAI_MODEL=glm-4.5
+```
+
+De oude single-provider vars `AI_CHAT_BASE_URL`, `AI_CHAT_API_KEY` en
+`AI_CHAT_MODEL` blijven werken zolang `AI_ROUTER_PROVIDERS` leeg is.
 
 ```bash
 npm run spike-filter:check

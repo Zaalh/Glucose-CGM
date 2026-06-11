@@ -1,37 +1,19 @@
 import { MongoClient } from 'mongodb'
+import { aiRouterConfigured, callAiRouter, readAiRouterConfig } from './lib/ai-router.mjs'
 
 const DEFAULT_MONGO_URI = 'mongodb://nightscout-mongo:27017/nightscout'
-const DEFAULT_MODEL = 'gpt-4.1-mini'
 const DEFAULT_LIMIT = 24
-const DEFAULT_TIMEOUT_MS = 30_000
 
 const CONFIDENCE = new Set(['low', 'medium', 'high'])
-
-function optionalEnv(name) {
-  const value = process.env[name] ?? ''
-  if (value.includes('example.com') || value.startsWith('your-')) return ''
-  return value.trim()
-}
-
-function trimTrailingSlash(value) {
-  return value.replace(/\/+$/, '')
-}
 
 function readConfig() {
   return {
     mongoUri: process.env.MONGODB_URI ?? DEFAULT_MONGO_URI,
-    apiKey: optionalEnv('AI_CHAT_API_KEY'),
-    baseUrl: optionalEnv('AI_CHAT_BASE_URL'),
-    model: optionalEnv('AI_CHAT_MODEL') || DEFAULT_MODEL,
+    aiRouter: readAiRouterConfig(),
     limit: Math.max(1, Math.min(100, Number(process.env.AI_REVIEW_LIMIT ?? DEFAULT_LIMIT))),
-    timeoutMs: Math.max(1000, Number(process.env.AI_CHAT_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS)),
     dryRun: process.argv.includes('--dry-run'),
     force: process.argv.includes('--force'),
   }
-}
-
-function configured(config) {
-  return Boolean(config.apiKey && config.baseUrl && config.model)
 }
 
 function recentSnapshotProjection() {
@@ -133,44 +115,36 @@ function userPrompt(snapshots) {
 }
 
 async function callChat(config, snapshots) {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), config.timeoutMs)
+  const result = await callAiRouter(config.aiRouter, {
+    temperature: 0.2,
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: systemPrompt() },
+      { role: 'user', content: userPrompt(snapshots) },
+    ],
+  })
+
   try {
-    const res = await fetch(`${trimTrailingSlash(config.baseUrl)}/v1/chat/completions`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${config.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: config.model,
-        temperature: 0.2,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: systemPrompt() },
-          { role: 'user', content: userPrompt(snapshots) },
-        ],
-      }),
-      signal: controller.signal,
-    })
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      throw new Error(`AI chat HTTP ${res.status}: ${text.slice(0, 500)}`)
+    return {
+      provider: result.provider,
+      model: result.model,
+      parsed: JSON.parse(result.content),
     }
-    const json = await res.json()
-    const content = json?.choices?.[0]?.message?.content
-    if (!content) throw new Error('AI chat gaf geen message.content terug.')
-    return JSON.parse(content)
-  } finally {
-    clearTimeout(timeout)
+  } catch {
+    throw new Error(`AI-provider ${result.provider} gaf geen geldige JSON terug.`)
   }
 }
 
-function cleanObservation(raw, now) {
+function sourceName(aiResult) {
+  const provider = aiResult?.provider ? String(aiResult.provider).slice(0, 60) : 'unknown'
+  return `ai-router:${provider}`
+}
+
+function cleanObservation(raw, now, source) {
   const confidence = CONFIDENCE.has(raw?.confidence) ? raw.confidence : 'low'
   return {
     createdAt: now,
-    source: 'ai-chat-v1',
+    source,
     scope: ['episode', 'day', 'week', 'model_review'].includes(raw?.scope) ? raw.scope : 'model_review',
     relatedEventIds: Array.isArray(raw?.relatedEventIds) ? raw.relatedEventIds.slice(0, 10) : [],
     summary: String(raw?.summary || '').slice(0, 500),
@@ -181,10 +155,10 @@ function cleanObservation(raw, now) {
   }
 }
 
-function cleanQuestion(raw, now) {
+function cleanQuestion(raw, now, source) {
   return {
     createdAt: now,
-    source: 'ai-chat-v1',
+    source,
     question: String(raw?.question || '').slice(0, 300),
     reason: String(raw?.reason || '').slice(0, 500),
     relatedEntryIdentifier: raw?.relatedEntryIdentifier ? String(raw.relatedEntryIdentifier).slice(0, 200) : null,
@@ -197,11 +171,11 @@ function cleanQuestion(raw, now) {
 
 async function main() {
   const config = readConfig()
-  if (!configured(config)) {
+  if (!aiRouterConfigured(config.aiRouter)) {
     console.log(JSON.stringify({
       ok: true,
       skipped: true,
-      reason: 'AI_CHAT_API_KEY, AI_CHAT_BASE_URL of AI_CHAT_MODEL ontbreekt; AI-laag staat uit.',
+      reason: 'Geen AI-provider geconfigureerd; zet AI_ROUTER_PROVIDERS met AI_<PROVIDER>_* of legacy AI_CHAT_*.',
     }))
     return
   }
@@ -223,22 +197,23 @@ async function main() {
     }
 
     const ai = await callChat(config, snapshots)
+    const source = sourceName(ai)
     const now = new Date().toISOString()
-    const observations = Array.isArray(ai?.observations)
-      ? ai.observations.map((o) => cleanObservation(o, now)).filter((o) => o.summary || o.hypothesis).slice(0, 5)
+    const observations = Array.isArray(ai.parsed?.observations)
+      ? ai.parsed.observations.map((o) => cleanObservation(o, now, source)).filter((o) => o.summary || o.hypothesis).slice(0, 5)
       : []
-    const questions = Array.isArray(ai?.questions)
-      ? ai.questions.map((q) => cleanQuestion(q, now)).filter((q) => q.question).slice(0, 3)
+    const questions = Array.isArray(ai.parsed?.questions)
+      ? ai.parsed.questions.map((q) => cleanQuestion(q, now, source)).filter((q) => q.question).slice(0, 3)
       : []
 
     if (config.dryRun) {
-      console.log(JSON.stringify({ ok: true, dryRun: true, observations, questions }, null, 2))
+      console.log(JSON.stringify({ ok: true, dryRun: true, provider: ai.provider, model: ai.model, observations, questions }, null, 2))
       return
     }
 
     if (observations.length) await db.collection('ai_observations').insertMany(observations)
     if (questions.length) await db.collection('ai_questions').insertMany(questions)
-    console.log(JSON.stringify({ ok: true, observations: observations.length, questions: questions.length }))
+    console.log(JSON.stringify({ ok: true, provider: ai.provider, model: ai.model, observations: observations.length, questions: questions.length }))
   } finally {
     if (client) await client.close().catch(() => undefined)
   }
