@@ -59,6 +59,14 @@ const loop = args.has('--loop')
 const server = args.has('--server')
 let config = readConfig(false)
 
+// AI-review state (lock + min-interval + modellen-cache). MOET hierboven de
+// top-level `await runForever()` staan, anders blijven deze in de TDZ in
+// --loop-modus (runForever keert nooit terug) en falen de /ai-review routes.
+const AI_REVIEW_MIN_INTERVAL_MS = Math.max(0, Number(process.env.AI_REVIEW_MIN_INTERVAL_MS ?? 30_000))
+let aiReviewRunning = false
+let aiReviewLastAt = 0
+let aiModelsCache = { at: 0, models: null }
+
 if (server) startServer()
 
 if (loop) {
@@ -943,11 +951,8 @@ function parsePositiveInt(value, fallback, max) {
 }
 
 // --- AI-review (optionele AI-laag) -----------------------------------------
-// In-memory lock + min-interval zodat de overlay-knop het LLM niet kan spammen.
-const AI_REVIEW_MIN_INTERVAL_MS = Math.max(0, Number(process.env.AI_REVIEW_MIN_INTERVAL_MS ?? 30_000))
-let aiReviewRunning = false
-let aiReviewLastAt = 0
-let aiModelsCache = { at: 0, models: null }
+// State (AI_REVIEW_MIN_INTERVAL_MS / aiReviewRunning / aiReviewLastAt /
+// aiModelsCache) staat bovenaan het bestand i.v.m. de TDZ + top-level await.
 
 // Draait één review met eigen Mongo-connectie. throws bij actieve run / te snel.
 async function runAiReviewOnce({ model } = {}) {
