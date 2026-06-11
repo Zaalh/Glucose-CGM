@@ -168,6 +168,48 @@ function tune(timeline, options = {}) {
   }
 }
 
+function evaluateParams(timeline, params, options = {}) {
+  if (timeline.length < 20) return { ok: false, reason: 'te weinig data' }
+  const frac = options.trainFraction ?? TRAIN_FRACTION
+  const splitIdx = Math.min(timeline.length - 1, Math.max(1, Math.floor(timeline.length * frac)))
+  const splitMs = timeline[splitIdx].date
+  const ctxOpts = { sustainMin: options.sustainMin, episodeVectors: options.episodeVectors ?? null }
+
+  const trainCtx = buildReplayContext(timeline, { ...ctxOpts, toMs: splitMs })
+  const testCtx = buildReplayContext(timeline, { ...ctxOpts, fromMs: splitMs })
+
+  const v2Train = evaluateV2(trainCtx, params).metrics
+  const v2Test = evaluateV2(testCtx, params).metrics
+  const defaultTrain = evaluateV2(trainCtx, DEFAULT_PARAMS).metrics
+  const defaultTest = evaluateV2(testCtx, DEFAULT_PARAMS).metrics
+  const v1Train = evaluateV1(trainCtx).metrics
+  const v1Test = evaluateV1(testCtx).metrics
+  const minEvents = options.minEvents ?? MIN_EVENTS
+  const degenerate = trainCtx.hypoOnsets.length < minEvents || testCtx.hypoOnsets.length < minEvents
+
+  return {
+    ok: true,
+    degenerate,
+    split: {
+      at: new Date(splitMs).toISOString(),
+      by: 'reading-index',
+      splitIndex: splitIdx,
+      totalReadings: timeline.length,
+      trainFraction: options.trainFraction ?? TRAIN_FRACTION,
+      trainHypoOnsets: trainCtx.hypoOnsets.length,
+      testHypoOnsets: testCtx.hypoOnsets.length,
+      sustainMinutes: trainCtx.sustainMin,
+    },
+    bestParams: params,
+    comparison: {
+      v1: { train: line(v1Train), test: line(v1Test) },
+      v2_default: { train: line(defaultTrain), test: line(defaultTest) },
+      v2_tuned: { train: line(v2Train), test: line(v2Test) },
+    },
+    gridSize: 1,
+  }
+}
+
 // Kwaliteitsgate (M6): V2 mag alleen automatisch het alarm overnemen als er
 // genoeg events zijn ÉN V2 op out-of-sample (test) data niet slechter is dan V1
 // — recall niet lager (geen extra gemiste hypo's) en precision niet lager (geen
@@ -245,7 +287,7 @@ async function main() {
       process.exit(1)
     }
     const baseResult = currentState
-      ? null
+      ? evaluateParams(timeline, existingState.params, baseOptions)
       : tune(timeline, baseOptions)
     const result = refineDamping && currentState
       ? tune(timeline, { ...baseOptions, refineDamping: true, baseParams: existingState.params })
