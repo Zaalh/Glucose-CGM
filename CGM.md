@@ -70,6 +70,14 @@ curl -X POST http://localhost:8787/sync
 Start handmatig dezelfde sync die de overlay periodiek aanroept.
 
 ```bash
+npm run ai:review -- --dry-run --model gpt-oss:120b
+```
+
+Draait de optionele AI-review (zie de AI-review sectie). De server biedt dezelfde
+review aan op poort 8787 via `POST /ai-review/run`, `GET /ai-review/latest` en
+`GET /ai-review/models`, geproxyd door nginx als `/_ai-review/*` voor de overlay-knop.
+
+```bash
 npm run nightscout:down
 ```
 
@@ -164,6 +172,27 @@ LIBREVIEW_RETRY_BASE_DELAY_MS=750
 `LIBREVIEW_GRACE_WINDOW_MINUTES` bepaalt hoeveel recente LibreView-historie elke sync opnieuw ophaalt, zodat late meetpunten alsnog opgeslagen kunnen worden.
 `LIBREVIEW_RETRY_ATTEMPTS` en `LIBREVIEW_RETRY_BASE_DELAY_MS` bepalen hoeveel korte herpogingen de sync doet bij tijdelijke netwerkfouten, timeouts, rate limits of serverfouten.
 
+### `.env.ai`
+
+Optionele AI-laag (Ollama Cloud). Niet gecommit (gitignored); per host plaatsen. Wordt
+door de CLI geladen via `node --env-file-if-exists` en door de `libreview-sync` server
+via `env_file` (`required: false`). Zonder dit bestand staat de AI-review gewoon uit.
+
+```env
+AI_ROUTER_PROVIDERS=ollama
+AI_OLLAMA_BASE_URL=https://ollama.com
+AI_OLLAMA_API_KEY=your-ollama-api-key
+AI_OLLAMA_MODEL=gpt-oss:120b
+AI_OLLAMA_TIMEOUT_MS=60000
+# Optioneel: periodiek automatisch draaien (default 0 = uit)
+# AI_REVIEW_INTERVAL_MINUTES=60
+```
+
+`AI_ROUTER_PROVIDERS` is de fallback-volgorde; per provider gelden `AI_<NAAM>_BASE_URL`,
+`AI_<NAAM>_API_KEY`, `AI_<NAAM>_MODEL`. Legacy `AI_CHAT_*` blijft werken als
+`AI_ROUTER_PROVIDERS` leeg is. Let op: op de Ollama free-tier vereisen sommige modellen
+een abonnement (HTTP 403) en geldt 1 model tegelijk + GPU-tijd-quota.
+
 ### `.env.influxdb`
 
 Optionele InfluxDB 1.8 configuratie. Dit is alleen voor xDrip upload of Grafana; Nightscout/MongoDB blijft de bron voor deze app.
@@ -256,7 +285,10 @@ De live setup is geverifieerd met InfluxDB `1.8.10`, Grafana `11.5.2`, datasourc
 - `grafana/provisioning/datasources/influxdb.yml`: Grafana datasource voor InfluxDB 1.x / InfluxQL.
 - `grafana/provisioning/dashboards/dashboards.yml`: Grafana dashboard provider.
 - `grafana/dashboards/xdrip-glucose.json`: Basisdashboard voor xDrip glucosewaarden.
-- `scripts/libreview-nightscout-sync.mjs`: Lokale sync van LibreView naar Nightscout; schrijft `prediction_snapshots` (V1 + V2 shadow) en glucose/rate naar InfluxDB.
+- `scripts/libreview-nightscout-sync.mjs`: Lokale sync van LibreView naar Nightscout; schrijft `prediction_snapshots` (V1 + V2 shadow) en glucose/rate naar InfluxDB. Serveert ook de AI-review endpoints (`/ai-review/*`).
+- `scripts/lib/ai-review-core.mjs`: Gedeelde AI-review kern (`runAiReview`) voor CLI en server; JSON-mode + retry, neemt `user_feedback` mee.
+- `scripts/lib/ai-router.mjs`: Multi-provider AI-router (OpenAI-compatible) met fallback-volgorde.
+- `scripts/ai-review.mjs`: Dunne CLI-wrapper rond `runAiReview` (`npm run ai:review`).
 - `scripts/lib/hypo-features.mjs`: Pure featurebuilder (`buildHypoFeatures`), gedeeld door live en backtest.
 - `scripts/run-spike-filter-check.mjs`: regressiecheck voor Laag 9 (`172 -> 154 -> 172` single-point spike).
 - `scripts/run-data-quality-check.mjs`: regressiecheck voor Laag 10 (gaten, dubbele/out-of-order timestamps, stale data).
@@ -275,7 +307,7 @@ De live setup is geverifieerd met InfluxDB `1.8.10`, Grafana `11.5.2`, datasourc
 - `scripts/retrain-and-export-model.mjs`: Train + export naar `scripts/risk-model-state.json`.
 - `scripts/risk-model-state.json`: Geëxporteerde, actieve risico-drempels.
 - `nightscout-overlay/rate-overlay.js`: De live overlay — hoofdmonitor met waarde, grafiek, voorspelling en hypo-kaart.
-- `nightscout-overlay/nginx.conf`: Injecteert de overlay en proxyt de sync-endpoints.
+- `nightscout-overlay/nginx.conf` + `nightscout-overlay/app-locations.conf`: Injecteert de overlay en proxyt de sync-endpoints (`/_prediction/latest`, `/_feedback`, `/_overlay/entries`, `/_ai-review/*`).
 
 ## Prediction
 
@@ -286,6 +318,31 @@ Geen quadratic regression gebruiken voor glucosevoorspelling. Bij minuutdata gee
 Naast de V1-regel draait een **V2 reactieve-hypo detector** (`scripts/lib/reactive-hypo-detector.mjs`, zie `hypo.md`) die curvevorm, dalingssnelheid, CGM-lag, scenario's en persoonlijke episodes combineert. V2 staat in **shadow-mode**: per snapshot opgeslagen als `shadowRisk`, maar V1 (`rules-v1.1`) blijft de enige alarmbron tot V2 op genoeg 1-min data getuned en geactiveerd is (M6). Live en backtest delen dezelfde featurebuilder/detector, zodat de backtest meet wat live draait.
 
 De featurebuilder (`scripts/lib/hypo-features.mjs`) berekent o.a. `acceleration` (versnelt de daling?), herstelsignalen (`isDecelerating`/`isBottoming`/`recoverySignal`) die vals alarm dempen wanneer een daling al voorbij is, een **variabele CGM-lag** (`effectiveLagMinutes` 7/5/3/0 min, afhankelijk van de dalingssnelheid) en een **meal-onset detector** (`mealOnset`/`riseFromTroughMmol`/`minutesSinceTrough`): herkent dat een maaltijdpiek begint zodat V2 al in de stijgende fase een lage `watch` geeft (~10-15 min eerder dan de daling). Die `watch` werkt als risk-floor, niet als score-bijdrage, dus meal-onset kan nooit zelf tot een alarm leiden. Laag 9 draait dezelfde median-of-3 spike-filter in live-sync, featurebuilder, backtest en tuner; alleen de werk-timeline wordt opgeschoond, ruwe CGM-entries blijven intact en snapshots markeren dit met `spikeFiltered`/`rawCurrentMmol` wanneer het gebeurt. De live-sync geeft V2 hetzelfde `pattern`-object (persoonlijke episode-vergelijking) door als V1, en sinds 2026-06-04 doen de backtest én auto-tuner dat ook via de gedeelde `scripts/lib/episode-similarity.mjs` — train/serve zijn dus gelijkgetrokken (component 6 / `patternScore` wordt overal hetzelfde gevoed). De hypo-kaart in de overlay toont V1 en V2 naast elkaar (`niveau · score`, bij V2 ook `confidence %` en `✓` bij getunede params; V1 heeft geen `%` want het regelmodel berekent geen confidence). Redenen per model staan in de hover-tooltip; de sync-risk mag het kaart-alarm escaleren maar nooit verlagen. `hypo.md` bevat het volledige verbeterd-voorspellingsplan (9 lagen).
+
+## AI-review (optioneel)
+
+Een optionele AI-laag die recente `prediction_snapshots` samenvat tot
+`ai_observations` en `ai_questions`. **Neemt nooit alarm-/actiebeslissingen** en past
+geen drempels aan — het staat volledig naast de V1/V2-detector en levert alleen uitleg,
+hypotheses en vragen. Staat uit tot `.env.ai` (een AI-provider) is gezet.
+
+- **Kern:** `scripts/lib/ai-review-core.mjs` (`runAiReview`), gebruikt door de CLI
+  (`npm run ai:review`) én de sync-server. Gebruikt een OpenAI-compatible
+  `/v1/chat/completions` endpoint via `scripts/lib/ai-router.mjs` (multi-provider,
+  fallback). Ollama Cloud kan geen strikt JSON-schema afdwingen, dus: JSON-mode +
+  schema in de prompt + validatie/retry.
+- **Feedback-lus:** de review stuurt de laatste `user_feedback` mee, zodat observaties
+  rekening houden met wat de gebruiker bevestigde (`confirmed`/`feels_hypo`) of ontkende
+  (`false_alarm`).
+- **Server-endpoints (poort 8787):** `POST /ai-review/run` (body `{ model }`, met
+  in-memory lock + `AI_REVIEW_MIN_INTERVAL_MS`), `GET /ai-review/latest`,
+  `GET /ai-review/models`. nginx proxyt deze als `/_ai-review/*`.
+- **Overlay:** een AI-knop rechtsonder opent een paneel met een model-dropdown
+  (⭐ aanbevolen-groep + volledige lijst uit `/api/tags`), een "Review draaien"-knop en
+  de recente observaties/vragen.
+- **Periodiek (optioneel):** `AI_REVIEW_INTERVAL_MINUTES>0` laat de server elk interval
+  automatisch een review draaien.
+- Volledige ontwerp + roadmap voor rijkere AI-rollen staat in `llm.md`.
 
 ## Alarms
 

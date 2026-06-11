@@ -10,6 +10,23 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 > `mealOnset`/`minutesSinceTrough`/`riseFromTroughMmol`-features. Meal-onset draait in
 > V2 (shadow); de actieve V1-alarmen blijven ongemoeid tot de M6-gate slaagt.
 
+### Toegevoegd
+
+- **AI-review met overlay-knop (Ollama Cloud)** — de optionele AI-laag is nu bedienbaar
+  vanuit de overlay. Nieuwe gedeelde kern `scripts/lib/ai-review-core.mjs` (`runAiReview`,
+  JSON-mode + schema-in-prompt + retry omdat Ollama Cloud geen strikt schema afdwingt),
+  gebruikt door zowel de CLI (`npm run ai:review`) als de sync-server. Server-endpoints
+  `POST /ai-review/run` (lock + min-interval), `GET /ai-review/latest`,
+  `GET /ai-review/models`, geproxyd via nginx als `/_ai-review/*`. Overlay krijgt een
+  AI-knop + paneel met model-dropdown (⭐ aanbevolen-groep), run-knop en weergave van
+  observaties/vragen. **Feedback-lus:** de review neemt recente `user_feedback` mee zodat
+  observaties persoonlijk/cumulatief worden. Optionele periodieke loop via
+  `AI_REVIEW_INTERVAL_MINUTES` (default uit). Config in gitignored `.env.ai` (via
+  `env_file required:false` in de `libreview-sync` service). De AI neemt **nooit**
+  alarm-/actiebeslissingen. Ontwerp + roadmap in `llm.md`.
+- **Multi-provider AI-router** (`scripts/lib/ai-router.mjs`) met fallback-volgorde via
+  `AI_ROUTER_PROVIDERS` + per-provider `AI_<NAAM>_*`; legacy `AI_CHAT_*` blijft werken.
+
 ### Gewijzigd
 
 - **Precision-analyse en kandidaat-dempingen voor V2 (nog niet live geactiveerd)** —
