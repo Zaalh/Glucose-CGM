@@ -160,6 +160,23 @@ AI_ZAI_MODEL=glm-4.5
 De oude single-provider vars `AI_CHAT_BASE_URL`, `AI_CHAT_API_KEY` en
 `AI_CHAT_MODEL` blijven werken zolang `AI_ROUTER_PROVIDERS` leeg is.
 
+`npm run ai:review` laadt lokaal automatisch `.env.ai` (gitignored) via
+`node --env-file-if-exists`. Voorbeeld met Ollama Cloud:
+
+```bash
+# .env.ai
+AI_ROUTER_PROVIDERS=ollama
+AI_OLLAMA_BASE_URL=https://ollama.com
+AI_OLLAMA_API_KEY=...
+AI_OLLAMA_MODEL=gpt-oss:120b
+```
+
+Per run een ander model kiezen (overschrijft `AI_*_MODEL`):
+
+```bash
+npm run ai:review -- --dry-run --model glm-4.7
+```
+
 ```bash
 npm run spike-filter:check
 ```

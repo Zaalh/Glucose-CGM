@@ -6,10 +6,27 @@ const DEFAULT_LIMIT = 24
 
 const CONFIDENCE = new Set(['low', 'medium', 'high'])
 
+function readCliArg(name) {
+  const inline = process.argv.find((a) => a.startsWith(`--${name}=`))
+  if (inline) return inline.slice(name.length + 3)
+  const idx = process.argv.indexOf(`--${name}`)
+  if (idx !== -1 && process.argv[idx + 1] && !process.argv[idx + 1].startsWith('--')) {
+    return process.argv[idx + 1]
+  }
+  return ''
+}
+
 function readConfig() {
+  const aiRouter = readAiRouterConfig()
+  // --model overschrijft het model van alle providers, zodat je per run een
+  // ander Ollama-cloud model kunt kiezen zonder de env aan te passen.
+  const modelOverride = readCliArg('model').trim()
+  if (modelOverride) {
+    aiRouter.providers = aiRouter.providers.map((p) => ({ ...p, model: modelOverride }))
+  }
   return {
     mongoUri: process.env.MONGODB_URI ?? DEFAULT_MONGO_URI,
-    aiRouter: readAiRouterConfig(),
+    aiRouter,
     limit: Math.max(1, Math.min(100, Number(process.env.AI_REVIEW_LIMIT ?? DEFAULT_LIMIT))),
     dryRun: process.argv.includes('--dry-run'),
     force: process.argv.includes('--force'),
