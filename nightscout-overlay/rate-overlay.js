@@ -774,6 +774,7 @@
       '#cgm-hypo-alert .hypo-average{font-family:monospace;font-size:14px;font-weight:900;line-height:1.1;white-space:nowrap;opacity:.95}',
       '#cgm-hypo-alert .hypo-predict{font-family:monospace;font-size:13px;font-weight:800;line-height:1.15;white-space:nowrap;opacity:.95}',
       '#cgm-hypo-alert .hypo-drop{font-family:monospace;font-size:12px;font-weight:800;line-height:1.15;white-space:nowrap;opacity:.95}',
+      '#cgm-hypo-alert .hypo-carb-inline{font-family:monospace;font-size:12px;font-weight:900;line-height:1.15;white-space:nowrap;opacity:.95}',
       '#cgm-hypo-alert .hypo-model{font-family:Arial,Helvetica,sans-serif;font-size:9px;font-weight:700;opacity:.6;margin-left:6px;padding:1px 4px;border:1px solid rgba(0,0,0,.25);border-radius:4px;vertical-align:middle}',
       '#cgm-hypo-alert .hypo-feedback{display:flex;flex-wrap:wrap;gap:4px;justify-content:center;margin-top:4px}',
       '#cgm-hypo-alert .hypo-feedback button{font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;line-height:1;padding:4px 7px;border:1px solid rgba(0,0,0,.28);border-radius:5px;background:rgba(255,255,255,.55);color:inherit;cursor:pointer}',
@@ -783,6 +784,7 @@
       '#cgm-hypo-alert.watch{color:#2f1600;border-color:#facc15;background:linear-gradient(135deg,#fff3a3 0%,#fbbf24 100%)}',
       '#cgm-hypo-alert.warning{color:#2f1600;border-color:#f59e0b;background:linear-gradient(135deg,#ffe08a 0%,#fb923c 100%)}',
       '#cgm-hypo-alert.hypo,#cgm-hypo-alert.urgent{color:#fff7ed;border-color:#fb7185;background:linear-gradient(135deg,#f59e0b 0%,#e11d48 100%);text-shadow:0 1px 2px rgba(0,0,0,.45)}',
+      '#cgm-hypo-alert,#cgm-hypo-alert.ok,#cgm-hypo-alert.watch,#cgm-hypo-alert.warning,#cgm-hypo-alert.hypo,#cgm-hypo-alert.urgent{color:#111!important;text-shadow:none!important}',
       '#cgm-point-rate-tooltip{position:absolute!important;z-index:10001!important;display:none;min-width:178px;border:1px solid rgba(255,255,255,.22);border-radius:5px;background:rgba(0,0,0,.86);color:#f3f4f6;font-family:Arial,Helvetica,sans-serif;padding:7px 8px;box-shadow:0 2px 12px rgba(0,0,0,.55);pointer-events:none}',
       '#cgm-point-rate-tooltip .pt-head{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:8px;font-size:12px;font-weight:900;line-height:1.15;margin-bottom:4px}',
       '#cgm-point-rate-tooltip .pt-head .pt-bg{text-align:left}',
@@ -1270,6 +1272,34 @@
     ].join('');
   }
 
+  function carbAdviceInlineHtml() {
+    var p = latestDbPrediction;
+    if (!p || !p.carbAdvice) return '';
+    if (latestReading && p.entryIdentifier && p.entryIdentifier !== latestReading.identifier) return '';
+    var advice = p.carbAdvice;
+    if (!advice.action || advice.action === 'none' || advice.action === 'eat_now') return '';
+    var title = advice.title || 'Houd suiker klaar';
+    var message = advice.message || '';
+    var detail = message ? ' · ' + message : '';
+    var titleParts = Array.isArray(advice.reasons) ? advice.reasons.filter(Boolean) : [];
+    if (Number.isFinite(advice.minutesTo40)) titleParts.push('tijd tot 4.0: ' + advice.minutesTo40 + ' min');
+    if (Number.isFinite(advice.minutesTo45)) titleParts.push('tijd tot 4.5: ' + advice.minutesTo45 + ' min');
+    var titleAttr = titleParts.length ? ' title="' + escapeHtml(titleParts.join(' · ')) + '"' : '';
+    return '<div class="hypo-line"><span class="hypo-carb-inline"' + titleAttr + '>advies: ' +
+      escapeHtml(title + detail) + '</span></div>';
+  }
+
+  function carbAdviceInlineText() {
+    var p = latestDbPrediction;
+    if (!p || !p.carbAdvice) return '';
+    if (latestReading && p.entryIdentifier && p.entryIdentifier !== latestReading.identifier) return '';
+    var advice = p.carbAdvice;
+    if (!advice.action || advice.action === 'none' || advice.action === 'eat_now') return '';
+    var title = advice.title || 'Houd suiker klaar';
+    var message = advice.message || '';
+    return 'advies: ' + title + (message ? ' · ' + message : '');
+  }
+
   function renderHypoAlert(risk) {
     var alert = ensureHypoAlert();
     currentHypoRisk = risk;
@@ -1277,6 +1307,7 @@
       ? 'patrooncorr: -' + currentPatternCorrection.correction.toFixed(1) + ' (n=' + currentPatternCorrection.episodes + ')'
       : '';
     var dbPatternLine = dbPatternLineText();
+    var carbInlineText = carbAdviceInlineText();
       
     if (!risk && !patternLine && !dbPatternLine) {
       alert.style.display = 'none';
@@ -1316,11 +1347,19 @@
       '<div class="hypo-line"><span class="hypo-average">', averageRateText(true), '</span></div>',
       predictHtml,
       dropLine ? '<div class="hypo-line"><span class="hypo-drop">' + dropLine + '</span></div>' : '',
-      dbPatternLine ? '<div class="hypo-line"><span class="hypo-drop" style="color: #ff9800; font-weight: bold;">' + escapeHtml(dbPatternLine) + '</span></div>' : '',
-      patternLine ? '<div class="hypo-line"><span class="hypo-drop" style="color: #ff9800; font-weight: bold;">' + escapeHtml(patternLine) + '</span></div>' : '',
+      dbPatternLine ? '<div class="hypo-line"><span class="hypo-drop" style="font-weight: bold;">' + escapeHtml(dbPatternLine) + '</span></div>' : '',
+      patternLine || carbInlineText ? '<div class="hypo-line"><span class="hypo-drop" style="font-weight: bold;">' + escapeHtml([patternLine, carbInlineText].filter(Boolean).join(' · ')) + '</span></div>' : '',
+      (!patternLine && !carbInlineText) ? carbAdviceInlineHtml() : '',
       '</div>'
     ].join('');
-    renderCarbAdvice(alert);
+    var p = latestDbPrediction;
+    var advice = p && p.carbAdvice ? p.carbAdvice : null;
+    if (advice && advice.action === 'eat_now') renderCarbAdvice(alert);
+    else {
+      var panel = ensureCarbAdvice(alert);
+      panel.style.display = 'none';
+      alert.classList.remove('has-carb');
+    }
   }
 
   function sendFeedback(type, btn) {
@@ -1439,23 +1478,32 @@
       container.style.transform = 'translateX(-50%)';
       container.style.width = '';
       statsPanel.style.top = Math.max(0, Math.round(chartBottom + 8)) + 'px';
-      button.style.top = Math.max(0, Math.round(buttonTop)) + 'px';
-      button.style.left = Math.round(window.scrollX + window.innerWidth / 2) + 'px';
-      button.style.transform = 'translateX(-50%)';
-      viewButton.style.top = Math.max(0, Math.round(buttonTop)) + 'px';
-      var viewWidth = viewButton.getBoundingClientRect().width || 56;
-      var btnRect = button.getBoundingClientRect();
-      viewButton.style.left = Math.round(window.scrollX + btnRect.left - viewWidth - 8) + 'px';
-      viewButton.style.transform = 'none';
-      var viewRect = viewButton.getBoundingClientRect();
-      var calcWidth = calcButton.getBoundingClientRect().width || 80;
-      calcButton.style.top = Math.max(0, Math.round(buttonTop)) + 'px';
-      calcButton.style.left = Math.round(window.scrollX + viewRect.left - calcWidth - 8) + 'px';
-      calcButton.style.transform = 'none';
+      var stackButtons = [calcButton, viewButton, button];
+      var stackGap = 5;
+      var maxButtonWidth = Math.max.apply(null, stackButtons.map(function (el) {
+        return el.getBoundingClientRect().width || 64;
+      }));
+      var stackHeight = stackButtons.reduce(function (sum, el) {
+        return sum + (el.getBoundingClientRect().height || 24);
+      }, 0) + stackGap * (stackButtons.length - 1);
+      var stackLeft = window.scrollX + alertRect.right + 10;
+      var stackTop = window.scrollY + alertRect.top + Math.max(0, (alertRect.height - stackHeight) / 2);
+      if (stackLeft + maxButtonWidth > window.scrollX + window.innerWidth - 8) {
+        stackLeft = window.scrollX + alertRect.left - maxButtonWidth - 10;
+      }
+      stackLeft = Math.max(window.scrollX + 6, stackLeft);
+      stackButtons.forEach(function (el) {
+        var h = el.getBoundingClientRect().height || 24;
+        el.style.top = Math.max(0, Math.round(stackTop)) + 'px';
+        el.style.left = Math.round(stackLeft) + 'px';
+        el.style.transform = 'none';
+        el.style.minWidth = Math.round(maxButtonWidth) + 'px';
+        stackTop += h + stackGap;
+      });
     }
     var buttonRect = button.getBoundingClientRect();
-    nav.style.top = Math.max(0, Math.round(buttonTop)) + 'px';
-    nav.style.left = Math.round(window.scrollX + buttonRect.right + 8) + 'px';
+    nav.style.top = Math.max(0, Math.round(buttonRect.bottom + window.scrollY + 6)) + 'px';
+    nav.style.left = Math.round(window.scrollX + buttonRect.left) + 'px';
     alert.style.top = Math.max(0, Math.round(alertTop)) + 'px';
     container.style.top = Math.max(0, Math.round(containerTop)) + 'px';
     if (window.innerWidth > 700) {
