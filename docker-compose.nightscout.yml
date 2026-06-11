@@ -97,6 +97,10 @@ services:
       - .env.nightscout
       - .env.libreview
       - .env.influxdb
+      # AI-laag (Ollama Cloud) voor de overlay AI-review knop. Gitignored, dus
+      # per host plaatsen; required:false zodat deploy zonder dit bestand niet breekt.
+      - path: .env.ai
+        required: false
     environment:
       NIGHTSCOUT_URL: http://nightscout:1337
       MONGODB_URI: mongodb://nightscout-mongo:27017/nightscout

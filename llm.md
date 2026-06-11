@@ -1,0 +1,299 @@
+# AI-review in de overlay — uitgebreid plan (llm.md)
+
+Status: **Fase 1–4 geïmplementeerd & getest** (deploy naar de iMac is de laatste
+stap). Dit document beschrijft het ontwerp om de AI-review als knop + paneel in de
+Nightscout-overlay te krijgen, gevoed door Ollama Cloud, met een meegebouwde
+periodieke achtergrond-loop. Sectie 10 beschrijft de **roadmap** om de AI
+betekenisvoller te maken dan alleen "samenvatten achteraf".
+
+> Veiligheidskader: de AI-laag levert **alleen observaties en vragen**. Nooit
+> alarm- of actiebeslissingen. Past bij de reactieve-hypoglykemie use-case
+> (geen insuline/closed-loop). Zie ook `README.md` en `hypo.md`.
+
+---
+
+## 1. Huidige architectuur (vastgesteld in code)
+
+```
+browser overlay  ──HTTP /_*──►  nginx (1337/443)  ──proxy──►  libreview-sync:8787  ──►  MongoDB
+(rate-overlay.js)               (app-locations.conf)          (libreview-nightscout-sync.mjs)
+```
+
+- **Overlay** = `nightscout-overlay/rate-overlay.js` (browser-script). Kan zelf géén
+  Mongo/Ollama benaderen; praat uitsluitend via `/_`-endpoints.
+  - Haalt al data via `/_prediction/latest`, `/_overlay/entries`, `POST /_feedback`.
+  - Knoppenstack (calc / view / nav) wordt gepositioneerd in de layout-functie.
+- **nginx** = `nightscout-overlay/app-locations.conf`: mapt `/_xxx` →
+  `http://libreview-sync:8787/xxx`. Gemount read-only in de `nightscout-ui` service.
+- **Server** = `scripts/libreview-nightscout-sync.mjs`, Docker-service `libreview-sync`,
+  draait met `--server --loop` op poort 8787. Heeft al Mongo-toegang en routes
+  (`/prediction/latest`, `/overlay/entries`, `/feedback`, `/sync`, `/health`).
+- **AI-logica** = `scripts/ai-review.mjs` + `scripts/lib/ai-router.mjs`. Nu CLI-only
+  (`npm run ai:review`). Router is multi-provider met fallback-volgorde; leest
+  `.env.ai` (gitignored) via `node --env-file-if-exists`.
+
+---
+
+## 2. Online research — Ollama Cloud (juni 2026)
+
+Bronnen onderaan. Relevante conclusies voor dit ontwerp:
+
+1. **OpenAI-compatible endpoint werkt op cloud.** `POST https://ollama.com/v1/chat/completions`
+   met `Authorization: Bearer <key>` geeft `choices[0].message.content` terug. Ondersteunde
+   request-velden: `model`, `messages`, `temperature`, `top_p`, `max_tokens`, `stop`,
+   `stream`, `response_format`, `tools`, `reasoning_effort`. (Getest: werkt.)
+2. **`response_format: {type:"json_object"}` (JSON-mode) werkt** op cloud. (Getest: gaf
+   geldige JSON terug met `gpt-oss:120b`.)
+3. **Strikte structured outputs (JSON-schema via `format`) worden op Ollama Cloud
+   NIET ondersteund.** Het native `/api/chat` `format`-veld met JSON-schema werkt alleen
+   lokaal, niet op cloud. → We kunnen niet leunen op schema-enforcement.
+4. **Best practices voor betrouwbare JSON** (geldt juist nu schema-enforcement ontbreekt):
+   - `temperature` laag (0–0.2).
+   - Expliciet in de prompt: "antwoord uitsluitend met JSON, geen extra tekst".
+   - De gewenste structuur (schema) **als tekst in de prompt** meegeven om het model te gronden.
+   - **Valideren** na parsen; bij parse-fout **opschonen of 1× retry**.
+5. **Model-listing**: `GET https://ollama.com/api/tags` (native, Bearer) of
+   `/v1/models` (OpenAI-compat). `/api/tags` is getest en geeft de cloud-modellen terug.
+
+→ **Ontwerpkeuze:** blijf bij de bestaande OpenAI-compatible router + `json_object`
+mode, en maak `ai-review-core` robuust met **validatie + één retry** bij ongeldige JSON.
+Geen afhankelijkheid van cloud-schema-enforcement.
+
+---
+
+## 3. Productkeuzes (door gebruiker bevestigd)
+
+| Vraag | Keuze |
+|------|-------|
+| Trigger | **Knop nu** + periodieke loop **alvast meebouwen** (default uit) |
+| Model-keuze | **Dropdown** met alle modellen (uit `/api/tags`) |
+| Resultaat | **Wegschrijven** naar Mongo (`ai_observations` / `ai_questions`) |
+
+---
+
+## 4. Doel-architectuur
+
+```
+overlay "AI"-knop ─► POST /_ai-review/run {model}  ─► server.runAiReview() ─► Ollama Cloud
+                                                              │
+                                                              └─► Mongo write (observations/questions)
+overlay paneel    ─► GET  /_ai-review/latest        ─► server leest recente docs uit Mongo
+model-dropdown    ─► GET  /_ai-review/models        ─► server proxyt Ollama /api/tags
+
+(optioneel, default uit) server-loop elke AI_REVIEW_INTERVAL_MINUTES ─► dezelfde runAiReview()
+```
+
+---
+
+## 5. Implementatie per fase
+
+### Fase 1 — Backend (server + refactor)
+
+**1.1 `scripts/lib/ai-review-core.mjs` (NIEUW)** — kernlogica losgetrokken uit
+`ai-review.mjs` zodat CLI én server dezelfde code gebruiken.
+- Exporteert `runAiReview({ db, dryRun, model, limit })` → `{ ok, provider, model,
+  observations, questions, skipped?, reason? }`.
+- Verplaatst hierheen: `readAiRouterConfig`-gebruik, `systemPrompt`, `userPrompt`,
+  `callChat`, `cleanObservation`, `cleanQuestion`, `sourceName`, snapshot-projectie + query.
+- **Robuustheid (research-punt 4):** als `JSON.parse` faalt → één retry met een extra
+  system-instructie ("vorige output was geen geldige JSON; geef uitsluitend geldige
+  JSON volgens dit schema: …"). Faalt het opnieuw → nette fout, niets wegschrijven.
+- Schema-grounding: neem de gewenste JSON-structuur als tekst op in de system-prompt.
+- `model` (optioneel) overschrijft het provider-model (zoals de huidige `--model` flag).
+- Schrijft alleen weg als `dryRun` false is; geeft altijd het resultaat terug.
+
+**1.2 `scripts/ai-review.mjs` (REFACTOR)** — wordt een dunne CLI-wrapper:
+opent Mongo, leest `--dry-run` / `--force` / `--model`, roept `runAiReview()` aan,
+print JSON. Gedrag voor de CLI blijft identiek.
+
+**1.3 `scripts/libreview-nightscout-sync.mjs` (NIEUWE ROUTES + LOOP)**
+- Import `runAiReview` en `readAiRouterConfig` uit de core.
+- **In-memory lock + min-interval** (module-scope): `let aiReviewRunning = false` en
+  `let lastAiReviewAt = 0`. Voorkomt dubbele/spam-runs vanaf de knop.
+- Route `POST /ai-review/run`:
+  - Body optioneel `{ model }`. CORS al aanwezig.
+  - Als `aiReviewRunning` → `409 { ok:false, message:'Review draait al' }`.
+  - Als `now - lastAiReviewAt < AI_REVIEW_MIN_INTERVAL_MS` (default 30s) → `429`.
+  - Anders: lock, `runAiReview({ db, dryRun:false, model })`, unlock, resultaat terug.
+- Route `GET /ai-review/latest`:
+  - Leest laatste N (`?limit=`, default 10) uit `ai_observations` + `ai_questions`,
+    gesorteerd op `createdAt` desc. Geeft `{ ok, observations, questions }`.
+- Route `GET /ai-review/models`:
+  - Proxyt `GET https://ollama.com/api/tags` met de Bearer-key uit de router-config
+    (eerste Ollama-provider), geeft `{ ok, models:[{name}] }`. Korte cache (bv. 5 min)
+    om Ollama niet te spammen.
+- **Periodieke loop (alvast, default uit):** lees `AI_REVIEW_INTERVAL_MINUTES`
+  (default `0`). Als `> 0`, start een `setInterval` die `runAiReview()` aanroept met
+  dezelfde lock. Log resultaat. Zet later op bv. `60` om elk uur te draaien.
+
+**1.4 Env / Docker**
+- `AI_OLLAMA_*` (+ `AI_ROUTER_PROVIDERS=ollama`) moeten beschikbaar zijn in de
+  `libreview-sync` container. Twee opties:
+  - **A (aanbevolen):** voeg `.env.ai` toe aan de `env_file`-lijst van `libreview-sync`
+    in `docker-compose.nightscout.yml`. `.env.ai` staat gitignored, dus per host plaatsen.
+  - **B:** zet de vars onder `environment:` (komt dan wél in git — niet doen met de key).
+- `node --env-file-if-exists` is alleen voor de CLI; de server leest gewoon `process.env`,
+  dus de env moet via Docker `env_file` binnenkomen.
+
+### Fase 2 — nginx (`nightscout-overlay/app-locations.conf`)
+
+Drie `location`-blokken bij, in dezelfde stijl als de bestaande:
+
+```nginx
+location = /_ai-review/run {
+  proxy_pass http://libreview-sync:8787/ai-review/run;
+}
+location = /_ai-review/latest {
+  proxy_pass http://libreview-sync:8787/ai-review/latest$is_args$args;
+}
+location = /_ai-review/models {
+  proxy_pass http://libreview-sync:8787/ai-review/models;
+}
+```
+
+(`POST` doorlaten; bestaande blokken tonen het patroon. nginx herladen na wijziging.)
+
+### Fase 3 — Overlay (`nightscout-overlay/rate-overlay.js`)
+
+**3.1 "AI"-knop** toevoegen aan de bestaande knoppenstack (de verticale stack-logica
+is recent toegevoegd; knop toevoegen aan de `stackButtons`-array + aanmaken zoals
+`calcButton`/`viewButton`).
+
+**3.2 AI-paneel** (nieuw DOM-element, vergelijkbaar met carb-advies-paneel):
+- **Model-dropdown**: gevuld via `GET /_ai-review/models` (1× bij openen, gecachet).
+  Default-selectie `gpt-oss:120b`. Keuze onthouden in `localStorage`.
+- **"Review draaien"-knop**: `POST /_ai-review/run` met `{ model }`. Tijdens de call:
+  knop disabled + spinner/"bezig…"; bij klaar: paneel verversen. Fouten (409/429/500)
+  netjes tonen.
+- **Weergave**: lijst van observaties (`summary`/`hypothesis`, `confidence`, `scope`)
+  en vragen (`question`/`reason`). HTML escapen (er is al een `escapeHtml`).
+- **Laden + verversen**: bij openen `GET /_ai-review/latest`; licht periodiek (bv. elke
+  60s als het paneel open is) opnieuw, zodat achtergrond-loop-resultaten verschijnen.
+
+**3.3 Styling**: stijl-regels bij de bestaande `#cgm-hypo-alert`-CSS-injectie, in lijn
+met de huidige look (monospace, donkere tekst).
+
+### Fase 4 — Verifiëren & deployen
+
+1. **Lokaal**: server tegen Mongo draaien, endpoints testen:
+   - `curl -XPOST localhost:8787/ai-review/run -d '{"model":"gpt-oss:120b"}'`
+   - `curl localhost:8787/ai-review/latest`
+   - `curl localhost:8787/ai-review/models`
+2. **Overlay** in de browser: knop → paneel → run → resultaat zichtbaar; dropdown gevuld.
+3. **iMac-deploy** (`192.168.178.240`, Docker, UI op 1337):
+   - `.env.ai` op de host plaatsen (key erin) + aan `env_file` van `libreview-sync` koppelen.
+   - `docker compose ... up -d --build libreview-sync` (herbouw server).
+   - nginx-config herladen (`nightscout-ui` herstarten of `nginx -s reload`).
+4. **Smoke-test** op de iMac via de UI.
+
+---
+
+## 6. Datamodel (bestaand, hergebruikt)
+
+`ai_observations`: `{ createdAt, source, scope, relatedEventIds[], summary, hypothesis,
+confidence, ... }`
+`ai_questions`: `{ createdAt, source, question, reason, relatedEntryIdentifier, ... }`
+`source` = `ai-router:<provider>` (bv. `ai-router:ollama`).
+
+---
+
+## 7. Risico's & mitigaties
+
+| Risico | Mitigatie |
+|--------|-----------|
+| LLM-call traag (sec) | Knop disabled + laad-state; ruime timeout (`AI_OLLAMA_TIMEOUT_MS=60000`) |
+| Knop-spam / kosten | Server-lock + min-interval (30s) + 1 run tegelijk |
+| Ongeldige JSON (geen cloud-schema) | JSON-mode + schema-in-prompt + validatie + 1× retry |
+| Key-lek | `.env.ai` gitignored; nooit in `environment:` van compose; key roteerbaar |
+| Provider down | Router-fallback-volgorde (meerdere providers mogelijk) |
+| Overlay toont stale data | Periodiek `/_ai-review/latest` verversen als paneel open is |
+
+---
+
+## 8. Bestanden die wijzigen
+
+| Bestand | Aard |
+|---------|------|
+| `scripts/lib/ai-review-core.mjs` | **nieuw** — gedeelde runAiReview + robuuste JSON |
+| `scripts/ai-review.mjs` | refactor → dunne CLI-wrapper |
+| `scripts/libreview-nightscout-sync.mjs` | 3 routes + lock + optionele loop |
+| `nightscout-overlay/app-locations.conf` | 3 nginx-locations |
+| `nightscout-overlay/rate-overlay.js` | AI-knop + paneel + dropdown + CSS |
+| `docker-compose.nightscout.yml` | `.env.ai` aan `env_file` van libreview-sync |
+| `.env.ai` (host, gitignored) | `AI_OLLAMA_*` op de iMac |
+| `README.md` | korte sectie over de AI-knop + endpoints |
+
+---
+
+## 9. Volgorde van uitvoeren
+
+1. Fase 1 (core-refactor + endpoints + lock) → endpoints los testbaar.
+2. Fase 2 (nginx) → endpoints bereikbaar via `/_`.
+3. Fase 3 (overlay UI) → knop + paneel + dropdown.
+4. Fase 4 (deploy iMac) + periodieke loop later activeren via `AI_REVIEW_INTERVAL_MINUTES`.
+
+---
+
+## 10. Roadmap — betekenisvollere AI-rollen
+
+Wat nu live is (samenvatten van recente snapshots) is de meest oppervlakkige rol.
+De data ligt er al voor rijkere rollen: `prediction_snapshots`, `user_feedback`,
+`episodes` / `episode_vectors`. **Harde grens blijft:** de AI neemt nooit
+alarm-/actiebeslissingen over; de detector (V1/V2) blijft de veiligheidskritische
+laag. De AI maakt de *gebruiker* slimmer over zijn patronen, niet de wiskunde.
+
+### 10.1 Feedback-lus sluiten ⭐ (grootste winst, laag risico)
+**Status: eerste slice GEDAAN.** De review laadt nu de laatste 20 `user_feedback`
+(confirmed/false_alarm/feels_hypo/ate_now/fingerstick_confirmed) en stuurt die als
+`recentUserFeedback` mee in de prompt; de system-prompt instrueert het model om
+hypotheses hierop te verfijnen en geen vragen te stellen die de feedback al
+beantwoordt. Geverifieerd: observaties refereren expliciet aan eerdere feedback.
+
+Nog open (volgende slices):
+- Antwoorden op specifieke `ai_questions` mogelijk maken in de UI en terugkoppelen
+  (`ai_questions.answer` bestaat al als veld).
+- Optioneel: gedestilleerde inzichten persisteren in een `ai_insights`-collectie zodat
+  de context niet onbeperkt groeit.
+
+### 10.2 Trigger- & patroonherkenning
+In plaats van per-snapshot: analyseer de **hele historie** op terugkerende
+dip-triggers (tijdstip, weekdag, daling-na-piek-curve, en — met feedback — welke
+situaties echt tot een hypo leidden).
+- Nieuwe aggregatie-input: episodes + outcome (`outcomeEvaluated`, `result`) i.p.v.
+  losse snapshots.
+- Output: observaties met `scope: 'week'`/`'day'` zoals "dips vooral op werkdagen
+  11–12u, ~2u na lunch". Raakt direct het doel: **eerder zien aankomen**.
+
+### 10.3 Live "waarom nu?"-uitleg
+Een regel/knop die in gewone taal uitlegt waaróm de detector nú op `watch/high`
+staat (rate, daling vanaf piek, gelijkende episodes). **Geen** alarmbesluit — alleen
+de bestaande beslissing begrijpelijk maken. Kan via `/_ai-review/explain` met de
+laatste snapshot; let op latency (cache per `entryIdentifier`).
+
+### 10.4 Dag-/weekoverzicht (digest)
+Periodieke digest (sluit aan op de al gebouwde loop): episodes, bijna-missers,
+time-in-range, met hypotheses. Schrijf naar `ai_observations` met `scope:'day'`/`'week'`.
+
+### 10.5 Detector-tuning adviseur (advies-only)
+AI bekijkt waar V2 miste / vals alarm gaf en stelt **parameter-richtingen** voor die
+de mens in `tune-reactive-hypo-v2.mjs` test. Nooit automatisch toepassen.
+
+### Prioriteit
+Aanbevolen volgorde: **10.1 → 10.2** (samen de meeste betekenis voor de
+reactieve-hypo use-case), daarna 10.3/10.4. 10.5 los, indien gewenst.
+
+### Aandachtspunten voor deze fases
+- Ollama Cloud kan geen strikt JSON-schema afdwingen → blijf bij JSON-mode +
+  prompt-grounding + validatie/retry (zie sectie 2).
+- Contextgrootte bewaken: stuur samenvattingen/aggregaties, geen ruwe historie.
+- Kosten/latency: zwaardere analyses (10.2/10.4) bij voorkeur via de periodieke loop,
+  niet synchroon achter een knop.
+
+---
+
+## Bronnen
+
+- [OpenAI compatibility — Ollama docs](https://docs.ollama.com/api/openai-compatibility)
+- [Structured outputs — Ollama docs](https://docs.ollama.com/capabilities/structured-outputs)
+- [Structured outputs — Ollama blog](https://ollama.com/blog/structured-outputs)
+- [OpenAI compatibility — Ollama blog](https://ollama.com/blog/openai-compatibility)

@@ -5,6 +5,7 @@ import { MongoClient } from 'mongodb'
 import { buildHypoFeatures, cleanGlucoseTimeline } from './lib/hypo-features.mjs'
 import { evaluateReactiveHypoRiskV2 } from './lib/reactive-hypo-detector.mjs'
 import { findSimilarEpisodes, patternFromFeatures } from './lib/episode-similarity.mjs'
+import { aiRouterConfigured, resolveAiRouterConfig, runAiReview } from './lib/ai-review-core.mjs'
 
 const LIBRE_API = 'https://api-eu.libreview.io'
 const DEFAULT_INTERVAL_SECONDS = 60
@@ -768,6 +769,41 @@ function startServer() {
       return
     }
 
+    if (url.pathname === '/ai-review/run' && req.method === 'POST') {
+      try {
+        const body = await readJsonBody(req)
+        const result = await runAiReviewOnce({ model: body && body.model })
+        res.end(JSON.stringify(result))
+      } catch (err) {
+        res.writeHead(err && err.statusCode ? err.statusCode : 500)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
+    if (url.pathname === '/ai-review/latest' && req.method === 'GET') {
+      try {
+        const limit = parsePositiveInt(url.searchParams.get('limit'), 10, 50)
+        const result = await getLatestAiReview(limit)
+        res.end(JSON.stringify({ ok: true, ...result }))
+      } catch (err) {
+        res.writeHead(500)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
+    if (url.pathname === '/ai-review/models' && req.method === 'GET') {
+      try {
+        const models = await listAiModels()
+        res.end(JSON.stringify({ ok: true, models }))
+      } catch (err) {
+        res.writeHead(500)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
     res.writeHead(404)
     res.end(JSON.stringify({ success: false, message: 'Niet gevonden.' }))
   })
@@ -775,15 +811,22 @@ function startServer() {
   httpServer.listen(port, '0.0.0.0', () => {
     console.log(`[libreview-sync] HTTP sync server luistert op ${port}`)
   })
+
+  startAiReviewLoop()
 }
 
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
     let raw = ''
+    const clientError = (message) => {
+      const err = new Error(message)
+      err.statusCode = 400
+      return err
+    }
     req.on('data', (chunk) => {
       raw += chunk
       if (raw.length > 1_000_000) {
-        reject(new Error('Body te groot'))
+        reject(clientError('Body te groot'))
         req.destroy()
       }
     })
@@ -791,7 +834,7 @@ function readJsonBody(req) {
       try {
         resolve(raw ? JSON.parse(raw) : {})
       } catch (err) {
-        reject(new Error(`Ongeldige JSON: ${formatError(err)}`))
+        reject(clientError(`Ongeldige JSON: ${formatError(err)}`))
       }
     })
     req.on('error', reject)
@@ -897,6 +940,101 @@ function parsePositiveInt(value, fallback, max) {
   const parsed = Number.parseInt(value ?? '', 10)
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback
   return Math.min(parsed, max)
+}
+
+// --- AI-review (optionele AI-laag) -----------------------------------------
+// In-memory lock + min-interval zodat de overlay-knop het LLM niet kan spammen.
+const AI_REVIEW_MIN_INTERVAL_MS = Math.max(0, Number(process.env.AI_REVIEW_MIN_INTERVAL_MS ?? 30_000))
+let aiReviewRunning = false
+let aiReviewLastAt = 0
+let aiModelsCache = { at: 0, models: null }
+
+// Draait één review met eigen Mongo-connectie. throws bij actieve run / te snel.
+async function runAiReviewOnce({ model } = {}) {
+  if (aiReviewRunning) {
+    const err = new Error('Er draait al een AI-review.')
+    err.statusCode = 409
+    throw err
+  }
+  const since = Date.now() - aiReviewLastAt
+  if (aiReviewLastAt && since < AI_REVIEW_MIN_INTERVAL_MS) {
+    const err = new Error(`Te snel achter elkaar; wacht ${Math.ceil((AI_REVIEW_MIN_INTERVAL_MS - since) / 1000)}s.`)
+    err.statusCode = 429
+    throw err
+  }
+  const aiRouter = resolveAiRouterConfig(model)
+  if (!aiRouterConfigured(aiRouter)) {
+    return {
+      ok: true,
+      skipped: true,
+      reason: 'Geen AI-provider geconfigureerd; zet AI_ROUTER_PROVIDERS met AI_<PROVIDER>_* of legacy AI_CHAT_*.',
+    }
+  }
+  aiReviewRunning = true
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    const result = await runAiReview({ db: client.db(), aiRouter })
+    aiReviewLastAt = Date.now()
+    return result
+  } finally {
+    aiReviewRunning = false
+    if (client) await client.close().catch(() => undefined)
+  }
+}
+
+async function getLatestAiReview(limit) {
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    const db = client.db()
+    const [observations, questions] = await Promise.all([
+      db.collection('ai_observations').find({}).sort({ createdAt: -1 }).limit(limit).toArray(),
+      db.collection('ai_questions').find({}).sort({ createdAt: -1 }).limit(limit).toArray(),
+    ])
+    return { observations, questions }
+  } finally {
+    if (client) await client.close().catch(() => undefined)
+  }
+}
+
+// Proxyt de Ollama-cloud modellenlijst (voor de dropdown). Kort gecachet.
+async function listAiModels() {
+  if (aiModelsCache.models && Date.now() - aiModelsCache.at < 5 * 60_000) {
+    return aiModelsCache.models
+  }
+  const aiRouter = resolveAiRouterConfig()
+  const ollama = aiRouter.providers.find((p) => /ollama/i.test(p.name)) ?? aiRouter.providers[0]
+  if (!ollama) return []
+  const base = ollama.baseUrl.replace(/\/+$/, '')
+  const res = await fetch(`${base}/api/tags`, {
+    headers: { Authorization: `Bearer ${ollama.apiKey}` },
+  })
+  if (!res.ok) throw new Error(`Modellen ophalen mislukt: HTTP ${res.status}`)
+  const json = await res.json()
+  const models = Array.isArray(json?.models)
+    ? json.models.map((m) => String(m?.name || '')).filter(Boolean).sort()
+    : []
+  aiModelsCache = { at: Date.now(), models }
+  return models
+}
+
+// Periodieke achtergrond-loop (default uit; zet AI_REVIEW_INTERVAL_MINUTES>0).
+function startAiReviewLoop() {
+  const minutes = Math.max(0, Number(process.env.AI_REVIEW_INTERVAL_MINUTES ?? 0))
+  if (!minutes) return
+  if (!aiRouterConfigured(resolveAiRouterConfig())) {
+    console.log('[libreview-sync] AI_REVIEW_INTERVAL_MINUTES gezet maar geen AI-provider; loop niet gestart.')
+    return
+  }
+  console.log(`[libreview-sync] AI-review loop elke ${minutes} min.`)
+  setInterval(() => {
+    runAiReviewOnce()
+      .then((r) => console.log(`[libreview-sync] AI-review loop: ${JSON.stringify({ skipped: r.skipped, obs: r.observations?.length, q: r.questions?.length })}`))
+      .catch((err) => console.error(`[libreview-sync] AI-review loop: ${formatError(err)}`))
+  }, minutes * 60_000)
 }
 
 function toNightscoutEntry(pt) {

@@ -830,6 +830,18 @@
       '#cgm-rate-overlay .fast-up{color:#faf5ff;border-color:#a855f7;background:linear-gradient(135deg,#c084fc 0%,#9333ea 100%);text-shadow:0 1px 2px rgba(0,0,0,.42)}',
       '#cgm-rate-overlay .very-fast-up{color:#faf5ff;border-color:#7e22ce;background:linear-gradient(135deg,#9333ea 0%,#581c87 100%);text-shadow:0 1px 2px rgba(0,0,0,.52)}',
       '#cgm-rate-overlay .missing{color:#8a8a8a;border-color:rgba(255,255,255,.14);background:rgba(0,0,0,.28)}',
+      '#cgm-ai-toggle{position:fixed;z-index:10002;right:10px;bottom:10px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:800;line-height:1;padding:7px 11px;border:1px solid rgba(0,0,0,.3);border-radius:6px;background:linear-gradient(135deg,#a5b4fc 0%,#6366f1 100%);color:#fff;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.35)}',
+      '#cgm-ai-panel{position:fixed;z-index:10002;right:10px;bottom:48px;display:none;width:340px;max-width:92vw;max-height:70vh;overflow:auto;border:1px solid rgba(0,0,0,.28);border-radius:8px;background:#0f172a;color:#e2e8f0;font-family:Arial,Helvetica,sans-serif;font-size:12px;padding:10px;box-shadow:0 6px 24px rgba(0,0,0,.5)}',
+      '#cgm-ai-panel.open{display:block}',
+      '#cgm-ai-panel .ai-row{display:flex;gap:6px;align-items:center;margin-bottom:8px}',
+      '#cgm-ai-panel select{flex:1;min-width:0;font-size:12px;padding:4px;border-radius:5px;border:1px solid rgba(255,255,255,.2);background:#1e293b;color:#e2e8f0}',
+      '#cgm-ai-panel .ai-run{font-size:12px;font-weight:800;padding:5px 10px;border-radius:5px;border:1px solid rgba(255,255,255,.25);background:#6366f1;color:#fff;cursor:pointer}',
+      '#cgm-ai-panel .ai-run[disabled]{opacity:.5;cursor:default}',
+      '#cgm-ai-panel .ai-status{font-size:11px;opacity:.85;margin-bottom:8px;min-height:14px}',
+      '#cgm-ai-panel .ai-sec{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;opacity:.7;margin:8px 0 4px}',
+      '#cgm-ai-panel .ai-item{border-top:1px solid rgba(255,255,255,.1);padding:6px 0}',
+      '#cgm-ai-panel .ai-item .ai-meta{font-size:10px;opacity:.6;margin-top:2px}',
+      '#cgm-ai-panel .ai-empty{opacity:.6;font-style:italic}',
       '@media(min-width:701px) and (max-width:1180px){#cgm-hypo-alert.has-carb{grid-template-columns:minmax(0,1fr) 138px;column-gap:8px}#cgm-carb-advice{padding-left:8px}#cgm-carb-advice .carb-title{font-size:11px}#cgm-carb-advice .carb-message{font-size:9px}}',
       '@media(max-width:700px){#cgm-mobile-dock{display:flex!important;flex-direction:column!important;width:100%!important;padding:8px 8px 0!important;box-sizing:border-box!important;gap:6px!important;clear:both!important}#cgm-mobile-dock #cgm-hypo-alert,#cgm-mobile-dock #cgm-carb-advice,#cgm-mobile-dock #cgm-rate-overlay,#cgm-mobile-dock #cgm-rate-toggle,#cgm-mobile-dock #cgm-rate-view-toggle,#cgm-mobile-dock #cgm-rate-history-nav{position:static!important;left:auto!important;right:auto!important;top:auto!important;bottom:auto!important;transform:none!important;box-sizing:border-box!important}#cgm-mobile-dock #cgm-hypo-alert,#cgm-mobile-dock #cgm-carb-advice{width:100%!important;max-width:100%!important;min-width:0!important;margin:0!important;gap:2px;padding:5px 7px}#cgm-mobile-dock #cgm-carb-advice .carb-title{font-size:12px}#cgm-mobile-dock #cgm-carb-advice .carb-message{font-size:10px;margin-top:2px}#cgm-mobile-dock #cgm-rate-overlay,#cgm-mobile-dock #cgm-rate-overlay.classic,#cgm-mobile-dock #cgm-rate-overlay.all{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:3px!important;width:100%!important;align-items:start!important;margin:0!important}#cgm-mobile-dock #cgm-rate-toggle,#cgm-mobile-dock #cgm-rate-view-toggle{display:inline-block!important;width:max-content!important;min-width:58px!important;margin:0 6px 0 0!important;padding:4px 7px!important;font-size:10px!important}#cgm-mobile-dock #cgm-rate-history-nav{width:max-content!important;max-width:100%!important;margin:0!important;font-size:10px!important;padding:2px 5px!important}#cgm-mobile-dock #cgm-hypo-alert .hypo-line{gap:4px;white-space:normal!important;text-align:center}#cgm-mobile-dock #cgm-hypo-alert .hypo-title{font-size:11px}#cgm-mobile-dock #cgm-hypo-alert .hypo-detail{font-size:16px}#cgm-mobile-dock #cgm-hypo-alert .hypo-rate{font-size:12px}#cgm-mobile-dock #cgm-hypo-alert .hypo-average{font-size:10px}#cgm-mobile-dock #cgm-hypo-alert .hypo-predict{font-size:9px;white-space:normal!important}#cgm-mobile-dock #cgm-hypo-alert .hypo-drop{font-size:9px;white-space:normal!important}#cgm-mobile-dock #cgm-rate-overlay .rate-card{padding:3px 16px 3px 5px;min-height:0}#cgm-mobile-dock #cgm-rate-overlay .rate-window{font-size:8px;line-height:1}#cgm-mobile-dock #cgm-rate-overlay .rate-main,#cgm-mobile-dock #cgm-rate-overlay .rate-card.primary .rate-main{font-size:12px;line-height:1.02;margin-top:1px}#cgm-mobile-dock #cgm-rate-overlay .rate-arrow{right:4px;font-size:14px}#cgm-mobile-dock #cgm-rate-overlay .rate-sub{font-size:7px;line-height:1.02;margin-top:1px}#cgm-stats-panel{grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:3px!important;width:98vw!important;padding:4px!important}#cgm-stats-panel .stat{padding:3px 4px}#cgm-stats-panel .stat-label{font-size:8px}#cgm-stats-panel .stat-value{font-size:11px}}'
     ].join('');
@@ -1167,6 +1179,150 @@
     return String(s).replace(/[&<>"]/g, function (c) {
       return c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&quot;';
     });
+  }
+
+  // --- AI-review paneel ------------------------------------------------------
+  var AI_MODEL_KEY = 'cgmAiModel';
+  // Getest werkend op de Ollama free-tier (snel + betrouwbare JSON). Andere
+  // modellen kunnen 403 (abonnement), leeg of traag zijn; de lijst zelf komt
+  // live uit /api/tags, dus geretireerde modellen verdwijnen vanzelf.
+  var AI_RECOMMENDED = ['nemotron-3-nano:30b', 'gemma4:31b', 'gpt-oss:120b'];
+  var AI_DEFAULT_MODEL = 'gpt-oss:120b';
+  var aiModelsLoaded = false;
+  var aiLatestTimer = null;
+
+  function ensureAiToggle() {
+    var existing = document.getElementById('cgm-ai-toggle');
+    if (existing) return existing;
+    var btn = document.createElement('button');
+    btn.id = 'cgm-ai-toggle';
+    btn.type = 'button';
+    btn.textContent = 'AI';
+    btn.addEventListener('click', toggleAiPanel);
+    document.body.appendChild(btn);
+    return btn;
+  }
+
+  function ensureAiPanel() {
+    var existing = document.getElementById('cgm-ai-panel');
+    if (existing) return existing;
+    var panel = document.createElement('div');
+    panel.id = 'cgm-ai-panel';
+    panel.innerHTML = [
+      '<div class="ai-row">',
+      '  <select id="cgm-ai-model" aria-label="AI model"></select>',
+      '  <button type="button" class="ai-run" id="cgm-ai-run">Review draaien</button>',
+      '</div>',
+      '<div class="ai-status" id="cgm-ai-status"></div>',
+      '<div id="cgm-ai-body"></div>'
+    ].join('');
+    document.body.appendChild(panel);
+    panel.querySelector('#cgm-ai-run').addEventListener('click', runAiReviewFromUi);
+    panel.querySelector('#cgm-ai-model').addEventListener('change', function (e) {
+      try { localStorage.setItem(AI_MODEL_KEY, e.target.value); } catch (err) {}
+    });
+    return panel;
+  }
+
+  function toggleAiPanel() {
+    var panel = ensureAiPanel();
+    var open = panel.classList.toggle('open');
+    if (open) {
+      loadAiModels();
+      loadAiLatest();
+      if (!aiLatestTimer) aiLatestTimer = window.setInterval(loadAiLatest, 60000);
+    } else if (aiLatestTimer) {
+      window.clearInterval(aiLatestTimer);
+      aiLatestTimer = null;
+    }
+  }
+
+  function setAiStatus(text) {
+    var el = document.getElementById('cgm-ai-status');
+    if (el) el.textContent = text || '';
+  }
+
+  function loadAiModels() {
+    if (aiModelsLoaded) return;
+    aiModelsLoaded = true;
+    fetchWithTimeout('/_ai-review/models', { cache: 'no-store' }, 12000)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (json) {
+        var sel = document.getElementById('cgm-ai-model');
+        if (!sel || !json || !Array.isArray(json.models)) return;
+        var saved = '';
+        try { saved = localStorage.getItem(AI_MODEL_KEY) || ''; } catch (e) {}
+        function opt(m) { return '<option value="' + escapeHtml(m) + '">' + escapeHtml(m) + '</option>'; }
+        var recs = AI_RECOMMENDED.filter(function (m) { return json.models.indexOf(m) >= 0; });
+        var rest = json.models.filter(function (m) { return recs.indexOf(m) < 0; });
+        var html = '';
+        if (recs.length) html += '<optgroup label="⭐ Aanbevolen">' + recs.map(opt).join('') + '</optgroup>';
+        html += '<optgroup label="Alle modellen">' + rest.map(opt).join('') + '</optgroup>';
+        sel.innerHTML = html;
+        if (saved && json.models.indexOf(saved) >= 0) sel.value = saved;
+        else if (json.models.indexOf(AI_DEFAULT_MODEL) >= 0) sel.value = AI_DEFAULT_MODEL;
+      })
+      .catch(function () { aiModelsLoaded = false; });
+  }
+
+  function runAiReviewFromUi() {
+    var runBtn = document.getElementById('cgm-ai-run');
+    var sel = document.getElementById('cgm-ai-model');
+    var model = sel ? sel.value : '';
+    if (runBtn) runBtn.disabled = true;
+    setAiStatus('Bezig met review' + (model ? ' (' + model + ')' : '') + '…');
+    fetchWithTimeout('/_ai-review/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: model })
+    }, 120000)
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, json: j }; }); })
+      .then(function (res) {
+        if (!res.ok || !res.json || res.json.ok === false) {
+          setAiStatus('Fout: ' + ((res.json && res.json.message) || 'onbekend'));
+          return;
+        }
+        if (res.json.skipped) setAiStatus('Overgeslagen: ' + res.json.reason);
+        else setAiStatus('Klaar — model ' + (res.json.model || '?') + ', ' +
+          (res.json.observations ? res.json.observations.length : 0) + ' observaties, ' +
+          (res.json.questions ? res.json.questions.length : 0) + ' vragen.');
+        loadAiLatest();
+      })
+      .catch(function (err) { setAiStatus('Fout: ' + (err && err.message ? err.message : err)); })
+      .then(function () { if (runBtn) runBtn.disabled = false; });
+  }
+
+  function loadAiLatest() {
+    fetchWithTimeout('/_ai-review/latest?limit=10', { cache: 'no-store' }, 12000)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (json) {
+        if (json && json.ok) renderAiLatest(json.observations || [], json.questions || []);
+      })
+      .catch(function () {});
+  }
+
+  function renderAiLatest(observations, questions) {
+    var body = document.getElementById('cgm-ai-body');
+    if (!body) return;
+    var html = ['<div class="ai-sec">Observaties</div>'];
+    if (!observations.length) html.push('<div class="ai-empty">Nog geen observaties.</div>');
+    observations.forEach(function (o) {
+      var txt = o.summary || o.hypothesis || '';
+      html.push('<div class="ai-item">' + escapeHtml(txt) +
+        '<div class="ai-meta">' + escapeHtml((o.confidence || '') + ' · ' + (o.scope || '') +
+        ' · ' + (o.createdAt ? new Date(o.createdAt).toLocaleString() : '')) + '</div></div>');
+    });
+    html.push('<div class="ai-sec">Vragen</div>');
+    if (!questions.length) html.push('<div class="ai-empty">Nog geen vragen.</div>');
+    questions.forEach(function (q) {
+      html.push('<div class="ai-item">' + escapeHtml(q.question || '') +
+        (q.reason ? '<div class="ai-meta">' + escapeHtml(q.reason) + '</div>' : '') + '</div>');
+    });
+    body.innerHTML = html.join('');
+  }
+
+  function installAiReview() {
+    ensureAiToggle();
   }
 
   var MODEL_RISK_LABELS = {
@@ -2144,6 +2300,7 @@
     installSoundDefaultOff();
     installPointTooltip();
     installChartRangeListeners();
+    installAiReview();
     observeCurrentGlucose();
   document.addEventListener('visibilitychange', function() {
     if (document.visibilityState === 'visible') {

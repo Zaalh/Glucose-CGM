@@ -177,6 +177,22 @@ Per run een ander model kiezen (overschrijft `AI_*_MODEL`):
 npm run ai:review -- --dry-run --model glm-4.7
 ```
 
+#### AI-review knop in de overlay
+
+De overlay heeft rechtsonder een **AI-knop**. Die opent een paneel met een
+model-dropdown, een "Review draaien"-knop en de recente observaties/vragen. De
+knop praat via nginx (`/_ai-review/*`) met de `libreview-sync` server, die de
+review draait (`ai_observations`/`ai_questions`) en de Ollama-modellen proxyt.
+
+De server-routes: `POST /ai-review/run` (body `{ model }`), `GET /ai-review/latest`,
+`GET /ai-review/models`. Een in-memory lock + `AI_REVIEW_MIN_INTERVAL_MS`
+(default 30s) voorkomt spammen. Zet hiervoor `.env.ai` (zelfde vars als hierboven)
+op de host; die wordt via `env_file` in de `libreview-sync` service geladen.
+
+Optioneel periodiek automatisch draaien (default uit): zet
+`AI_REVIEW_INTERVAL_MINUTES=60` in `.env.ai` → de server draait dan elk uur een
+review op de achtergrond.
+
 ```bash
 npm run spike-filter:check
 ```
