@@ -188,12 +188,22 @@ met de huidige look (monospace, donkere tekst).
 
 ---
 
-## 6. Datamodel (bestaand, hergebruikt)
+## 6. Datamodel
 
-`ai_observations`: `{ createdAt, source, scope, relatedEventIds[], summary, hypothesis,
-confidence, ... }`
-`ai_questions`: `{ createdAt, source, question, reason, relatedEntryIdentifier, ... }`
-`source` = `ai-router:<provider>` (bv. `ai-router:ollama`).
+`ai_observations`: `{ _id, createdAt (ISO-string), runId, model, source, scope,
+relatedEventIds[], summary, hypothesis, confidence, needsUserConfirmation, acceptedByUser }`
+`ai_questions`: `{ _id, createdAt, runId, model, source, question, reason,
+relatedEntryIdentifier, relatedEntryId, relatedEventId, answeredAt, answer }`
+
+- `source` = `ai-router:<provider>` (bv. `ai-router:ollama`).
+- `runId` (UUID) groepeert alle docs van één review-run; `model` = gebruikt Ollama-model.
+- **Indexen:** `{createdAt:-1}` en `{runId:1}` op beide collecties (idempotent aangemaakt).
+- **Retentie:** docs ouder dan `AI_REVIEW_RETENTION_DAYS` (default 90) worden bij elke run
+  geprund → zelf-schalend, geen onbegrensde groei.
+- `/ai-review/latest` geeft alleen de **laatste run** (op `runId`) terug → geen duplicaten
+  in het paneel.
+
+**Status: GEDAAN** (runId/model/index/retentie + Nederlandstalige output zijn live).
 
 ---
 
@@ -207,6 +217,8 @@ confidence, ... }`
 | Key-lek | `.env.ai` gitignored; nooit in `environment:` van compose; key roteerbaar |
 | Provider down | Router-fallback-volgorde (meerdere providers mogelijk) |
 | Overlay toont stale data | Periodiek `/_ai-review/latest` verversen als paneel open is |
+| Onbegrensde DB-groei (loop) | Retentie-prune (`AI_REVIEW_RETENTION_DAYS`, default 90) + indexen op `createdAt`/`runId` |
+| Extra LLM-kosten bij "inzien" | Detail/historie komen uit opgeslagen data (Mongo-reads), nooit een nieuwe Ollama-call (zie 11) |
 
 ---
 
@@ -288,6 +300,67 @@ reactieve-hypo use-case), daarna 10.3/10.4. 10.5 los, indien gewenst.
 - Contextgrootte bewaken: stuur samenvattingen/aggregaties, geen ruwe historie.
 - Kosten/latency: zwaardere analyses (10.2/10.4) bij voorkeur via de periodieke loop,
   niet synchroon achter een knop.
+
+---
+
+## 11. Uitgebreide rapport-/detailweergave in het paneel
+
+**Doel:** in het AI-paneel op een observatie of vraag klikken → het **volledige
+detail ("rapport")** uitgebreid inzien (nu wordt alleen een afgekapte `summary` +
+meta-regel getoond).
+
+> **Gratis-tier kernprincipe (Ollama):** het detail bestaat volledig uit **al
+> opgeslagen data** (de velden in `ai_observations`/`ai_questions` die al via
+> `GET /_ai-review/latest` zijn opgehaald). Uitklappen/bladeren = **puur UI + Mongo-reads,
+> nul extra LLM-calls, nul GPU-quota.** Géén enkele klik in de detailweergave mag Ollama
+> aanroepen. Alleen "Review draaien" (en optioneel 11.3) raakt de quota.
+
+### 11.1 Inline uitklap (minimaal — aanbevolen als eerste stap)
+- Elk lijst-item (`.ai-item`) wordt klikbaar; klik toggelt een detail-blok eronder
+  (accordion). Tweede klik klapt weer dicht.
+- Detail toont **alle opgeslagen velden**, leesbaar en volledig (niet afgekapt):
+  - **Observatie:** volledige `summary` + `hypothesis`, `confidence`, `scope`, `model`,
+    tijdstip (`createdAt`), `needsUserConfirmation`; `runId` klein/grijs onderaan.
+  - **Vraag:** volledige `question` + `reason`, gerelateerde entry
+    (`relatedEntryIdentifier`), `model`, tijdstip; later een antwoord-veld (zie 10.1).
+- **Geen nieuw endpoint nodig:** `/_ai-review/latest` levert de volledige docs al. De
+  overlay bewaart de opgehaalde docs in geheugen (bv. `aiLatestData`), geeft items een
+  `data-idx`, en de click-handler rendert het detail uit dat object. Alles via
+  `escapeHtml`. **Free-tier safe.**
+- Bestand: alleen `nightscout-overlay/rate-overlay.js` (`renderAiLatest` uitbreiden +
+  click-to-expand + wat detail-CSS). Geen server-/nginx-wijziging.
+
+### 11.2 Run-historie bladeren (optioneel — ook nul LLM-kost)
+Nu toont het paneel alleen de laatste run. Om **oudere rapporten** in te zien:
+- Nieuw endpoint `GET /ai-review/runs` → lijst van runs: distinct `runId` +
+  `createdAt` + `model` + aantallen, nieuw→oud. **Alleen Mongo-reads.**
+- Nieuw endpoint `GET /ai-review/run?id=<runId>` → alle obs/vragen van die run.
+- Paneel: een run-selector (datum/tijd + model) bovenin; kies een run → toon die.
+  Default blijft de laatste run.
+- nginx: `/_ai-review/runs` + `/_ai-review/run` locations erbij (zelfde patroon).
+- **Free-tier safe:** puur lees-queries op bestaande data; raakt Ollama niet.
+
+### 11.3 (Optioneel — kost WÉL 1 LLM-call) "Uitgebreid rapport genereren"
+Wil je een rijker, samenhangend verslag dan de losse observaties (≈ digest, 10.4):
+- Eén knop "Uitgebreid dagrapport" die **één** extra review-achtige call doet met een
+  digest-prompt (`scope: 'day'`), opgeslagen als gewone observatie.
+- **Gratis-tier discipline:** user-getriggerd (nooit automatisch per klik), achter de
+  bestaande lock + `AI_REVIEW_MIN_INTERVAL_MS`, en bij voorkeur via de periodieke loop
+  **max 1×/dag** i.p.v. per klik. Duidelijk gescheiden van de gratis weergave (11.1/11.2).
+
+### 11.4 Gratis-tier richtlijnen (samengevat)
+- **Inzien = gratis:** detail uitklappen, run-historie bladeren, paneel verversen →
+  uitsluitend Mongo-reads, nooit Ollama.
+- **Genereren = quota:** alleen "Review draaien" en (optioneel) "Uitgebreid rapport"
+  raken Ollama; hou die user-getriggerd + rate-limited.
+- Free-tier = 1 model tegelijk, GPU-tijd-quota, 5-uurs/7-daagse limieten; sommige
+  modellen geven 403 (abonnement). Daarom: zware/herhaalde analyses via de loop
+  (max 1×/uur of /dag), niet per klik.
+
+### Prioriteit / volgorde
+**11.1 eerst** (klein, in één bestand, nul kosten, lost direct de wens op). Daarna
+**11.2** als je oudere rapporten wilt bladeren. **11.3** alleen als losse observaties
+echt te mager blijken — en dan strikt rate-limited i.v.m. de free-tier.
 
 ---
 
