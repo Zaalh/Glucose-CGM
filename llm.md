@@ -369,6 +369,11 @@ echt te mager blijken — en dan strikt rate-limited i.v.m. de free-tier.
 **Doel:** naast losse observaties/vragen ook **echte rapporten** tonen, gebaseerd op de
 klinische CGM-standaard (AGP) en op reactieve-hypo-onderzoek.
 
+**Status: A + B + C/D GEDAAN (live).** Paneel heeft 3 tabs (Inzichten / Statistiek /
+Rapporten). A (AGP-light) + B (episodes) zijn deterministisch/gratis; C/D (narratief
+dagrapport) draait via `POST /ai-review/report` (1 LLM-call, achter de lock) en wordt
+opgeslagen in `ai_reports`.
+
 **Achtergrond (zie Bronnen):**
 - **AGP (Ambulatory Glucose Profile)** is de standaard CGM-rapportage (ADA 2025):
   Time in Range (TIR, 3,9–10 mmol/L), Time Below/Above Range (TBR/TAR), gemiddelde
@@ -442,6 +447,63 @@ UI-tabs (12.6). Daarna **C/D** (narratief, 1 call), gekoppeld aan de periodieke 
 
 ---
 
+## 13. Interactieve chat (gevraagd) — plan
+
+**Doel:** een chatvenster in het paneel waar je vragen kunt stellen ("waarom dipte ik
+vanmorgen?", "wanneer ben ik het meest kwetsbaar?") en de AI antwoordt, **gegrond in je
+eigen data** (stats, episodes, recente observaties/feedback).
+
+> **Gratis-tier let op (belangrijk):** in tegenstelling tot bladeren/inzien kost **elk
+> chatbericht 1 LLM-call** → het verbruikt Ollama-quota per bericht. Daarom: bewust en
+> spaarzaam gebruiken; geen auto-polling; compacte context meesturen.
+
+### 13.1 Server
+- `POST /ai-review/chat` met `{ messages: [{role,content}...] }` (de client houdt de
+  conversatie bij en stuurt 'm compact mee, bv. laatste ~10 berichten).
+- Server bouwt: **system-prompt** (Nederlands; alleen over deze data; **geen medisch
+  advies / geen alarmbeslissingen**) + een **compacte data-context** (samenvatting van de
+  AGP-stats, top-N episodes, recente observaties/feedback) + de meegestuurde messages.
+  Eén `callAiRouter`-call, antwoord terug als `{ ok, reply }`.
+- **Lock:** hergebruik `aiReviewRunning` (1 call tegelijk = past bij free-tier 1-concurrent),
+  maar **zonder** de 30s min-interval (anders is chatten onbruikbaar traag) — wel een
+  korte guard tegen dubbele gelijktijdige calls.
+- Optioneel: conversatie niet persisteren (privacy/eenvoud), of in `ai_chats` met retentie.
+
+### 13.2 nginx
+- `/_ai-review/chat` (POST, `proxy_read_timeout 120s`).
+
+### 13.3 Overlay
+- Vierde tab **Chat**: berichtenlijst + invoerveld + verstuurknop. Tijdens een call:
+  invoer disabled + "AI denkt na…". Antwoord eronder. Bewaar de history in geheugen
+  (evt. `localStorage`). Toon een kleine "kost quota"-hint.
+
+### 13.4 Prioriteit
+Bouwbaar als losse, contained feature (core `runAiChat` + 1 route + 1 nginx-locatie + tab).
+Bewust ná de gratis features, omdat het quota kost per bericht.
+
+---
+
+## 14. Hoe de AI beter kan (research-gegrond)
+
+Op basis van online onderzoek (zie Bronnen) — relevant voor reactieve hypoglykemie:
+
+- **Maaltijd-/event-logging = grootste hefboom.** Reactieve hypo wordt gedreven door
+  **wat en wanneer** je eet; nu ziet de AI alleen glucosecurves. Een snelle log
+  (maaltijd/snack/symptoom + tijd, evt. grove samenstelling) — als uitbreiding van de
+  bestaande `user_feedback` (heeft al `ate_now`) — laat de AI **dips aan maaltijden
+  koppelen** (trigger-identificatie, precies jouw doel) en bekende context benoemen
+  (eiwit/vet vóór koolhydraten = "preload" vertraagt de piek en dempt de rebound-dip;
+  low-GI; frequente kleine maaltijden). **Beschrijvend, nooit als voorschrift.**
+- **Richere review-context:** geef de AGP-stats + episodes ook mee aan de gewone
+  observatie-review (nu vooral snapshots), zodat observaties op weekpatronen leunen.
+- **Counterfactuals/voedingssuggesties** (uit de literatuur) bewust **niet** doen: te dicht
+  op medisch advies; buiten de veiligheidsgrens.
+
+**Veiligheidsgrens blijft:** de AI duidt en beschrijft; de V1/V2-detector blijft de enige
+alarmbron, en er wordt geen medisch advies of voorschrift gegeven.
+
+---
+
 ## Bronnen
 
 - [OpenAI compatibility — Ollama docs](https://docs.ollama.com/api/openai-compatibility)
@@ -453,3 +515,6 @@ UI-tabs (12.6). Daarna **C/D** (narratief, 1 call), gekoppeld aan de periodieke 
 - [AGP report — uitleg (DiaTribe)](https://diatribe.org/diabetes-technology/making-most-cgm-uncover-magic-your-ambulatory-glucose-profile)
 - [CGM voor reactieve hypoglykemie bij niet-diabetici (PMC)](https://pmc.ncbi.nlm.nih.gov/articles/PMC6232734/)
 - [Postprandiale glykemische respons bij personen zonder diabetes (Metabolism)](https://www.metabolismjournal.com/article/S0026-0495(23)00244-5/fulltext)
+- [Dieetstrategieën reactieve hypoglykemie / maaltijdsamenstelling (Wikipedia overzicht)](https://en.wikipedia.org/wiki/Reactive_hypoglycemia)
+- [Nutriënt-volgorde (protein/fat preload) en glucosetolerantie (PMC)](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6418004/)
+- [LLM als "personal nutritionist" / gedrag↔glucose (Sensors, MDPI)](https://www.mdpi.com/1424-8220/25/17/5372)
