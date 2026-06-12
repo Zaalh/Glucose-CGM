@@ -5,7 +5,7 @@ import { MongoClient } from 'mongodb'
 import { buildHypoFeatures, cleanGlucoseTimeline } from './lib/hypo-features.mjs'
 import { evaluateReactiveHypoRiskV2 } from './lib/reactive-hypo-detector.mjs'
 import { findSimilarEpisodes, patternFromFeatures } from './lib/episode-similarity.mjs'
-import { aiRouterConfigured, resolveAiRouterConfig, runAiReview, runAiReport } from './lib/ai-review-core.mjs'
+import { aiRouterConfigured, resolveAiRouterConfig, runAiReview, runAiReport, runAiChat } from './lib/ai-review-core.mjs'
 
 const LIBRE_API = 'https://api-eu.libreview.io'
 const DEFAULT_INTERVAL_SECONDS = 60
@@ -878,6 +878,18 @@ function startServer() {
       return
     }
 
+    if (url.pathname === '/ai-review/chat' && req.method === 'POST') {
+      try {
+        const body = await readJsonBody(req)
+        const result = await runAiChatOnce({ messages: body && body.messages })
+        res.end(JSON.stringify(result))
+      } catch (err) {
+        res.writeHead(err && err.statusCode ? err.statusCode : 500)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
     if (url.pathname === '/ai-review/models' && req.method === 'GET') {
       try {
         const models = await listAiModels()
@@ -1211,6 +1223,38 @@ async function runAiReportOnce({ type } = {}) {
     const result = await runAiReport({ db, aiRouter, stats, episodes, feedback, type })
     aiReviewLastAt = Date.now()
     return result
+  } finally {
+    aiReviewRunning = false
+    if (client) await client.close().catch(() => undefined)
+  }
+}
+
+// Chat: 1 LLM-call per bericht. Wel de concurrency-lock (1 tegelijk), maar GÉÉN
+// min-interval (anders is chatten onbruikbaar traag).
+async function runAiChatOnce({ messages } = {}) {
+  if (aiReviewRunning) {
+    const err = new Error('Er draait al een AI-taak; even wachten.')
+    err.statusCode = 409
+    throw err
+  }
+  const aiRouter = resolveAiRouterConfig()
+  if (!aiRouterConfigured(aiRouter)) {
+    return { ok: true, skipped: true, reason: 'Geen AI-provider geconfigureerd.' }
+  }
+  aiReviewRunning = true
+  let client = null
+  try {
+    const [stats, episodes] = await Promise.all([getAiStats(14), getAiEpisodes(10)])
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    const db = client.db()
+    const [observations, feedback] = await Promise.all([
+      db.collection('ai_observations').find({}).sort({ createdAt: -1 }).limit(8).toArray(),
+      db.collection('user_feedback')
+        .find({}, { projection: { createdAt: 1, type: 1, note: 1, relatedEntryIdentifier: 1, relatedEntryMmol: 1, riskAtFeedback: 1 } })
+        .sort({ createdAt: -1 }).limit(20).toArray(),
+    ])
+    return await runAiChat({ aiRouter, messages, stats, episodes, observations, feedback })
   } finally {
     aiReviewRunning = false
     if (client) await client.close().catch(() => undefined)

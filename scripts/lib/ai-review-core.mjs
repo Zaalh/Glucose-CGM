@@ -371,3 +371,51 @@ export async function runAiReport({ db, aiRouter, stats, episodes = [], feedback
   await pruneOldAiDocs(db)
   return { ok: true, provider: result.provider, model: result.model, report: doc }
 }
+
+// --- Chat: vrije vraag/antwoord gegrond in de data (1 LLM-call per bericht) ----
+function chatSystemPrompt() {
+  return [
+    'Je bent een behulpzame assistent die vragen beantwoordt over de CGM-data van één gebruiker met reactieve hypoglykemie (geen insuline, geen closed-loop).',
+    'Schrijf in het Nederlands, kort en concreet.',
+    'GEEN medisch advies, geen voorschriften, geen alarm-/actiebeslissingen — de V1/V2-detector blijft de enige alarmbron.',
+    'Gebruik de meegegeven datacontext (statistiek, episodes, observaties, feedback) om te antwoorden; verzin geen waarden. Weet je iets niet uit de data, zeg dat eerlijk.',
+    'Je mag algemeen bekende, niet-persoonlijke context noemen (bv. dat eiwit/vet vóór koolhydraten de piek vertraagt) maar als observatie, niet als instructie.',
+  ].join('\n')
+}
+
+function chatContext({ stats, episodes, observations, feedback }) {
+  return 'Datacontext (JSON, alleen ter onderbouwing): ' + JSON.stringify({
+    stats: stats || null,
+    episodes: Array.isArray(episodes) ? episodes.slice(0, 10) : [],
+    recentObservations: Array.isArray(observations)
+      ? observations.slice(0, 8).map((o) => ({ summary: o.summary, confidence: o.confidence, createdAt: o.createdAt }))
+      : [],
+    recentUserFeedback: Array.isArray(feedback) ? feedback.map(compactFeedback) : [],
+  })
+}
+
+// Beantwoordt één chatbericht. `messages` is de (door de client bijgehouden) historie;
+// alleen de laatste ~10 user/assistant-berichten worden meegestuurd. Geen opslag.
+export async function runAiChat({ aiRouter, messages = [], stats, episodes = [], observations = [], feedback = [] } = {}) {
+  if (!aiRouterConfigured(aiRouter)) {
+    return { ok: true, skipped: true, reason: 'Geen AI-provider geconfigureerd.' }
+  }
+  const history = (Array.isArray(messages) ? messages : [])
+    .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
+    .slice(-10)
+    .map((m) => ({ role: m.role, content: String(m.content).slice(0, 2000) }))
+  if (!history.length || history[history.length - 1].role !== 'user') {
+    const err = new Error('Laatste bericht moet van de gebruiker zijn.')
+    err.statusCode = 400
+    throw err
+  }
+  const result = await callAiRouter(aiRouter, {
+    temperature: 0.3,
+    messages: [
+      { role: 'system', content: chatSystemPrompt() },
+      { role: 'system', content: chatContext({ stats, episodes, observations, feedback }) },
+      ...history,
+    ],
+  })
+  return { ok: true, provider: result.provider, model: result.model, reply: String(result.content || '') }
+}

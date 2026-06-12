@@ -873,6 +873,13 @@
       '#cgm-ai-panel .ai-ep{border-top:1px solid rgba(255,255,255,.1);padding:5px 0}',
       '#cgm-ai-panel .ai-ep-head{font-weight:700}',
       '#cgm-ai-panel .ai-ep .ai-meta{font-size:10px;opacity:.6;margin-top:2px}',
+      '#cgm-ai-panel .ai-chatlog{max-height:300px;overflow:auto;margin-bottom:8px;display:flex;flex-direction:column;gap:6px}',
+      '#cgm-ai-panel .ai-msg{padding:6px 8px;border-radius:8px;max-width:88%;line-height:1.35}',
+      '#cgm-ai-panel .ai-msg-user{align-self:flex-end;background:#6366f1;color:#fff}',
+      '#cgm-ai-panel .ai-msg-ai{align-self:flex-start;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1)}',
+      '#cgm-ai-panel .ai-typing{opacity:.6;font-style:italic}',
+      '#cgm-ai-panel .ai-chatrow{display:flex;gap:6px}',
+      '#cgm-ai-panel .ai-chatrow input{flex:1;min-width:0;font-size:12px;padding:6px;border-radius:5px;border:1px solid rgba(255,255,255,.2);background:#1e293b;color:#e2e8f0}',
       '@media(min-width:701px) and (max-width:1180px){#cgm-hypo-alert.has-carb{grid-template-columns:minmax(0,1fr) 138px;column-gap:8px}#cgm-carb-advice{padding-left:8px}#cgm-carb-advice .carb-title{font-size:11px}#cgm-carb-advice .carb-message{font-size:9px}}',
       '@media(max-width:700px){#cgm-mobile-dock{display:flex!important;flex-direction:column!important;width:100%!important;padding:8px 8px 0!important;box-sizing:border-box!important;gap:6px!important;clear:both!important}#cgm-mobile-dock #cgm-hypo-alert,#cgm-mobile-dock #cgm-carb-advice,#cgm-mobile-dock #cgm-rate-overlay,#cgm-mobile-dock #cgm-rate-toggle,#cgm-mobile-dock #cgm-rate-view-toggle,#cgm-mobile-dock #cgm-rate-history-nav{position:static!important;left:auto!important;right:auto!important;top:auto!important;bottom:auto!important;transform:none!important;box-sizing:border-box!important}#cgm-mobile-dock #cgm-hypo-alert,#cgm-mobile-dock #cgm-carb-advice{width:100%!important;max-width:100%!important;min-width:0!important;margin:0!important;gap:2px;padding:5px 7px}#cgm-mobile-dock #cgm-carb-advice .carb-title{font-size:12px}#cgm-mobile-dock #cgm-carb-advice .carb-message{font-size:10px;margin-left:6px}#cgm-mobile-dock #cgm-rate-overlay,#cgm-mobile-dock #cgm-rate-overlay.classic,#cgm-mobile-dock #cgm-rate-overlay.all{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:3px!important;width:100%!important;align-items:start!important;margin:0!important}#cgm-mobile-dock #cgm-rate-toggle,#cgm-mobile-dock #cgm-rate-view-toggle{display:inline-block!important;width:max-content!important;min-width:58px!important;margin:0 6px 0 0!important;padding:4px 7px!important;font-size:10px!important}#cgm-mobile-dock #cgm-rate-history-nav{width:max-content!important;max-width:100%!important;margin:0!important;font-size:10px!important;padding:2px 5px!important}#cgm-mobile-dock #cgm-hypo-alert .hypo-line{gap:4px;white-space:normal!important;text-align:center}#cgm-mobile-dock #cgm-hypo-alert .hypo-title{font-size:11px}#cgm-mobile-dock #cgm-hypo-alert .hypo-detail{font-size:16px}#cgm-mobile-dock #cgm-hypo-alert .hypo-rate{font-size:12px}#cgm-mobile-dock #cgm-hypo-alert .hypo-average{font-size:10px}#cgm-mobile-dock #cgm-hypo-alert .hypo-predict{font-size:9px;white-space:normal!important}#cgm-mobile-dock #cgm-hypo-alert .hypo-drop{font-size:9px;white-space:normal!important}#cgm-mobile-dock #cgm-rate-overlay .rate-card{padding:3px 16px 3px 5px;min-height:0}#cgm-mobile-dock #cgm-rate-overlay .rate-window{font-size:8px;line-height:1}#cgm-mobile-dock #cgm-rate-overlay .rate-main,#cgm-mobile-dock #cgm-rate-overlay .rate-card.primary .rate-main{font-size:12px;line-height:1.02;margin-top:1px}#cgm-mobile-dock #cgm-rate-overlay .rate-arrow{right:4px;font-size:14px}#cgm-mobile-dock #cgm-rate-overlay .rate-sub{font-size:7px;line-height:1.02;margin-top:1px}#cgm-stats-panel{grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:3px!important;width:98vw!important;padding:4px!important}#cgm-stats-panel .stat{padding:3px 4px}#cgm-stats-panel .stat-label{font-size:8px}#cgm-stats-panel .stat-value{font-size:11px}}'
     ].join('');
@@ -1249,6 +1256,7 @@
       '  <button type="button" class="ai-tab active" data-tab="inzichten">Inzichten</button>',
       '  <button type="button" class="ai-tab" data-tab="stats">Statistiek</button>',
       '  <button type="button" class="ai-tab" data-tab="rapporten">Rapporten</button>',
+      '  <button type="button" class="ai-tab" data-tab="chat">Chat</button>',
       '</div>',
       '<div class="ai-pane" data-pane="inzichten">',
       '  <div class="ai-row">',
@@ -1264,12 +1272,20 @@
       '  <div class="ai-row"><button type="button" class="ai-run" id="cgm-ai-genreport">Genereer dagrapport</button></div>',
       '  <div class="ai-status" id="cgm-ai-repstatus"></div>',
       '  <div id="cgm-ai-reports"><div class="ai-empty">Nog geen rapporten.</div></div>',
+      '</div>',
+      '<div class="ai-pane" data-pane="chat" hidden>',
+      '  <div id="cgm-ai-chatlog" class="ai-chatlog"><div class="ai-empty">Stel een vraag over je data. Let op: elk bericht kost AI-quota.</div></div>',
+      '  <div class="ai-chatrow"><input id="cgm-ai-chatinput" type="text" placeholder="Vraag iets over je glucose…" aria-label="Chatvraag"><button type="button" class="ai-run" id="cgm-ai-chatsend">Stuur</button></div>',
       '</div>'
     ].join('');
     document.body.appendChild(panel);
     panel.querySelector('#cgm-ai-run').addEventListener('click', runAiReviewFromUi);
     panel.querySelector('#cgm-ai-genreport').addEventListener('click', generateAiReport);
     panel.querySelector('#cgm-ai-reports').addEventListener('click', onAiItemClick);
+    panel.querySelector('#cgm-ai-chatsend').addEventListener('click', sendAiChat);
+    panel.querySelector('#cgm-ai-chatinput').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); sendAiChat(); }
+    });
     panel.querySelector('#cgm-ai-model').addEventListener('change', function (e) {
       try { localStorage.setItem(AI_MODEL_KEY, e.target.value); } catch (err) {}
     });
@@ -1601,6 +1617,49 @@
 
   function aiCard(label, value, cls) {
     return '<div class="ai-card ' + (cls || '') + '"><div class="ai-card-v">' + escapeHtml(String(value)) + '</div><div class="ai-card-l">' + escapeHtml(label) + '</div></div>';
+  }
+
+  // --- Chat-tab: 1 LLM-call per bericht (kost quota). History in geheugen.
+  var aiChatHistory = [];
+  function renderAiChat() {
+    var log = document.getElementById('cgm-ai-chatlog');
+    if (!log) return;
+    if (!aiChatHistory.length) {
+      log.innerHTML = '<div class="ai-empty">Stel een vraag over je data. Let op: elk bericht kost AI-quota.</div>';
+      return;
+    }
+    log.innerHTML = aiChatHistory.map(function (m) {
+      var cls = m.role === 'user' ? 'ai-msg-user' : 'ai-msg-ai';
+      return '<div class="ai-msg ' + cls + '">' + escapeHtml(m.content).replace(/\n/g, '<br>') + '</div>';
+    }).join('');
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function sendAiChat() {
+    var input = document.getElementById('cgm-ai-chatinput');
+    var sendBtn = document.getElementById('cgm-ai-chatsend');
+    if (!input) return;
+    var text = (input.value || '').trim();
+    if (!text) return;
+    aiChatHistory.push({ role: 'user', content: text });
+    input.value = '';
+    renderAiChat();
+    var log = document.getElementById('cgm-ai-chatlog');
+    if (log) { log.insertAdjacentHTML('beforeend', '<div class="ai-msg ai-msg-ai ai-typing">AI denkt na…</div>'); log.scrollTop = log.scrollHeight; }
+    if (sendBtn) sendBtn.disabled = true;
+    input.disabled = true;
+    fetchWithTimeout('/_ai-review/chat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: aiChatHistory.slice(-10) })
+    }, 120000)
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, json: j }; }); })
+      .then(function (res) {
+        if (!res.ok || !res.json || res.json.ok === false) aiChatHistory.push({ role: 'assistant', content: 'Fout: ' + ((res.json && res.json.message) || 'onbekend') });
+        else if (res.json.skipped) aiChatHistory.push({ role: 'assistant', content: 'Overgeslagen: ' + res.json.reason });
+        else aiChatHistory.push({ role: 'assistant', content: res.json.reply || '(geen antwoord)' });
+        renderAiChat();
+      })
+      .catch(function (err) { aiChatHistory.push({ role: 'assistant', content: 'Fout: ' + (err && err.message ? err.message : err) }); renderAiChat(); })
+      .then(function () { if (sendBtn) sendBtn.disabled = false; input.disabled = false; input.focus(); });
   }
 
   function installAiReview() {
