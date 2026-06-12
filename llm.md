@@ -22,13 +22,15 @@ betekenisvoller te maken dan alleen "samenvatten achteraf".
 | Chat | Plan | Nuttig, maar quota- en safety-gevoelig |
 | Verdiepte hypo-analyse | Eerste slice gebouwd | Deterministische episode-metrics, severity, burden, recovery, rebound |
 | CGM-datakwaliteit/artefacten | Eerste slice gebouwd | Quality flags/score voor datagaten, single-point lows, lag, mogelijke compression lows |
+| SmartXdrip-achtige review-workflow | Deels gebouwd | Dagreview, high episodes, high->low context en heatmap live; History/detail nog open |
 | Safety guardrails + evaluatie | Te bouwen | Vooral belangrijk voor chat en narratieve rapporten |
 
 **Nieuwe prioriteit na online review (12 juni 2026):**
 1. Verdiepte hypo-analyse + CGM-datakwaliteit (sectie 15/16).
 2. Event-/maaltijdlogging uitbreiden (sectie 14, gekoppeld aan 15).
-3. Safety guardrails + evaluatie (sectie 17/18).
-4. Pas daarna interactieve chat (sectie 13), omdat elk bericht quota kost en medisch
+3. History + echte High/Low Episode detail-workflow (sectie 19).
+4. Safety guardrails + evaluatie (sectie 17/18).
+5. Pas daarna interactieve chat (sectie 13), omdat elk bericht quota kost en medisch
    gevoeliger is dan deterministische rapportage.
 
 ---
@@ -693,6 +695,129 @@ De volgende stap is pas geslaagd als:
 
 ---
 
+## 19. SmartXdrip-achtige review-workflow — plan
+
+**Status: eerste slice gebouwd.** Geinspireerd door SmartXdrip Community Preview:
+companion review naast Nightscout/xDrip, met Home/Insights/History/High Episode/Low
+Episode/Stats. In deze repo is al live: `GET /ai-review/day`, dagcards in de
+Statistiek-tab, high episodes, high->low context, source health en weekdag×uur heatmap.
+Nog open: echte **History-tab**, aparte **High/Low Episode detailweergave** met
+omliggende curve, en pattern cards in de Inzichten-tab.
+
+### 19.1 Wat SmartXdrip toevoegt boven "stats"
+De sterke productkeuze is niet alleen meer metrics, maar een review-flow:
+
+1. **Home / insight banner:** "wat moet ik nu merken?" met actuele status en sync health.
+2. **Insights:** daily brief, weekly review en pattern cards in gewone taal.
+3. **History:** dag-voor-dag review met high/low event markers.
+4. **Low Episode:** start, duur, nadir, herstelcontext, omliggende curve, waarom opvallend.
+5. **High Episode:** start, duur, piek, herstelcontext, omliggende curve, waarom opvallend.
+6. **Stats:** TIR, gemiddelde, CV/SD, range breakdown, AGP en heatmap.
+
+Onze richting: dezelfde workflow, maar **deterministisch en local-first** waar mogelijk;
+LLM alleen voor narratieve samenvatting nadat cijfers/episodes al vaststaan.
+
+### 19.2 History-tab (volgende bouwstap)
+Nieuwe tab in het AI-paneel: **History**.
+
+Server:
+- `GET /ai-review/history?days=14`
+  - retourneert lijst dagen nieuw->oud;
+  - per dag: `date`, TIR/TBR/TAR, gemiddelde, CV, min/max, coverage, low/high counts,
+    hypo-burden, worst low, worst high, source-health.
+- Hergebruik `getAiDayReview(date)` intern zodat logica niet dupliceert.
+
+Overlay:
+- Datumlijst/dagcards: "Vr 12 jun — TIR 94%, laag 3.2%, 2 lows, 1 high".
+- Klik dag -> laadt `GET /_ai-review/day?date=YYYY-MM-DD`.
+- Toon dagkaart met high/low event markers en links naar episode-detail.
+
+Waarde:
+- Dit maakt moeilijke dagen vindbaar zonder door ruwe Nightscout-curves te scrollen.
+- Past direct bij SmartXdrip "History -> High/Low Episode".
+
+### 19.3 Low Episode detail
+Doel: niet alleen een rij in Statistiek, maar een echte detailkaart voor één low.
+
+Server:
+- `GET /ai-review/episode-detail?type=low&peakAt=<iso>`
+- Zoek episode in `reactive_hypo_episodes`.
+- Haal omliggende readings uit `entries`: standaard `peakAt - 2h` t/m `recoveredAt + 2h`
+  of `nadirAt + 2h` als recovery ontbreekt.
+- Retourneer:
+  - episode metrics: piek, nadir, duur, burden, recovery, rebound, severity, shape;
+  - quality flags/score;
+  - surrounding readings `{t, mmol}`;
+  - nearby high episodes en user feedback in hetzelfde venster;
+  - `notableReasons[]`, deterministisch opgebouwd.
+
+Notable reasons voorbeelden:
+- "Diepe low: nadir <3.0."
+- "Lang onder 3.9: >20 minuten."
+- "Hoge piek vooraf gevolgd door snelle daling."
+- "Mogelijke sensorartefact: single-point low / compression-low flag."
+- "Herstel traag: >30 minuten."
+- "Rebound high na herstel."
+
+Overlay:
+- Episode-rij klik -> detail uitklappen of modal binnen paneel.
+- Mini-curve als simpele SVG/polyline of compacte tabel/sparkline.
+- Toon "review, geen behandeladvies" subtiel onderaan.
+
+### 19.4 High Episode detail
+Highs zijn relevant omdat reactieve dips vaak beginnen na een hoge postprandiale piek.
+
+Server:
+- Maak high-episodes first-class:
+  - optie A: live detecteren uit `entries` per dag/window;
+  - optie B: persistente `glucose_high_episodes` builder als dit vaker nodig wordt.
+- Metrics:
+  - `startAt`, `endAt`, `peakAt`, `peakMmol`;
+  - `durationAbove10Minutes`, `durationAbove13_9Minutes`;
+  - `areaAbove10`, `areaAbove13_9`;
+  - recovery naar <10;
+  - opvolgende low binnen 4 uur (`followedByLowEpisodeId` / `minutesToLowPeak`).
+
+Overlay:
+- High episode detail toont piek, duur, area-above-threshold, herstel en eventuele
+  high->low koppeling.
+- Gebruik andere kleur/label dan low, maar zelfde review-structuur.
+
+### 19.5 Pattern cards in Inzichten
+Maak de eerste tab minder "losse AI-output" en meer SmartXdrip Insights.
+
+Deterministische cards, gratis:
+- **Vandaag:** korte banner uit `GET /day`.
+- **Deze week vs vorige week:** TIR/TBR/TAR delta, low-burden delta.
+- **Kwetsbaar venster:** hoogste low% of meeste low episodes per uur/weekdag.
+- **High->low patroon:** aantal gekoppelde high->low gebeurtenissen.
+- **Datakwaliteit:** coverage en langste datagat.
+- **Artefact-check:** aantal `single_point_low` / `possible_compression_low`.
+
+LLM-optie:
+- De LLM mag deze cards samenvatten, maar alleen op basis van de card-data.
+- Geen LLM nodig om de cards te detecteren.
+
+### 19.6 Source health als first-class inzicht
+SmartXdrip zet sync status/source health op Home. In onze overlay moet dit zichtbaar zijn:
+- laatste meting;
+- leeftijd laatste meting;
+- coverage vandaag/14d;
+- langste datagat;
+- status: `goed` / `matig` / `slecht`.
+
+Regel: als source health slecht is, moeten Inzichten/Rapporten expliciet minder stellig zijn.
+
+### 19.7 Prioriteit
+Aanbevolen volgorde:
+1. `episode-detail` endpoint + low detail UI (meeste waarde, data bestaat al).
+2. High episode metrics uitbreiden met area-above/recovery/followed-by-low.
+3. History-tab met dagcards en datumselectie.
+4. Pattern cards op Inzichten-tab.
+5. Optioneel: persistente high-episode builder als live detectie te traag/onhandig wordt.
+
+---
+
 ## Bronnen
 
 - [OpenAI compatibility — Ollama docs](https://docs.ollama.com/api/openai-compatibility)
@@ -712,3 +837,5 @@ De volgende stap is pas geslaagd als:
 - [Whipple-triade — symptomen + lage glucose + herstel](https://en.wikipedia.org/wiki/Whipple%27s_triad)
 - [CareGuardAI — guardrails voor patient-facing medische LLMs](https://arxiv.org/abs/2604.26959)
 - [When Large Language Models Fail in Healthcare — promptgevoeligheid/risico](https://arxiv.org/abs/2606.07237)
+- [SmartXdrip Community Preview — companion review app](https://github.com/solgosea/smartxdrip-community-preview)
+- [SmartXdrip Docs — Home / Insights / History / Episode / Stats workflow](https://solgosea.github.io/smartxdrip-docs/)
