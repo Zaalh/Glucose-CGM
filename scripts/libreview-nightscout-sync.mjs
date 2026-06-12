@@ -1149,24 +1149,35 @@ async function getAiStats(days) {
     rows.sort((a, b) => a.date - b.date)
     const tz = process.env.LIBREVIEW_TZ || 'Europe/Amsterdam'
     const hourFmt = new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', hour12: false })
+    const weekdayFmt = new Intl.DateTimeFormat('en-GB', { timeZone: tz, weekday: 'short' })
+    const WD = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 }
     const hourAgg = Array.from({ length: 24 }, () => ({ sum: 0, n: 0, low: 0 }))
+    const wdAgg = Array.from({ length: 7 }, () => ({ sum: 0, n: 0, low: 0 }))
     const vals = []
     let inRange = 0, below = 0, veryLow = 0, above = 0, veryHigh = 0
     let min = Infinity, max = -Infinity
     let lowEpisodes = 0, longestLowMin = 0, curLowStart = null, prevLow = false
+    // 7d-vs-7d trend.
+    const half = to - 7 * 86_400_000
+    let recN = 0, recIn = 0, recBelow = 0, prevN = 0, prevIn = 0, prevBelow = 0
     for (const r of rows) {
       const mmol = Number(r.sgv) / MGDL_PER_MMOL
       vals.push(mmol)
       if (mmol < min) min = mmol
       if (mmol > max) max = mmol
-      if (mmol >= 3.9 && mmol <= 10.0) inRange++
-      if (mmol < 3.9) below++
+      const isIn = mmol >= 3.9 && mmol <= 10.0
+      const isLow = mmol < 3.9
+      if (isIn) inRange++
+      if (isLow) below++
       if (mmol < 3.0) veryLow++
       if (mmol > 10.0) above++
       if (mmol > 13.9) veryHigh++
       const h = Number(hourFmt.format(new Date(r.date))) % 24
-      const a = hourAgg[h]; a.sum += mmol; a.n++; if (mmol < 3.9) a.low++
-      const isLow = mmol < 3.9
+      const a = hourAgg[h]; a.sum += mmol; a.n++; if (isLow) a.low++
+      const wd = WD[weekdayFmt.format(new Date(r.date))]
+      if (wd != null) { const w = wdAgg[wd]; w.sum += mmol; w.n++; if (isLow) w.low++ }
+      if (r.date >= half) { recN++; if (isIn) recIn++; if (isLow) recBelow++ }
+      else { prevN++; if (isIn) prevIn++; if (isLow) prevBelow++ }
       if (isLow && !prevLow) { lowEpisodes++; curLowStart = r.date }
       if (!isLow && prevLow && curLowStart != null) longestLowMin = Math.max(longestLowMin, Math.round((r.date - curLowStart) / 60000))
       prevLow = isLow
@@ -1177,15 +1188,31 @@ async function getAiStats(days) {
     const pct = (x) => (n ? round((x / n) * 100, 1) : 0)
     const expected = days * 1440
     const perHour = hourAgg.map((a, h) => ({ hour: h, mean: a.n ? round(a.sum / a.n, 1) : null, lowPct: a.n ? round((a.low / a.n) * 100, 1) : 0, n: a.n }))
+    // Mediaan + IQR (AGP gebruikt percentielen).
+    const sorted = vals.slice().sort((a, b) => a - b)
+    const q = (p) => (n ? round(sorted[Math.min(n - 1, Math.floor(p * n))], 1) : null)
+    // GMI (Glucose Management Indicator) uit gemiddelde mg/dL.
+    const gmi = n ? round(3.31 + 0.02392 * (mean * MGDL_PER_MMOL), 1) : null
+    const WD_LABELS = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo']
+    const perWeekday = wdAgg.map((w, i) => ({ day: WD_LABELS[i], mean: w.n ? round(w.sum / w.n, 1) : null, lowPct: w.n ? round((w.low / w.n) * 100, 1) : 0, n: w.n }))
+    const recTir = recN ? round((recIn / recN) * 100, 1) : null
+    const prevTir = prevN ? round((prevIn / prevN) * 100, 1) : null
+    const trend = {
+      recentTir: recTir, prevTir: prevTir,
+      tirDelta: (recTir != null && prevTir != null) ? round(recTir - prevTir, 1) : null,
+      recentLowPct: recN ? round((recBelow / recN) * 100, 1) : null,
+      prevLowPct: prevN ? round((prevBelow / prevN) * 100, 1) : null,
+    }
     return {
       window: { days, from: new Date(from).toISOString(), to: new Date(to).toISOString() },
       count: n,
       coveragePct: round(Math.min(100, expected ? (n / expected) * 100 : 0), 0),
       mean: n ? round(mean, 1) : null, sd: n ? round(sd, 1) : null, cv: mean ? round((sd / mean) * 100, 0) : null,
+      gmi, median: q(0.5), p25: q(0.25), p75: q(0.75),
       tir: pct(inRange), tbr: pct(below), veryLow: pct(veryLow), tar: pct(above), veryHigh: pct(veryHigh),
       min: n ? round(min, 1) : null, max: n ? round(max, 1) : null,
       lows: { count: lowEpisodes, longestMin: longestLowMin },
-      perHour,
+      perHour, perWeekday, trend,
     }
   } finally {
     if (client) await client.close().catch(() => undefined)

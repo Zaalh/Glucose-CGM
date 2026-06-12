@@ -831,7 +831,7 @@
       '#cgm-rate-overlay .very-fast-up{color:#faf5ff;border-color:#7e22ce;background:linear-gradient(135deg,#9333ea 0%,#581c87 100%);text-shadow:0 1px 2px rgba(0,0,0,.52)}',
       '#cgm-rate-overlay .missing{color:#8a8a8a;border-color:rgba(255,255,255,.14);background:rgba(0,0,0,.28)}',
       '#cgm-ai-toggle{position:fixed;z-index:10002;left:10px;bottom:10px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:800;line-height:1;padding:7px 11px;border:1px solid rgba(0,0,0,.3);border-radius:6px;background:linear-gradient(135deg,#a5b4fc 0%,#6366f1 100%);color:#fff;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.35)}',
-      '#cgm-ai-panel{position:fixed;z-index:10002;left:10px;bottom:48px;display:none;width:340px;max-width:92vw;max-height:70vh;overflow:auto;border:1px solid rgba(0,0,0,.28);border-radius:8px;background:#0f172a;color:#e2e8f0;font-family:Arial,Helvetica,sans-serif;font-size:12px;padding:10px;box-shadow:0 6px 24px rgba(0,0,0,.5)}',
+      '#cgm-ai-panel{position:fixed;z-index:10002;left:10px;bottom:48px;display:none;width:400px;max-width:92vw;max-height:72vh;overflow:auto;border:1px solid rgba(0,0,0,.28);border-radius:8px;background:#0f172a;color:#e2e8f0;font-family:Arial,Helvetica,sans-serif;font-size:12px;padding:10px;box-shadow:0 6px 24px rgba(0,0,0,.5)}',
       '#cgm-ai-panel.open{display:block}',
       '#cgm-ai-panel .ai-row{display:flex;gap:6px;align-items:center;margin-bottom:8px}',
       '#cgm-ai-panel select{flex:1;min-width:0;font-size:12px;padding:4px;border-radius:5px;border:1px solid rgba(255,255,255,.2);background:#1e293b;color:#e2e8f0}',
@@ -866,6 +866,11 @@
       '#cgm-ai-panel .ai-card-v{font-size:15px;font-weight:900;line-height:1.1}',
       '#cgm-ai-panel .ai-card-l{font-size:9px;opacity:.7;margin-top:2px}',
       '#cgm-ai-panel .ai-fine{font-size:10px;opacity:.6;margin-bottom:4px}',
+      '#cgm-ai-panel .ai-targets{display:flex;flex-wrap:wrap;gap:4px;margin:2px 0 6px}',
+      '#cgm-ai-panel .ai-tg{font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid rgba(255,255,255,.15)}',
+      '#cgm-ai-panel .ai-tg.ok{color:#4ade80;border-color:rgba(74,222,128,.5)}',
+      '#cgm-ai-panel .ai-tg.no{color:#fb7185;border-color:rgba(251,113,133,.5)}',
+      '#cgm-ai-panel .ai-wd .ai-hbar label{font-size:8px;opacity:.7}',
       '#cgm-ai-panel .ai-hours{display:flex;align-items:flex-end;gap:2px;height:40px;margin-bottom:4px}',
       '#cgm-ai-panel .ai-hbar{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%}',
       '#cgm-ai-panel .ai-hbar span{width:100%;background:linear-gradient(180deg,#fb7185,#e11d48);border-radius:2px 2px 0 0;min-height:1px}',
@@ -1584,7 +1589,21 @@
     h.push(aiCard('Variabiliteit (CV)', aiNum(stats.cv, '%'), ''));
     h.push(aiCard('Lows', aiNum(stats.lows ? stats.lows.count : null, '') + (stats.lows && stats.lows.longestMin ? ' · ' + stats.lows.longestMin + 'm' : ''), 'low'));
     h.push('</div>');
-    h.push('<div class="ai-fine">very-low &lt;3.0: ' + aiNum(stats.veryLow, '%') + ' · very-high &gt;13.9: ' + aiNum(stats.veryHigh, '%') + ' · min ' + aiNum(stats.min, '') + ' · max ' + aiNum(stats.max, '') + ' mmol/L</div>');
+    h.push('<div class="ai-fine">GMI ' + aiNum(stats.gmi, '%') + ' · mediaan ' + aiNum(stats.median, '') + ' (IQR ' + aiNum(stats.p25, '') + '–' + aiNum(stats.p75, '') + ') · very-low &lt;3.0: ' + aiNum(stats.veryLow, '%') + ' · very-high &gt;13.9: ' + aiNum(stats.veryHigh, '%') + ' · min ' + aiNum(stats.min, '') + ' · max ' + aiNum(stats.max, '') + '</div>');
+    // Klinische doelen (ADA): TIR>=70, TBR<4, CV<36, GMI<7.
+    h.push('<div class="ai-targets">' +
+      aiTarget('TIR ≥70%', stats.tir != null && stats.tir >= 70) +
+      aiTarget('TBR <4%', stats.tbr != null && stats.tbr < 4) +
+      aiTarget('CV <36%', stats.cv != null && stats.cv < 36) +
+      aiTarget('GMI <7%', stats.gmi != null && stats.gmi < 7) +
+      '</div>');
+    // 7d-vs-7d trend.
+    if (stats.trend && stats.trend.recentTir != null && stats.trend.prevTir != null) {
+      var d = stats.trend.tirDelta;
+      var arrow = d > 0.5 ? '▲' : (d < -0.5 ? '▼' : '▬');
+      h.push('<div class="ai-fine">Trend TIR (laatste 7d vs vorige 7d): ' + stats.trend.prevTir + '% → ' + stats.trend.recentTir + '% ' + arrow +
+        ' · laag ' + aiNum(stats.trend.prevLowPct, '%') + ' → ' + aiNum(stats.trend.recentLowPct, '%') + '</div>');
+    }
     // Per-uur risicoprofiel (%low per uur) als mini-balken.
     if (stats.perHour && stats.perHour.length) {
       var maxLow = 0;
@@ -1597,6 +1616,31 @@
         h.push('<div class="ai-hbar" title="' + escapeHtml(title) + '"><span style="height:' + ht + 'px"></span><label>' + (p.hour % 6 === 0 ? p.hour : '') + '</label></div>');
       });
       h.push('</div>');
+    }
+    // Per-weekdag (%low per dag).
+    if (stats.perWeekday && stats.perWeekday.length) {
+      var maxWd = 0;
+      stats.perWeekday.forEach(function (p) { if (p.lowPct > maxWd) maxWd = p.lowPct; });
+      h.push('<div class="ai-sec">Per weekdag (% laag)</div>');
+      h.push('<div class="ai-hours ai-wd">');
+      stats.perWeekday.forEach(function (p) {
+        var ht = maxWd > 0 ? Math.round((p.lowPct / maxWd) * 26) : 0;
+        var title = p.day + ' · ' + p.lowPct + '% laag · gem ' + aiNum(p.mean, '') + ' (n=' + p.n + ')';
+        h.push('<div class="ai-hbar" title="' + escapeHtml(title) + '"><span style="height:' + ht + 'px"></span><label>' + escapeHtml(p.day) + '</label></div>');
+      });
+      h.push('</div>');
+    }
+    // Episode-samenvatting (uit de B-lijst, client-side).
+    if (episodes.length) {
+      var sumDrop = 0, dropN = 0, sumMin = 0, minN = 0, byOutcome = {};
+      episodes.forEach(function (e) {
+        if (e.dropFromPeakMmol != null) { sumDrop += e.dropFromPeakMmol; dropN++; }
+        if (e.minutesPeakToNadir != null) { sumMin += e.minutesPeakToNadir; minN++; }
+        var o = e.outcome || 'onbekend'; byOutcome[o] = (byOutcome[o] || 0) + 1;
+      });
+      var oc = Object.keys(byOutcome).map(function (k) { return k + ': ' + byOutcome[k]; }).join(' · ');
+      h.push('<div class="ai-fine">Gem. daling ' + (dropN ? (Math.round(sumDrop / dropN * 10) / 10) : '–') + ' mmol · gem. piek→dal ' +
+        (minN ? Math.round(sumMin / minN) : '–') + ' min · ' + escapeHtml(oc) + '</div>');
     }
     // Reactieve-hypo episodes (B).
     h.push('<div class="ai-sec">Reactieve-hypo episodes (' + episodes.length + ')</div>');
@@ -1617,6 +1661,10 @@
 
   function aiCard(label, value, cls) {
     return '<div class="ai-card ' + (cls || '') + '"><div class="ai-card-v">' + escapeHtml(String(value)) + '</div><div class="ai-card-l">' + escapeHtml(label) + '</div></div>';
+  }
+
+  function aiTarget(label, ok) {
+    return '<span class="ai-tg ' + (ok ? 'ok' : 'no') + '">' + (ok ? '✓' : '✗') + ' ' + escapeHtml(label) + '</span>';
   }
 
   // --- Chat-tab: 1 LLM-call per bericht (kost quota). History in geheugen.
