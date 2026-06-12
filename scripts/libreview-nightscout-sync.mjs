@@ -1310,7 +1310,43 @@ async function getAiEpisodes(limit) {
     client = new MongoClient(config.mongoUri)
     await client.connect()
     return await client.db().collection('reactive_hypo_episodes')
-      .find({}, { projection: { _id: 0, peakAt: 1, nadirAt: 1, peakMmol: 1, nadirMmol: 1, dropFromPeakMmol: 1, dropFromPeakPercent: 1, minutesPeakToNadir: 1, maxFallRate30m: 1, outcome: 1, startMmol: 1, endMmol: 1, minutesPeakToUnder40: 1, minutesPeakToUnder45: 1 } })
+      .find({}, {
+        projection: {
+          _id: 0,
+          peakAt: 1,
+          nadirAt: 1,
+          recoveredAt: 1,
+          peakMmol: 1,
+          nadirMmol: 1,
+          dropFromPeakMmol: 1,
+          peakToNadirDeltaMmol: 1,
+          dropFromPeakPercent: 1,
+          minutesPeakToNadir: 1,
+          recoveryMinutes: 1,
+          maxFallRate30m: 1,
+          fallRateMmolPerMin: 1,
+          outcome: 1,
+          severity: 1,
+          shape: 1,
+          whippleClass: 1,
+          qualityFlags: 1,
+          qualityScore: 1,
+          timeBelow3_9Minutes: 1,
+          timeBelow3_0Minutes: 1,
+          areaBelow3_9: 1,
+          areaBelow3_0: 1,
+          reboundHigh: 1,
+          reboundPeakMmol: 1,
+          reboundMinutesAfterRecovery: 1,
+          nightEpisode: 1,
+          timeOfDayBucket: 1,
+          postprandialCandidate: 1,
+          startMmol: 1,
+          endMmol: 1,
+          minutesPeakToUnder40: 1,
+          minutesPeakToUnder45: 1,
+        },
+      })
       .sort({ peakAt: -1 })
       .limit(limit)
       .toArray()

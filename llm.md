@@ -10,6 +10,27 @@ betekenisvoller te maken dan alleen "samenvatten achteraf".
 > alarm- of actiebeslissingen. Past bij de reactieve-hypoglykemie use-case
 > (geen insuline/closed-loop). Zie ook `README.md` en `hypo.md`.
 
+## 0. Statusmatrix (kort)
+
+| Onderdeel | Status | Opmerking |
+|-----------|--------|-----------|
+| AI-knop + paneel | Live/getest | Fase 1-4 staan hieronder als implementatiehistorie |
+| Model-dropdown + Ollama-router | Live/getest | Cloud JSON-mode, geen schema-enforcement |
+| Observaties/vragen opslaan | Live | `ai_observations` / `ai_questions` met runId/model/retentie |
+| Detailweergave + runhistorie | Live | Gratis: alleen Mongo-reads |
+| Rapportages A/B/C/D | Live | A/B deterministisch, C/D 1 LLM-call en opgeslagen in `ai_reports` |
+| Chat | Plan | Nuttig, maar quota- en safety-gevoelig |
+| Verdiepte hypo-analyse | Eerste slice gebouwd | Deterministische episode-metrics, severity, burden, recovery, rebound |
+| CGM-datakwaliteit/artefacten | Eerste slice gebouwd | Quality flags/score voor datagaten, single-point lows, lag, mogelijke compression lows |
+| Safety guardrails + evaluatie | Te bouwen | Vooral belangrijk voor chat en narratieve rapporten |
+
+**Nieuwe prioriteit na online review (12 juni 2026):**
+1. Verdiepte hypo-analyse + CGM-datakwaliteit (sectie 15/16).
+2. Event-/maaltijdlogging uitbreiden (sectie 14, gekoppeld aan 15).
+3. Safety guardrails + evaluatie (sectie 17/18).
+4. Pas daarna interactieve chat (sectie 13), omdat elk bericht quota kost en medisch
+   gevoeliger is dan deterministische rapportage.
+
 ---
 
 ## 1. Huidige architectuur (vastgesteld in code)
@@ -504,6 +525,174 @@ alarmbron, en er wordt geen medisch advies of voorschrift gegeven.
 
 ---
 
+## 15. Verdiepte hypo-analyse (deterministisch, gratis)
+
+**Status: eerste slice gebouwd.** `scripts/lib/episode-builder.mjs` schrijft episode
+`version:3` met extra metrics; `GET /ai-review/episodes` geeft ze door; de overlay toont
+ernst, burden, herstel, rebound en datakwaliteit in de Statistiek-tab. Nog open:
+maaltijd-/eventkoppeling, echte Whipple-classificatie op basis van symptomen/herstel, en
+episode-clustering.
+
+**Doel:** van "er was een dip" naar een bruikbare episode-analyse:
+**piek -> dalingssnelheid -> nadir -> duur onder grens -> herstel -> rebound -> context
+-> betrouwbaarheid**. Dit moet deterministisch op de server gebeuren; de LLM mag daarna
+alleen uitleg geven.
+
+### 15.1 Episode-metrics
+Breid `reactive_hypo_episodes` uit of voeg een afgeleide projectie toe met:
+- `startAt`, `peakAt`, `nadirAt`, `recoveredAt`, `endAt`.
+- `peakMmol`, `nadirMmol`, `peakToNadirDeltaMmol`, `peakToNadirMinutes`.
+- `fallRateMmolPerMin` en optioneel `fallRateMmolPer15Min`.
+- `timeBelow3_9Minutes` en `timeBelow3_0Minutes`.
+- `areaBelow3_9` en `areaBelow3_0` (diepte x duur = hypo-burden).
+- `recoveryMinutes` (nadir -> terug boven 3,9 mmol/L).
+- `reboundHigh` / `reboundPeakMmol` / `reboundMinutesAfterRecovery`.
+- `nightEpisode` en `timeOfDayBucket` (`night`, `morning`, `afternoon`, `evening`).
+
+### 15.2 Ernst en patroonlabels
+Voeg labels toe die UI en rapporten direct kunnen tonen:
+- `severity`: `uncertain` | `mild` | `relevant` | `severe`.
+- `shape`: `fast_drop`, `slow_drift`, `prolonged_low`, `rebound`, `isolated_point`.
+- `postprandialCandidate`: true als de dip binnen 4 uur na een maaltijd/event valt.
+- `minutesSinceMeal` zodra maaltijdlogging beschikbaar is.
+- `similarEpisodeIds` of cluster-id op basis van tijdstip, piek->dal-vorm en context.
+
+### 15.3 Whipple-triade als classificatie, niet als diagnose
+Gebruik feedback/symptomen om episodes te classificeren:
+- `symptomatic_confirmed`: lage CGM + klachten + herstel na eten/glucose.
+- `asymptomatic_low`: lage CGM zonder bekende klachten.
+- `symptoms_without_low`: klachten, maar geen lage CGM op dat moment.
+- `uncertain`: te weinig feedback of slechte datakwaliteit.
+
+Belangrijk: dit is **geen diagnose**. Het voorkomt juist dat de app elke CGM-dip als
+"echte reactieve hypo" presenteert.
+
+### 15.4 Endpoints/UI
+- `GET /ai-review/episodes` blijft gratis, maar retourneert de uitgebreide metrics.
+- Detailweergave toont per episode: ernst, datakwaliteit, mini-tijdlijn, herstel en
+  context/feedback.
+- Rapporten gebruiken deze metrics als input; LLM krijgt samenvattingen, geen ruwe
+  volledige CGM-historie.
+
+---
+
+## 16. CGM-datakwaliteit en artefacten
+
+**Status: eerste slice gebouwd.** Episodes krijgen `qualityFlags[]` en `qualityScore`
+voor datagaten, `single_point_low`, `possible_compression_low` en `lag_sensitive`.
+Nog open: sensor-warmup/stale uit brondata, fingerstick-disagreement en expliciete
+datadekking-waarschuwingen per dag/week in rapporten.
+
+**Doel:** expliciet maken wanneer een lage waarde waarschijnlijk betrouwbaar is en wanneer
+voorzichtigheid nodig is. CGM meet interstitieel vocht, kan achterlopen op bloedglucose
+en kan fout-lage waarden geven door druk op de sensor ("compression lows").
+
+### 16.1 Quality flags per episode
+Voeg per episode `qualityFlags[]` en `qualityScore` toe:
+- `data_gap_before`, `data_gap_during`, `data_gap_after`.
+- `single_point_low` (een losse lage waarde zonder omliggend patroon).
+- `possible_compression_low` (vooral nacht + abrupte daling + snel herstel zonder rebound).
+- `lag_sensitive` (zeer snelle daling/stijging; CGM kan achterlopen).
+- `sensor_warmup_or_stale` als brondata dat aangeeft.
+- `fingerstick_confirmed` / `fingerstick_disagreed` vanuit feedback.
+
+### 16.2 Datadekking in rapporten
+AGP-light moet naast TIR/TBR/TAR ook tonen:
+- verwachte vs ontvangen metingen;
+- langste datagat;
+- percentage bruikbare data;
+- waarschuwing als een dag/week te weinig dekking heeft voor stevige conclusies.
+
+### 16.3 Presentatieregel
+Rapporten en chat mogen bij slechte datakwaliteit niet stellig formuleren. Voorbeelden:
+- Wel: "Deze dip lijkt op een korte sensor-low; bevestiging ontbreekt."
+- Niet: "Je had een reactieve hypo."
+
+---
+
+## 17. Safety guardrails voor chat en rapporten — plan
+
+**Doel:** AI-antwoorden nuttig houden zonder medische besluitvorming te worden.
+Recente LLM-health literatuur blijft laten zien dat modellen kunnen hallucineren,
+te stellig antwoorden en gevoelig zijn voor promptvariaties. Daarom moet elke
+patient-facing AI-route expliciete guardrails hebben.
+
+### 17.1 Output-contract
+Voor narratieve rapporten en chat gebruikt de server intern een gestructureerd contract:
+
+```json
+{
+  "answer": "korte Nederlandse uitleg",
+  "evidence": ["welke stats/episodes/feedback gebruikt zijn"],
+  "uncertainty": "wat onbekend of onzeker is",
+  "dataQuality": "goed|matig|slecht",
+  "safetyLevel": "ok|caution|refer",
+  "notMedicalAdvice": true
+}
+```
+
+De UI mag dit als tekst tonen, maar de server valideert minimaal dat `answer`,
+`uncertainty`, `dataQuality` en `safetyLevel` aanwezig zijn.
+
+### 17.2 Chatregels
+- Antwoord alleen op basis van eigen CGM-data, episodes, stats, rapporten en feedback.
+- Geen diagnose, geen medicatieadvies, geen behandelvoorschrift.
+- Bij vragen over ernstige symptomen, flauwvallen, aanhoudende hypo of medische keuzes:
+  `safetyLevel:'refer'` en verwijs naar arts/spoedhulp.
+- Benoem onzekerheid expliciet, vooral bij slechte datakwaliteit of ontbrekende feedback.
+- Geen automatische vervolgacties; chat mag nooit detectorparameters wijzigen.
+
+### 17.3 Auditability
+Sla bij LLM-gegenereerde rapporten minimaal op:
+- gebruikte periode;
+- model/provider;
+- compacte `contextSnapshot` met stats/episode-ids/feedback-ids;
+- promptversie;
+- output-contract.
+
+Voor chat: standaard **niet persisteren**. Als chat later wel wordt opgeslagen, dan alleen
+met korte retentie en dezelfde `contextSnapshot`-aanpak.
+
+---
+
+## 18. Evaluatie: werkt dit echt beter? — plan
+
+**Doel:** meten of de AI- en hypo-laag daadwerkelijk nuttiger wordt, zonder alleen op
+mooie tekst te vertrouwen.
+
+### 18.1 Deterministische metrics
+Meet over 7/14/30 dagen:
+- aantal hypo-episodes per severity;
+- totale `areaBelow3_9` en `areaBelow3_0`;
+- mediane recovery-tijd;
+- percentage episodes met feedback;
+- percentage episodes met `fingerstick_confirmed`;
+- percentage episodes met slechte datakwaliteit;
+- verdeling per uur/weekday en postprandiaal venster.
+
+### 18.2 Detectorfeedback
+Koppel aan bestaande feedback:
+- confirmed vs false_alarm;
+- feels_hypo zonder detector-alert;
+- gemiste episodes achteraf;
+- welke shape/severity geeft de meeste false positives.
+
+### 18.3 AI-kwaliteit
+Voor AI-observaties/rapporten:
+- werd de observatie bevestigd of genegeerd?
+- stelde de AI vragen die al beantwoord waren?
+- bevatte het antwoord medische voorschriften? Zo ja: bug.
+- gebruikte het antwoord evidence uit stats/episodes in plaats van losse speculatie?
+
+### 18.4 Succescriterium
+De volgende stap is pas geslaagd als:
+- rapporten minder stellig worden bij slechte datakwaliteit;
+- episodes beter geordend zijn op ernst/burden;
+- gebruiker sneller ziet welke dips echt belangrijk zijn;
+- chat geen extra alarm- of behandelbeslissingen introduceert.
+
+---
+
 ## Bronnen
 
 - [OpenAI compatibility — Ollama docs](https://docs.ollama.com/api/openai-compatibility)
@@ -518,3 +707,8 @@ alarmbron, en er wordt geen medisch advies of voorschrift gegeven.
 - [Dieetstrategieën reactieve hypoglykemie / maaltijdsamenstelling (Wikipedia overzicht)](https://en.wikipedia.org/wiki/Reactive_hypoglycemia)
 - [Nutriënt-volgorde (protein/fat preload) en glucosetolerantie (PMC)](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6418004/)
 - [LLM als "personal nutritionist" / gedrag↔glucose (Sensors, MDPI)](https://www.mdpi.com/1424-8220/25/17/5372)
+- [CGM-beperkingen: interstitieel lag, fingerstick-confirmatie, compression lows](https://en.wikipedia.org/wiki/Continuous_glucose_monitor)
+- [Blood glucose monitoring — CGM meet interstitieel vocht en loopt achter](https://en.wikipedia.org/wiki/Blood_glucose_monitoring)
+- [Whipple-triade — symptomen + lage glucose + herstel](https://en.wikipedia.org/wiki/Whipple%27s_triad)
+- [CareGuardAI — guardrails voor patient-facing medische LLMs](https://arxiv.org/abs/2604.26959)
+- [When Large Language Models Fail in Healthcare — promptgevoeligheid/risico](https://arxiv.org/abs/2606.07237)

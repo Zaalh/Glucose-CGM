@@ -4,6 +4,7 @@
 // Timeline bevat bewust twee episodes: een reactieve hypo (piek 10 -> nadir 3.8)
 // en een veilige daling (piek 8 -> nadir 5.5), met vlakke stukken ertussen.
 
+import assert from 'node:assert/strict'
 import { timelineFromReadings } from './lib/hypo-features.mjs'
 import { buildEpisodes, outcomeHistogram } from './lib/episode-builder.mjs'
 
@@ -43,6 +44,27 @@ for (const e of episodes) {
 }
 
 const outcomes = episodes.map((e) => e.outcome)
-const ok = episodes.length === 2 && outcomes.includes('hypo') && outcomes.includes('safe_drop')
+const hypo = episodes.find((e) => e.outcome === 'hypo')
+const safeDrop = episodes.find((e) => e.outcome === 'safe_drop')
+let ok = false
+try {
+  assert.equal(episodes.length, 2)
+  assert.ok(hypo)
+  assert.ok(safeDrop)
+  assert.equal(hypo.version, 3)
+  assert.equal(safeDrop.version, 3)
+  assert.ok(hypo.timeBelow3_9Minutes > 0)
+  assert.ok(hypo.areaBelow3_9 > 0)
+  assert.ok(hypo.recoveryMinutes > 0)
+  assert.equal(hypo.severity, 'uncertain')
+  assert.equal(hypo.shape, 'isolated_point')
+  assert.ok(hypo.qualityFlags.includes('single_point_low'))
+  assert.ok(hypo.qualityScore >= 0 && hypo.qualityScore <= 100)
+  assert.equal(safeDrop.severity, 'mild')
+  assert.equal(safeDrop.areaBelow3_9, 0)
+  ok = outcomes.includes('hypo') && outcomes.includes('safe_drop')
+} catch (err) {
+  console.error(`\nFAIL: ${err.message}`)
+}
 console.log(`\n${ok ? 'OK' : 'FAIL'}: verwacht 2 episodes (hypo + safe_drop)`)
 process.exit(ok ? 0 : 1)

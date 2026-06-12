@@ -1632,27 +1632,45 @@
     }
     // Episode-samenvatting (uit de B-lijst, client-side).
     if (episodes.length) {
-      var sumDrop = 0, dropN = 0, sumMin = 0, minN = 0, byOutcome = {};
+      var sumDrop = 0, dropN = 0, sumMin = 0, minN = 0, byOutcome = {}, bySeverity = {};
+      var burden39 = 0, poorQuality = 0;
       episodes.forEach(function (e) {
         if (e.dropFromPeakMmol != null) { sumDrop += e.dropFromPeakMmol; dropN++; }
         if (e.minutesPeakToNadir != null) { sumMin += e.minutesPeakToNadir; minN++; }
         var o = e.outcome || 'onbekend'; byOutcome[o] = (byOutcome[o] || 0) + 1;
+        var s = e.severity || 'onbekend'; bySeverity[s] = (bySeverity[s] || 0) + 1;
+        if (e.areaBelow3_9 != null) burden39 += Number(e.areaBelow3_9) || 0;
+        if (e.qualityScore != null && e.qualityScore < 70) poorQuality++;
       });
       var oc = Object.keys(byOutcome).map(function (k) { return k + ': ' + byOutcome[k]; }).join(' · ');
+      var sc = Object.keys(bySeverity).map(function (k) { return k + ': ' + bySeverity[k]; }).join(' · ');
       h.push('<div class="ai-fine">Gem. daling ' + (dropN ? (Math.round(sumDrop / dropN * 10) / 10) : '–') + ' mmol · gem. piek→dal ' +
         (minN ? Math.round(sumMin / minN) : '–') + ' min · ' + escapeHtml(oc) + '</div>');
+      h.push('<div class="ai-fine">Hypo-burden &lt;3.9: ' + (Math.round(burden39 * 10) / 10) + ' mmol·min · ernst ' +
+        escapeHtml(sc || '–') + (poorQuality ? ' · ' + poorQuality + ' met matige/slechte datakwaliteit' : '') + '</div>');
     }
     // Reactieve-hypo episodes (B).
     h.push('<div class="ai-sec">Reactieve-hypo episodes (' + episodes.length + ')</div>');
     if (!episodes.length) h.push('<div class="ai-empty">Geen episodes.</div>');
     episodes.forEach(function (e) {
       var when = e.peakAt ? new Date(e.peakAt).toLocaleString() : '?';
+      var tags = [];
+      if (e.outcome) tags.push(e.outcome);
+      if (e.severity) tags.push(e.severity);
+      if (e.shape) tags.push(e.shape);
       var head = (e.peakMmol != null ? e.peakMmol : '?') + '→' + (e.nadirMmol != null ? e.nadirMmol : '?') + ' mmol · ' +
-        (e.minutesPeakToNadir != null ? e.minutesPeakToNadir + 'm' : '?') + (e.outcome ? ' · ' + e.outcome : '');
+        (e.minutesPeakToNadir != null ? e.minutesPeakToNadir + 'm' : '?') + (tags.length ? ' · ' + tags.join(' · ') : '');
       var meta = [];
       if (e.dropFromPeakMmol != null) meta.push('daling ' + e.dropFromPeakMmol + ' mmol');
       if (e.dropFromPeakPercent != null) meta.push(e.dropFromPeakPercent + '%');
+      if (e.fallRateMmolPerMin != null) meta.push('gem. val ' + e.fallRateMmolPerMin + '/min');
       if (e.maxFallRate30m != null) meta.push('max ' + e.maxFallRate30m + '/min');
+      if (e.timeBelow3_9Minutes != null) meta.push('<3.9 ' + e.timeBelow3_9Minutes + 'm');
+      if (e.areaBelow3_9 != null) meta.push('burden ' + e.areaBelow3_9);
+      if (e.recoveryMinutes != null) meta.push('herstel ' + e.recoveryMinutes + 'm');
+      if (e.reboundHigh) meta.push('rebound ' + aiNum(e.reboundPeakMmol, ''));
+      if (e.qualityScore != null) meta.push('kwaliteit ' + e.qualityScore + '%');
+      if (e.qualityFlags && e.qualityFlags.length) meta.push('flags: ' + e.qualityFlags.join(', '));
       meta.push(when);
       h.push('<div class="ai-ep"><div class="ai-ep-head">' + escapeHtml(head) + '</div><div class="ai-meta">' + escapeHtml(meta.join(' · ')) + '</div></div>');
     });
