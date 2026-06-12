@@ -854,6 +854,17 @@ function startServer() {
       return
     }
 
+    if (url.pathname === '/ai-review/day' && req.method === 'GET') {
+      try {
+        const day = await getAiDayReview(url.searchParams.get('date'))
+        res.end(JSON.stringify({ ok: true, ...day }))
+      } catch (err) {
+        res.writeHead(err && err.statusCode ? err.statusCode : 500)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
     if (url.pathname === '/ai-review/report' && req.method === 'POST') {
       try {
         const body = await readJsonBody(req)
@@ -1151,8 +1162,9 @@ async function getAiStats(days) {
     const hourFmt = new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', hour12: false })
     const weekdayFmt = new Intl.DateTimeFormat('en-GB', { timeZone: tz, weekday: 'short' })
     const WD = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 }
-    const hourAgg = Array.from({ length: 24 }, () => ({ sum: 0, n: 0, low: 0 }))
-    const wdAgg = Array.from({ length: 7 }, () => ({ sum: 0, n: 0, low: 0 }))
+    const hourAgg = Array.from({ length: 24 }, () => ({ sum: 0, n: 0, low: 0, high: 0, inRange: 0 }))
+    const wdAgg = Array.from({ length: 7 }, () => ({ sum: 0, n: 0, low: 0, high: 0, inRange: 0 }))
+    const heatmapAgg = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => ({ n: 0, low: 0, high: 0, inRange: 0 })))
     const vals = []
     let inRange = 0, below = 0, veryLow = 0, above = 0, veryHigh = 0
     let min = Infinity, max = -Infinity
@@ -1173,9 +1185,13 @@ async function getAiStats(days) {
       if (mmol > 10.0) above++
       if (mmol > 13.9) veryHigh++
       const h = Number(hourFmt.format(new Date(r.date))) % 24
-      const a = hourAgg[h]; a.sum += mmol; a.n++; if (isLow) a.low++
+      const isHigh = mmol > 10.0
+      const a = hourAgg[h]; a.sum += mmol; a.n++; if (isLow) a.low++; if (isHigh) a.high++; if (isIn) a.inRange++
       const wd = WD[weekdayFmt.format(new Date(r.date))]
-      if (wd != null) { const w = wdAgg[wd]; w.sum += mmol; w.n++; if (isLow) w.low++ }
+      if (wd != null) {
+        const w = wdAgg[wd]; w.sum += mmol; w.n++; if (isLow) w.low++; if (isHigh) w.high++; if (isIn) w.inRange++
+        const cell = heatmapAgg[wd][h]; cell.n++; if (isLow) cell.low++; if (isHigh) cell.high++; if (isIn) cell.inRange++
+      }
       if (r.date >= half) { recN++; if (isIn) recIn++; if (isLow) recBelow++ }
       else { prevN++; if (isIn) prevIn++; if (isLow) prevBelow++ }
       if (isLow && !prevLow) { lowEpisodes++; curLowStart = r.date }
@@ -1187,14 +1203,36 @@ async function getAiStats(days) {
     const sd = n ? Math.sqrt(vals.reduce((s, v) => s + (v - mean) * (v - mean), 0) / n) : 0
     const pct = (x) => (n ? round((x / n) * 100, 1) : 0)
     const expected = days * 1440
-    const perHour = hourAgg.map((a, h) => ({ hour: h, mean: a.n ? round(a.sum / a.n, 1) : null, lowPct: a.n ? round((a.low / a.n) * 100, 1) : 0, n: a.n }))
+    const perHour = hourAgg.map((a, h) => ({
+      hour: h,
+      mean: a.n ? round(a.sum / a.n, 1) : null,
+      lowPct: a.n ? round((a.low / a.n) * 100, 1) : 0,
+      highPct: a.n ? round((a.high / a.n) * 100, 1) : 0,
+      tir: a.n ? round((a.inRange / a.n) * 100, 1) : 0,
+      n: a.n,
+    }))
     // Mediaan + IQR (AGP gebruikt percentielen).
     const sorted = vals.slice().sort((a, b) => a - b)
     const q = (p) => (n ? round(sorted[Math.min(n - 1, Math.floor(p * n))], 1) : null)
     // GMI (Glucose Management Indicator) uit gemiddelde mg/dL.
     const gmi = n ? round(3.31 + 0.02392 * (mean * MGDL_PER_MMOL), 1) : null
     const WD_LABELS = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo']
-    const perWeekday = wdAgg.map((w, i) => ({ day: WD_LABELS[i], mean: w.n ? round(w.sum / w.n, 1) : null, lowPct: w.n ? round((w.low / w.n) * 100, 1) : 0, n: w.n }))
+    const perWeekday = wdAgg.map((w, i) => ({
+      day: WD_LABELS[i],
+      mean: w.n ? round(w.sum / w.n, 1) : null,
+      lowPct: w.n ? round((w.low / w.n) * 100, 1) : 0,
+      highPct: w.n ? round((w.high / w.n) * 100, 1) : 0,
+      tir: w.n ? round((w.inRange / w.n) * 100, 1) : 0,
+      n: w.n,
+    }))
+    const heatmap = heatmapAgg.map((row, wd) => row.map((c, hour) => ({
+      day: WD_LABELS[wd],
+      hour,
+      n: c.n,
+      lowPct: c.n ? round((c.low / c.n) * 100, 1) : 0,
+      highPct: c.n ? round((c.high / c.n) * 100, 1) : 0,
+      tir: c.n ? round((c.inRange / c.n) * 100, 1) : 0,
+    })))
     const recTir = recN ? round((recIn / recN) * 100, 1) : null
     const prevTir = prevN ? round((prevIn / prevN) * 100, 1) : null
     const trend = {
@@ -1212,11 +1250,193 @@ async function getAiStats(days) {
       tir: pct(inRange), tbr: pct(below), veryLow: pct(veryLow), tar: pct(above), veryHigh: pct(veryHigh),
       min: n ? round(min, 1) : null, max: n ? round(max, 1) : null,
       lows: { count: lowEpisodes, longestMin: longestLowMin },
-      perHour, perWeekday, trend,
+      perHour, perWeekday, heatmap, trend,
     }
   } finally {
     if (client) await client.close().catch(() => undefined)
   }
+}
+
+function dayKeyInTz(date, timeZone) {
+  const fmt = new Intl.DateTimeFormat('en-GB', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' })
+  const parts = Object.fromEntries(fmt.formatToParts(date).map((p) => [p.type, p.value]))
+  return `${parts.year}-${parts.month}-${parts.day}`
+}
+
+function localDayRange(dateKey, timeZone) {
+  const [year, month, day] = String(dateKey || '').split('-').map(Number)
+  if (!year || !month || !day) return null
+  const approx = Date.UTC(year, month - 1, day, 12, 0, 0)
+  let start = approx - 36 * 3_600_000
+  while (dayKeyInTz(new Date(start), timeZone) < dateKey) start += 3_600_000
+  while (dayKeyInTz(new Date(start - 60_000), timeZone) >= dateKey) start -= 60_000
+  while (dayKeyInTz(new Date(start), timeZone) !== dateKey) start += 60_000
+  let end = start + 18 * 3_600_000
+  while (dayKeyInTz(new Date(end), timeZone) === dateKey) end += 60_000
+  return { from: start, to: end }
+}
+
+function summarizeEntries(rows, expectedMinutes) {
+  const vals = rows.map((r) => Number(r.sgv) / MGDL_PER_MMOL).filter(Number.isFinite)
+  const n = vals.length
+  let inRange = 0, below = 0, veryLow = 0, above = 0, veryHigh = 0
+  let min = Infinity, max = -Infinity
+  for (const mmol of vals) {
+    if (mmol >= 3.9 && mmol <= 10.0) inRange++
+    if (mmol < 3.9) below++
+    if (mmol < 3.0) veryLow++
+    if (mmol > 10.0) above++
+    if (mmol > 13.9) veryHigh++
+    if (mmol < min) min = mmol
+    if (mmol > max) max = mmol
+  }
+  const mean = n ? vals.reduce((s, v) => s + v, 0) / n : 0
+  const sd = n ? Math.sqrt(vals.reduce((s, v) => s + (v - mean) * (v - mean), 0) / n) : 0
+  const pct = (x) => (n ? round((x / n) * 100, 1) : 0)
+  return {
+    count: n,
+    coveragePct: round(Math.min(100, expectedMinutes ? (n / expectedMinutes) * 100 : 0), 0),
+    mean: n ? round(mean, 1) : null,
+    sd: n ? round(sd, 1) : null,
+    cv: mean ? round((sd / mean) * 100, 0) : null,
+    tir: pct(inRange),
+    tbr: pct(below),
+    veryLow: pct(veryLow),
+    tar: pct(above),
+    veryHigh: pct(veryHigh),
+    min: n ? round(min, 1) : null,
+    max: n ? round(max, 1) : null,
+  }
+}
+
+function buildHighEpisodes(rows) {
+  const episodes = []
+  let cur = null
+  for (const r of rows) {
+    const mmol = Number(r.sgv) / MGDL_PER_MMOL
+    const isHigh = mmol > 10.0
+    if (isHigh && !cur) {
+      cur = { startAt: r.date, endAt: r.date, peakAt: r.date, peakMmol: mmol, count: 1 }
+    } else if (isHigh && cur) {
+      cur.endAt = r.date
+      cur.count += 1
+      if (mmol > cur.peakMmol) { cur.peakMmol = mmol; cur.peakAt = r.date }
+    } else if (!isHigh && cur) {
+      const durationMin = Math.max(1, Math.round((cur.endAt - cur.startAt) / 60000))
+      if (durationMin >= 15 || cur.count >= 3) {
+        episodes.push({
+          startAt: new Date(cur.startAt).toISOString(),
+          endAt: new Date(cur.endAt).toISOString(),
+          peakAt: new Date(cur.peakAt).toISOString(),
+          peakMmol: round(cur.peakMmol, 1),
+          durationMinutes: durationMin,
+        })
+      }
+      cur = null
+    }
+  }
+  if (cur) {
+    const durationMin = Math.max(1, Math.round((cur.endAt - cur.startAt) / 60000))
+    if (durationMin >= 15 || cur.count >= 3) {
+      episodes.push({
+        startAt: new Date(cur.startAt).toISOString(),
+        endAt: new Date(cur.endAt).toISOString(),
+        peakAt: new Date(cur.peakAt).toISOString(),
+        peakMmol: round(cur.peakMmol, 1),
+        durationMinutes: durationMin,
+      })
+    }
+  }
+  return episodes
+}
+
+async function getAiDayReview(dateKey) {
+  const tz = process.env.LIBREVIEW_TZ || 'Europe/Amsterdam'
+  const range = localDayRange(dateKey || dayKeyInTz(new Date(), tz), tz)
+  if (!range) {
+    const err = new Error('Ongeldige datum; gebruik YYYY-MM-DD.')
+    err.statusCode = 400
+    throw err
+  }
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    const db = client.db()
+    const rows = await db.collection('entries')
+      .find({ type: 'sgv', sgv: { $exists: true }, date: { $gte: range.from, $lt: range.to } }, { projection: { _id: 0, sgv: 1, date: 1 } })
+      .sort({ date: 1 })
+      .toArray()
+    const lows = await db.collection('reactive_hypo_episodes')
+      .find({ peakAt: { $gte: new Date(range.from).toISOString(), $lt: new Date(range.to).toISOString() } }, {
+        projection: {
+          _id: 0, peakAt: 1, nadirAt: 1, recoveredAt: 1, peakMmol: 1, nadirMmol: 1,
+          dropFromPeakMmol: 1, minutesPeakToNadir: 1, recoveryMinutes: 1, outcome: 1,
+          severity: 1, shape: 1, qualityScore: 1, qualityFlags: 1, areaBelow3_9: 1,
+          timeBelow3_9Minutes: 1, reboundHigh: 1, reboundPeakMmol: 1,
+        },
+      })
+      .sort({ peakAt: 1 })
+      .limit(50)
+      .toArray()
+    const highEpisodes = buildHighEpisodes(rows)
+    const highToLow = []
+    for (const high of highEpisodes) {
+      const highEnd = Date.parse(high.endAt)
+      const low = lows.find((l) => {
+        const peak = Date.parse(l.peakAt)
+        return Number.isFinite(peak) && peak >= highEnd && peak <= highEnd + 4 * 3_600_000
+      })
+      if (low) {
+        highToLow.push({
+          highPeakAt: high.peakAt,
+          highPeakMmol: high.peakMmol,
+          lowPeakAt: low.peakAt,
+          lowNadirAt: low.nadirAt,
+          lowNadirMmol: low.nadirMmol,
+          minutesHighEndToLowPeak: round((Date.parse(low.peakAt) - highEnd) / 60000, 0),
+        })
+      }
+    }
+    const expected = Math.max(1, Math.round((range.to - range.from) / 60000))
+    const stats = summarizeEntries(rows, expected)
+    const burden = lows.reduce((s, e) => s + (Number(e.areaBelow3_9) || 0), 0)
+    const worstLow = lows.slice().sort((a, b) => (Number(a.nadirMmol) || 99) - (Number(b.nadirMmol) || 99))[0] || null
+    const worstHigh = highEpisodes.slice().sort((a, b) => (Number(b.peakMmol) || 0) - (Number(a.peakMmol) || 0))[0] || null
+    const sourceHealth = {
+      lastEntryAt: rows.length ? new Date(rows[rows.length - 1].date).toISOString() : null,
+      longestGapMinutes: longestGapMinutes(rows),
+      level: stats.coveragePct >= 80 ? 'goed' : (stats.coveragePct >= 50 ? 'matig' : 'slecht'),
+    }
+    const summary = [
+      `TIR ${stats.tir}%`,
+      `laag ${stats.tbr}%`,
+      `${lows.length} low-episodes`,
+      `${highEpisodes.length} high-episodes`,
+      `dekking ${stats.coveragePct}%`,
+    ].join(' · ')
+    return {
+      date: dateKey || dayKeyInTz(new Date(), tz),
+      window: { from: new Date(range.from).toISOString(), to: new Date(range.to).toISOString(), timeZone: tz },
+      summary,
+      stats,
+      lowEpisodes: lows,
+      highEpisodes,
+      highToLow,
+      notable: { worstLow, worstHigh, hypoBurden3_9: round(burden, 1) },
+      sourceHealth,
+    }
+  } finally {
+    if (client) await client.close().catch(() => undefined)
+  }
+}
+
+function longestGapMinutes(rows) {
+  let longest = 0
+  for (let i = 1; i < rows.length; i += 1) {
+    longest = Math.max(longest, Math.round((rows[i].date - rows[i - 1].date) / 60000))
+  }
+  return longest
 }
 
 // D/C — Genereert één narratief rapport (1 LLM-call) achter dezelfde lock als de

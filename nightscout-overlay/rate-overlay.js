@@ -878,6 +878,11 @@
       '#cgm-ai-panel .ai-ep{border-top:1px solid rgba(255,255,255,.1);padding:5px 0}',
       '#cgm-ai-panel .ai-ep-head{font-weight:700}',
       '#cgm-ai-panel .ai-ep .ai-meta{font-size:10px;opacity:.6;margin-top:2px}',
+      '#cgm-ai-panel .ai-heatmap{margin:3px 0 8px}',
+      '#cgm-ai-panel .ai-hm-row{display:grid;grid-template-columns:22px repeat(24,1fr);gap:1px;align-items:center;margin-bottom:1px}',
+      '#cgm-ai-panel .ai-hm-day{font-size:8px;opacity:.65;text-align:right;padding-right:3px}',
+      '#cgm-ai-panel .ai-hm-cell{display:block;min-width:4px;height:9px;border-radius:1px;background:rgba(255,255,255,.04)}',
+      '#cgm-ai-panel .ai-hm-axis{display:grid;grid-template-columns:22px repeat(5,1fr);font-size:8px;opacity:.45;margin-top:2px}',
       '#cgm-ai-panel .ai-chatlog{max-height:300px;overflow:auto;margin-bottom:8px;display:flex;flex-direction:column;gap:6px}',
       '#cgm-ai-panel .ai-msg{padding:6px 8px;border-radius:8px;max-width:88%;line-height:1.35}',
       '#cgm-ai-panel .ai-msg-user{align-self:flex-end;background:#6366f1;color:#fff}',
@@ -1563,9 +1568,10 @@
     if (box) box.innerHTML = '<div class="ai-empty">Laden…</div>';
     Promise.all([
       fetchWithTimeout('/_ai-review/stats?days=14', { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; }),
-      fetchWithTimeout('/_ai-review/episodes?limit=20', { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; })
+      fetchWithTimeout('/_ai-review/episodes?limit=20', { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; }),
+      fetchWithTimeout('/_ai-review/day', { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; })
     ]).then(function (res) {
-      renderAiStats(res[0], res[1] && res[1].episodes ? res[1].episodes : []);
+      renderAiStats(res[0], res[1] && res[1].episodes ? res[1].episodes : [], res[2]);
     }).catch(function () {
       aiStatsLoaded = false;
       if (box) box.innerHTML = '<div class="ai-empty">Kon statistiek niet laden.</div>';
@@ -1574,7 +1580,7 @@
 
   function aiNum(v, unit) { return (v === null || v === undefined) ? '–' : (v + (unit || '')); }
 
-  function renderAiStats(stats, episodes) {
+  function renderAiStats(stats, episodes, day) {
     var box = document.getElementById('cgm-ai-stats');
     if (!box) return;
     if (!stats || !stats.ok) { box.innerHTML = '<div class="ai-empty">Geen statistiek beschikbaar.</div>'; return; }
@@ -1590,6 +1596,9 @@
     h.push(aiCard('Lows', aiNum(stats.lows ? stats.lows.count : null, '') + (stats.lows && stats.lows.longestMin ? ' · ' + stats.lows.longestMin + 'm' : ''), 'low'));
     h.push('</div>');
     h.push('<div class="ai-fine">GMI ' + aiNum(stats.gmi, '%') + ' · mediaan ' + aiNum(stats.median, '') + ' (IQR ' + aiNum(stats.p25, '') + '–' + aiNum(stats.p75, '') + ') · very-low &lt;3.0: ' + aiNum(stats.veryLow, '%') + ' · very-high &gt;13.9: ' + aiNum(stats.veryHigh, '%') + ' · min ' + aiNum(stats.min, '') + ' · max ' + aiNum(stats.max, '') + '</div>');
+    if (day && day.ok) {
+      h.push(renderAiDayReview(day));
+    }
     // Klinische doelen (ADA): TIR>=70, TBR<4, CV<36, GMI<7.
     h.push('<div class="ai-targets">' +
       aiTarget('TIR ≥70%', stats.tir != null && stats.tir >= 70) +
@@ -1629,6 +1638,9 @@
         h.push('<div class="ai-hbar" title="' + escapeHtml(title) + '"><span style="height:' + ht + 'px"></span><label>' + escapeHtml(p.day) + '</label></div>');
       });
       h.push('</div>');
+    }
+    if (stats.heatmap && stats.heatmap.length) {
+      h.push(renderAiHeatmap(stats.heatmap));
     }
     // Episode-samenvatting (uit de B-lijst, client-side).
     if (episodes.length) {
@@ -1672,9 +1684,72 @@
       if (e.qualityScore != null) meta.push('kwaliteit ' + e.qualityScore + '%');
       if (e.qualityFlags && e.qualityFlags.length) meta.push('flags: ' + e.qualityFlags.join(', '));
       meta.push(when);
-      h.push('<div class="ai-ep"><div class="ai-ep-head">' + escapeHtml(head) + '</div><div class="ai-meta">' + escapeHtml(meta.join(' · ')) + '</div></div>');
+      h.push('<div class="ai-ep ai-item"><div class="ai-ep-head ai-item-head"><span class="ai-chev">▸</span>' + escapeHtml(head) + '</div><div class="ai-meta">' + escapeHtml(meta.join(' · ')) + '</div>' + aiEpisodeDetailHtml(e) + '</div>');
     });
     box.innerHTML = h.join('');
+  }
+
+  function renderAiDayReview(day) {
+    var h = [];
+    var stat = day.stats || {};
+    var notable = day.notable || {};
+    var source = day.sourceHealth || {};
+    h.push('<div class="ai-sec">Vandaag</div>');
+    h.push('<div class="ai-fine">' + escapeHtml(day.summary || '') + '</div>');
+    h.push('<div class="ai-cards">');
+    h.push(aiCard('Vandaag TIR', aiNum(stat.tir, '%'), 'ok'));
+    h.push(aiCard('Vandaag laag', aiNum(stat.tbr, '%'), 'low'));
+    h.push(aiCard('High episodes', aiNum(day.highEpisodes ? day.highEpisodes.length : null, ''), 'high'));
+    h.push(aiCard('Low episodes', aiNum(day.lowEpisodes ? day.lowEpisodes.length : null, ''), 'low'));
+    h.push(aiCard('Burden <3.9', aiNum(notable.hypoBurden3_9, ''), 'low'));
+    h.push(aiCard('Datakwaliteit', source.level || '–', source.level === 'goed' ? 'ok' : ''));
+    h.push('</div>');
+    var notes = [];
+    if (notable.worstLow) notes.push('diepste low ' + notable.worstLow.nadirMmol + ' mmol om ' + aiTime(notable.worstLow.nadirAt));
+    if (notable.worstHigh) notes.push('hoogste high ' + notable.worstHigh.peakMmol + ' mmol om ' + aiTime(notable.worstHigh.peakAt));
+    if (source.longestGapMinutes != null) notes.push('langste datagat ' + source.longestGapMinutes + 'm');
+    if (day.highToLow && day.highToLow.length) notes.push(day.highToLow.length + ' high→low koppeling(en)');
+    if (notes.length) h.push('<div class="ai-fine">' + escapeHtml(notes.join(' · ')) + '</div>');
+    if (day.highEpisodes && day.highEpisodes.length) {
+      h.push('<div class="ai-sec">High episodes vandaag</div>');
+      day.highEpisodes.slice(0, 5).forEach(function (e) {
+        h.push('<div class="ai-ep"><div class="ai-ep-head">' + escapeHtml(aiTime(e.peakAt) + ' · piek ' + e.peakMmol + ' mmol · ' + e.durationMinutes + 'm') + '</div></div>');
+      });
+    }
+    if (day.highToLow && day.highToLow.length) {
+      h.push('<div class="ai-sec">High→low context</div>');
+      day.highToLow.slice(0, 5).forEach(function (x) {
+        h.push('<div class="ai-fine">' + escapeHtml('High ' + x.highPeakMmol + ' mmol → low ' + x.lowNadirMmol + ' mmol (' + x.minutesHighEndToLowPeak + 'm later)') + '</div>');
+      });
+    }
+    return h.join('');
+  }
+
+  function renderAiHeatmap(heatmap) {
+    var h = ['<div class="ai-sec">Heatmap laag-risico (weekdag × uur)</div>', '<div class="ai-heatmap">'];
+    heatmap.forEach(function (row) {
+      h.push('<div class="ai-hm-row"><span class="ai-hm-day">' + escapeHtml(row[0] ? row[0].day : '') + '</span>');
+      row.forEach(function (c) {
+        var pct = c.lowPct || 0;
+        var alpha = Math.min(1, pct / 20);
+        var title = c.day + ' ' + c.hour + ':00 · laag ' + pct + '% · hoog ' + (c.highPct || 0) + '% · TIR ' + (c.tir || 0) + '% · n=' + c.n;
+        h.push('<span class="ai-hm-cell" title="' + escapeHtml(title) + '" style="background:rgba(251,113,133,' + alpha.toFixed(2) + ')"></span>');
+      });
+      h.push('</div>');
+    });
+    h.push('<div class="ai-hm-axis"><span></span><span>0</span><span>6</span><span>12</span><span>18</span><span>23</span></div>');
+    h.push('</div>');
+    return h.join('');
+  }
+
+  function aiEpisodeDetailHtml(e) {
+    var rows = [];
+    rows.push('<div class="ai-d-row"><b>Tijdlijn:</b> piek ' + escapeHtml(aiTime(e.peakAt)) + ' → nadir ' + escapeHtml(aiTime(e.nadirAt)) + (e.recoveredAt ? ' → herstel ' + escapeHtml(aiTime(e.recoveredAt)) : '') + '</div>');
+    rows.push('<div class="ai-d-row"><b>Diepte/duur:</b> nadir ' + escapeHtml(aiNum(e.nadirMmol, '')) + ' mmol · <3.9 ' + escapeHtml(aiNum(e.timeBelow3_9Minutes, 'm')) + ' · burden ' + escapeHtml(aiNum(e.areaBelow3_9, '')) + '</div>');
+    rows.push('<div class="ai-d-row"><b>Herstel/context:</b> herstel ' + escapeHtml(aiNum(e.recoveryMinutes, 'm')) + ' · rebound ' + escapeHtml(e.reboundHigh ? aiNum(e.reboundPeakMmol, '') + ' mmol' : 'nee') + '</div>');
+    rows.push('<div class="ai-d-row"><b>Classificatie:</b> ' + escapeHtml([e.outcome, e.severity, e.shape, 'kwaliteit ' + aiNum(e.qualityScore, '%')].filter(Boolean).join(' · ')) + '</div>');
+    if (e.qualityFlags && e.qualityFlags.length) rows.push('<div class="ai-d-row"><b>Datakwaliteit:</b> ' + escapeHtml(e.qualityFlags.join(', ')) + '</div>');
+    return '<div class="ai-detail">' + rows.join('') + '</div>';
   }
 
   function aiCard(label, value, cls) {
