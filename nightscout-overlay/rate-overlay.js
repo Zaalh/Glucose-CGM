@@ -855,6 +855,24 @@
       '#cgm-ai-panel .ai-d-meta{font-size:10px;opacity:.65;margin-top:4px}',
       '#cgm-ai-panel .ai-d-id{font-size:9px;opacity:.4;margin-top:3px;font-family:monospace}',
       '#cgm-ai-panel .ai-empty{opacity:.6;font-style:italic}',
+      '#cgm-ai-panel .ai-tabs{display:flex;gap:4px;margin-bottom:8px}',
+      '#cgm-ai-panel .ai-tab{flex:1;font-size:11px;font-weight:700;padding:5px 4px;border:1px solid rgba(255,255,255,.18);border-radius:5px;background:#1e293b;color:#cbd5e1;cursor:pointer}',
+      '#cgm-ai-panel .ai-tab.active{background:#6366f1;color:#fff;border-color:#6366f1}',
+      '#cgm-ai-panel .ai-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:6px}',
+      '#cgm-ai-panel .ai-card{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:6px;padding:6px 4px;text-align:center}',
+      '#cgm-ai-panel .ai-card.ok{border-color:rgba(74,222,128,.5)}',
+      '#cgm-ai-panel .ai-card.low{border-color:rgba(251,113,133,.5)}',
+      '#cgm-ai-panel .ai-card.high{border-color:rgba(250,204,21,.5)}',
+      '#cgm-ai-panel .ai-card-v{font-size:15px;font-weight:900;line-height:1.1}',
+      '#cgm-ai-panel .ai-card-l{font-size:9px;opacity:.7;margin-top:2px}',
+      '#cgm-ai-panel .ai-fine{font-size:10px;opacity:.6;margin-bottom:4px}',
+      '#cgm-ai-panel .ai-hours{display:flex;align-items:flex-end;gap:2px;height:40px;margin-bottom:4px}',
+      '#cgm-ai-panel .ai-hbar{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%}',
+      '#cgm-ai-panel .ai-hbar span{width:100%;background:linear-gradient(180deg,#fb7185,#e11d48);border-radius:2px 2px 0 0;min-height:1px}',
+      '#cgm-ai-panel .ai-hbar label{font-size:8px;opacity:.5;margin-top:1px}',
+      '#cgm-ai-panel .ai-ep{border-top:1px solid rgba(255,255,255,.1);padding:5px 0}',
+      '#cgm-ai-panel .ai-ep-head{font-weight:700}',
+      '#cgm-ai-panel .ai-ep .ai-meta{font-size:10px;opacity:.6;margin-top:2px}',
       '@media(min-width:701px) and (max-width:1180px){#cgm-hypo-alert.has-carb{grid-template-columns:minmax(0,1fr) 138px;column-gap:8px}#cgm-carb-advice{padding-left:8px}#cgm-carb-advice .carb-title{font-size:11px}#cgm-carb-advice .carb-message{font-size:9px}}',
       '@media(max-width:700px){#cgm-mobile-dock{display:flex!important;flex-direction:column!important;width:100%!important;padding:8px 8px 0!important;box-sizing:border-box!important;gap:6px!important;clear:both!important}#cgm-mobile-dock #cgm-hypo-alert,#cgm-mobile-dock #cgm-carb-advice,#cgm-mobile-dock #cgm-rate-overlay,#cgm-mobile-dock #cgm-rate-toggle,#cgm-mobile-dock #cgm-rate-view-toggle,#cgm-mobile-dock #cgm-rate-history-nav{position:static!important;left:auto!important;right:auto!important;top:auto!important;bottom:auto!important;transform:none!important;box-sizing:border-box!important}#cgm-mobile-dock #cgm-hypo-alert,#cgm-mobile-dock #cgm-carb-advice{width:100%!important;max-width:100%!important;min-width:0!important;margin:0!important;gap:2px;padding:5px 7px}#cgm-mobile-dock #cgm-carb-advice .carb-title{font-size:12px}#cgm-mobile-dock #cgm-carb-advice .carb-message{font-size:10px;margin-left:6px}#cgm-mobile-dock #cgm-rate-overlay,#cgm-mobile-dock #cgm-rate-overlay.classic,#cgm-mobile-dock #cgm-rate-overlay.all{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:3px!important;width:100%!important;align-items:start!important;margin:0!important}#cgm-mobile-dock #cgm-rate-toggle,#cgm-mobile-dock #cgm-rate-view-toggle{display:inline-block!important;width:max-content!important;min-width:58px!important;margin:0 6px 0 0!important;padding:4px 7px!important;font-size:10px!important}#cgm-mobile-dock #cgm-rate-history-nav{width:max-content!important;max-width:100%!important;margin:0!important;font-size:10px!important;padding:2px 5px!important}#cgm-mobile-dock #cgm-hypo-alert .hypo-line{gap:4px;white-space:normal!important;text-align:center}#cgm-mobile-dock #cgm-hypo-alert .hypo-title{font-size:11px}#cgm-mobile-dock #cgm-hypo-alert .hypo-detail{font-size:16px}#cgm-mobile-dock #cgm-hypo-alert .hypo-rate{font-size:12px}#cgm-mobile-dock #cgm-hypo-alert .hypo-average{font-size:10px}#cgm-mobile-dock #cgm-hypo-alert .hypo-predict{font-size:9px;white-space:normal!important}#cgm-mobile-dock #cgm-hypo-alert .hypo-drop{font-size:9px;white-space:normal!important}#cgm-mobile-dock #cgm-rate-overlay .rate-card{padding:3px 16px 3px 5px;min-height:0}#cgm-mobile-dock #cgm-rate-overlay .rate-window{font-size:8px;line-height:1}#cgm-mobile-dock #cgm-rate-overlay .rate-main,#cgm-mobile-dock #cgm-rate-overlay .rate-card.primary .rate-main{font-size:12px;line-height:1.02;margin-top:1px}#cgm-mobile-dock #cgm-rate-overlay .rate-arrow{right:4px;font-size:14px}#cgm-mobile-dock #cgm-rate-overlay .rate-sub{font-size:7px;line-height:1.02;margin-top:1px}#cgm-stats-panel{grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:3px!important;width:98vw!important;padding:4px!important}#cgm-stats-panel .stat{padding:3px 4px}#cgm-stats-panel .stat-label{font-size:8px}#cgm-stats-panel .stat-value{font-size:11px}}'
     ].join('');
@@ -1227,13 +1245,22 @@
     var panel = document.createElement('div');
     panel.id = 'cgm-ai-panel';
     panel.innerHTML = [
-      '<div class="ai-row">',
-      '  <select id="cgm-ai-model" aria-label="AI model"></select>',
-      '  <button type="button" class="ai-run" id="cgm-ai-run">Review draaien</button>',
+      '<div class="ai-tabs">',
+      '  <button type="button" class="ai-tab active" data-tab="inzichten">Inzichten</button>',
+      '  <button type="button" class="ai-tab" data-tab="stats">Statistiek</button>',
+      '  <button type="button" class="ai-tab" data-tab="rapporten">Rapporten</button>',
       '</div>',
-      '<div class="ai-status" id="cgm-ai-status"></div>',
-      '<div class="ai-row ai-runrow"><label class="ai-runlabel" for="cgm-ai-run-select">Rapport:</label><select id="cgm-ai-run-select" aria-label="Kies een eerdere review"></select></div>',
-      '<div id="cgm-ai-body"></div>'
+      '<div class="ai-pane" data-pane="inzichten">',
+      '  <div class="ai-row">',
+      '    <select id="cgm-ai-model" aria-label="AI model"></select>',
+      '    <button type="button" class="ai-run" id="cgm-ai-run">Review draaien</button>',
+      '  </div>',
+      '  <div class="ai-status" id="cgm-ai-status"></div>',
+      '  <div class="ai-row ai-runrow"><label class="ai-runlabel" for="cgm-ai-run-select">Rapport:</label><select id="cgm-ai-run-select" aria-label="Kies een eerdere review"></select></div>',
+      '  <div id="cgm-ai-body"></div>',
+      '</div>',
+      '<div class="ai-pane" data-pane="stats" hidden><div id="cgm-ai-stats"><div class="ai-empty">Laden…</div></div></div>',
+      '<div class="ai-pane" data-pane="rapporten" hidden><div class="ai-empty">Binnenkort: dag- en triggerrapporten (worden door de AI gegenereerd).</div></div>'
     ].join('');
     document.body.appendChild(panel);
     panel.querySelector('#cgm-ai-run').addEventListener('click', runAiReviewFromUi);
@@ -1245,7 +1272,23 @@
       loadAiRun(aiSelectedRunId);
     });
     panel.querySelector('#cgm-ai-body').addEventListener('click', onAiItemClick);
+    panel.querySelector('.ai-tabs').addEventListener('click', onAiTabClick);
     return panel;
+  }
+
+  function onAiTabClick(event) {
+    var btn = event.target && event.target.closest ? event.target.closest('.ai-tab') : null;
+    if (!btn) return;
+    var tab = btn.getAttribute('data-tab');
+    var panel = document.getElementById('cgm-ai-panel');
+    if (!panel) return;
+    Array.prototype.forEach.call(panel.querySelectorAll('.ai-tab'), function (t) {
+      t.classList.toggle('active', t === btn);
+    });
+    Array.prototype.forEach.call(panel.querySelectorAll('.ai-pane'), function (p) {
+      p.hidden = p.getAttribute('data-pane') !== tab;
+    });
+    if (tab === 'stats') loadAiStats();
   }
 
   function toggleAiPanel() {
@@ -1433,6 +1476,76 @@
     var item = event.target && event.target.closest ? event.target.closest('.ai-item') : null;
     if (!item) return;
     item.classList.toggle('open');
+  }
+
+  // --- Statistiek-tab (A + B): deterministisch, puur Mongo-reads, geen LLM/quota.
+  var aiStatsLoaded = false;
+  function loadAiStats(force) {
+    if (aiStatsLoaded && !force) return;
+    aiStatsLoaded = true;
+    var box = document.getElementById('cgm-ai-stats');
+    if (box) box.innerHTML = '<div class="ai-empty">Laden…</div>';
+    Promise.all([
+      fetchWithTimeout('/_ai-review/stats?days=14', { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; }),
+      fetchWithTimeout('/_ai-review/episodes?limit=20', { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; })
+    ]).then(function (res) {
+      renderAiStats(res[0], res[1] && res[1].episodes ? res[1].episodes : []);
+    }).catch(function () {
+      aiStatsLoaded = false;
+      if (box) box.innerHTML = '<div class="ai-empty">Kon statistiek niet laden.</div>';
+    });
+  }
+
+  function aiNum(v, unit) { return (v === null || v === undefined) ? '–' : (v + (unit || '')); }
+
+  function renderAiStats(stats, episodes) {
+    var box = document.getElementById('cgm-ai-stats');
+    if (!box) return;
+    if (!stats || !stats.ok) { box.innerHTML = '<div class="ai-empty">Geen statistiek beschikbaar.</div>'; return; }
+    var h = [];
+    // Metric-kaartjes (TIR/TBR/TAR + gemiddelde/CV).
+    h.push('<div class="ai-sec">Laatste ' + stats.window.days + ' dagen · dekking ' + aiNum(stats.coveragePct, '%') + '</div>');
+    h.push('<div class="ai-cards">');
+    h.push(aiCard('In bereik (TIR)', aiNum(stats.tir, '%'), 'ok'));
+    h.push(aiCard('Onder (TBR)', aiNum(stats.tbr, '%'), 'low'));
+    h.push(aiCard('Boven (TAR)', aiNum(stats.tar, '%'), 'high'));
+    h.push(aiCard('Gemiddelde', aiNum(stats.mean, ''), ''));
+    h.push(aiCard('Variabiliteit (CV)', aiNum(stats.cv, '%'), ''));
+    h.push(aiCard('Lows', aiNum(stats.lows ? stats.lows.count : null, '') + (stats.lows && stats.lows.longestMin ? ' · ' + stats.lows.longestMin + 'm' : ''), 'low'));
+    h.push('</div>');
+    h.push('<div class="ai-fine">very-low &lt;3.0: ' + aiNum(stats.veryLow, '%') + ' · very-high &gt;13.9: ' + aiNum(stats.veryHigh, '%') + ' · min ' + aiNum(stats.min, '') + ' · max ' + aiNum(stats.max, '') + ' mmol/L</div>');
+    // Per-uur risicoprofiel (%low per uur) als mini-balken.
+    if (stats.perHour && stats.perHour.length) {
+      var maxLow = 0;
+      stats.perHour.forEach(function (p) { if (p.lowPct > maxLow) maxLow = p.lowPct; });
+      h.push('<div class="ai-sec">Wanneer dip ik (% laag per uur)</div>');
+      h.push('<div class="ai-hours">');
+      stats.perHour.forEach(function (p) {
+        var ht = maxLow > 0 ? Math.round((p.lowPct / maxLow) * 26) : 0;
+        var title = p.hour + ':00 · ' + p.lowPct + '% laag · gem ' + aiNum(p.mean, '') + ' (n=' + p.n + ')';
+        h.push('<div class="ai-hbar" title="' + escapeHtml(title) + '"><span style="height:' + ht + 'px"></span><label>' + (p.hour % 6 === 0 ? p.hour : '') + '</label></div>');
+      });
+      h.push('</div>');
+    }
+    // Reactieve-hypo episodes (B).
+    h.push('<div class="ai-sec">Reactieve-hypo episodes (' + episodes.length + ')</div>');
+    if (!episodes.length) h.push('<div class="ai-empty">Geen episodes.</div>');
+    episodes.forEach(function (e) {
+      var when = e.peakAt ? new Date(e.peakAt).toLocaleString() : '?';
+      var head = (e.peakMmol != null ? e.peakMmol : '?') + '→' + (e.nadirMmol != null ? e.nadirMmol : '?') + ' mmol · ' +
+        (e.minutesPeakToNadir != null ? e.minutesPeakToNadir + 'm' : '?') + (e.outcome ? ' · ' + e.outcome : '');
+      var meta = [];
+      if (e.dropFromPeakMmol != null) meta.push('daling ' + e.dropFromPeakMmol + ' mmol');
+      if (e.dropFromPeakPercent != null) meta.push(e.dropFromPeakPercent + '%');
+      if (e.maxFallRate30m != null) meta.push('max ' + e.maxFallRate30m + '/min');
+      meta.push(when);
+      h.push('<div class="ai-ep"><div class="ai-ep-head">' + escapeHtml(head) + '</div><div class="ai-meta">' + escapeHtml(meta.join(' · ')) + '</div></div>');
+    });
+    box.innerHTML = h.join('');
+  }
+
+  function aiCard(label, value, cls) {
+    return '<div class="ai-card ' + (cls || '') + '"><div class="ai-card-v">' + escapeHtml(String(value)) + '</div><div class="ai-card-l">' + escapeHtml(label) + '</div></div>';
   }
 
   function installAiReview() {

@@ -830,6 +830,30 @@ function startServer() {
       return
     }
 
+    if (url.pathname === '/ai-review/stats' && req.method === 'GET') {
+      try {
+        const days = parsePositiveInt(url.searchParams.get('days'), 14, 90)
+        const stats = await getAiStats(days)
+        res.end(JSON.stringify({ ok: true, ...stats }))
+      } catch (err) {
+        res.writeHead(500)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
+    if (url.pathname === '/ai-review/episodes' && req.method === 'GET') {
+      try {
+        const limit = parsePositiveInt(url.searchParams.get('limit'), 20, 200)
+        const episodes = await getAiEpisodes(limit)
+        res.end(JSON.stringify({ ok: true, episodes }))
+      } catch (err) {
+        res.writeHead(500)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
     if (url.pathname === '/ai-review/models' && req.method === 'GET') {
       try {
         const models = await listAiModels()
@@ -1070,6 +1094,79 @@ async function getAiRun(runId) {
       db.collection('ai_questions').find({ runId }).sort({ createdAt: -1 }).limit(50).toArray(),
     ])
     return { observations, questions }
+  } finally {
+    if (client) await client.close().catch(() => undefined)
+  }
+}
+
+// A — Statistiek/AGP-light. Deterministisch uit `entries`, geen LLM. mmol = sgv/18.0182.
+async function getAiStats(days) {
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    const to = Date.now()
+    const from = to - days * 86_400_000
+    const rows = await client.db().collection('entries')
+      .find({ type: 'sgv', sgv: { $exists: true }, date: { $gte: from } }, { projection: { _id: 0, sgv: 1, date: 1 } })
+      .toArray()
+    rows.sort((a, b) => a.date - b.date)
+    const tz = process.env.LIBREVIEW_TZ || 'Europe/Amsterdam'
+    const hourFmt = new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', hour12: false })
+    const hourAgg = Array.from({ length: 24 }, () => ({ sum: 0, n: 0, low: 0 }))
+    const vals = []
+    let inRange = 0, below = 0, veryLow = 0, above = 0, veryHigh = 0
+    let min = Infinity, max = -Infinity
+    let lowEpisodes = 0, longestLowMin = 0, curLowStart = null, prevLow = false
+    for (const r of rows) {
+      const mmol = Number(r.sgv) / MGDL_PER_MMOL
+      vals.push(mmol)
+      if (mmol < min) min = mmol
+      if (mmol > max) max = mmol
+      if (mmol >= 3.9 && mmol <= 10.0) inRange++
+      if (mmol < 3.9) below++
+      if (mmol < 3.0) veryLow++
+      if (mmol > 10.0) above++
+      if (mmol > 13.9) veryHigh++
+      const h = Number(hourFmt.format(new Date(r.date))) % 24
+      const a = hourAgg[h]; a.sum += mmol; a.n++; if (mmol < 3.9) a.low++
+      const isLow = mmol < 3.9
+      if (isLow && !prevLow) { lowEpisodes++; curLowStart = r.date }
+      if (!isLow && prevLow && curLowStart != null) longestLowMin = Math.max(longestLowMin, Math.round((r.date - curLowStart) / 60000))
+      prevLow = isLow
+    }
+    const n = vals.length
+    const mean = n ? vals.reduce((s, v) => s + v, 0) / n : 0
+    const sd = n ? Math.sqrt(vals.reduce((s, v) => s + (v - mean) * (v - mean), 0) / n) : 0
+    const pct = (x) => (n ? round((x / n) * 100, 1) : 0)
+    const expected = days * 1440
+    const perHour = hourAgg.map((a, h) => ({ hour: h, mean: a.n ? round(a.sum / a.n, 1) : null, lowPct: a.n ? round((a.low / a.n) * 100, 1) : 0, n: a.n }))
+    return {
+      window: { days, from: new Date(from).toISOString(), to: new Date(to).toISOString() },
+      count: n,
+      coveragePct: round(Math.min(100, expected ? (n / expected) * 100 : 0), 0),
+      mean: n ? round(mean, 1) : null, sd: n ? round(sd, 1) : null, cv: mean ? round((sd / mean) * 100, 0) : null,
+      tir: pct(inRange), tbr: pct(below), veryLow: pct(veryLow), tar: pct(above), veryHigh: pct(veryHigh),
+      min: n ? round(min, 1) : null, max: n ? round(max, 1) : null,
+      lows: { count: lowEpisodes, longestMin: longestLowMin },
+      perHour,
+    }
+  } finally {
+    if (client) await client.close().catch(() => undefined)
+  }
+}
+
+// B — Reactieve-hypo episodes. Deterministisch uit `reactive_hypo_episodes`, geen LLM.
+async function getAiEpisodes(limit) {
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    return await client.db().collection('reactive_hypo_episodes')
+      .find({}, { projection: { _id: 0, peakAt: 1, nadirAt: 1, peakMmol: 1, nadirMmol: 1, dropFromPeakMmol: 1, dropFromPeakPercent: 1, minutesPeakToNadir: 1, maxFallRate30m: 1, outcome: 1, startMmol: 1, endMmol: 1, minutesPeakToUnder40: 1, minutesPeakToUnder45: 1 } })
+      .sort({ peakAt: -1 })
+      .limit(limit)
+      .toArray()
   } finally {
     if (client) await client.close().catch(() => undefined)
   }
