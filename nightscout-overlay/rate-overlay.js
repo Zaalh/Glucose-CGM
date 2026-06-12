@@ -838,6 +838,8 @@
       '#cgm-ai-panel .ai-run{font-size:12px;font-weight:800;padding:5px 10px;border-radius:5px;border:1px solid rgba(255,255,255,.25);background:#6366f1;color:#fff;cursor:pointer}',
       '#cgm-ai-panel .ai-run[disabled]{opacity:.5;cursor:default}',
       '#cgm-ai-panel .ai-status{font-size:11px;opacity:.85;margin-bottom:8px;min-height:14px}',
+      '#cgm-ai-panel .ai-runrow{margin-bottom:8px}',
+      '#cgm-ai-panel .ai-runlabel{font-size:11px;opacity:.7;margin-right:6px;white-space:nowrap}',
       '#cgm-ai-panel .ai-sec{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;opacity:.7;margin:8px 0 4px}',
       '#cgm-ai-panel .ai-item{border-top:1px solid rgba(255,255,255,.1);padding:6px 0;cursor:pointer}',
       '#cgm-ai-panel .ai-item:hover{background:rgba(255,255,255,.04)}',
@@ -1205,6 +1207,7 @@
   // reeds-opgehaalde data komt: geen extra LLM-call / Ollama-quota.
   var aiLatestObs = [];
   var aiLatestQ = [];
+  var aiSelectedRunId = null;
 
   function ensureAiToggle() {
     var existing = document.getElementById('cgm-ai-toggle');
@@ -1229,12 +1232,17 @@
       '  <button type="button" class="ai-run" id="cgm-ai-run">Review draaien</button>',
       '</div>',
       '<div class="ai-status" id="cgm-ai-status"></div>',
+      '<div class="ai-row ai-runrow"><label class="ai-runlabel" for="cgm-ai-run-select">Rapport:</label><select id="cgm-ai-run-select" aria-label="Kies een eerdere review"></select></div>',
       '<div id="cgm-ai-body"></div>'
     ].join('');
     document.body.appendChild(panel);
     panel.querySelector('#cgm-ai-run').addEventListener('click', runAiReviewFromUi);
     panel.querySelector('#cgm-ai-model').addEventListener('change', function (e) {
       try { localStorage.setItem(AI_MODEL_KEY, e.target.value); } catch (err) {}
+    });
+    panel.querySelector('#cgm-ai-run-select').addEventListener('change', function (e) {
+      aiSelectedRunId = e.target.value;
+      loadAiRun(aiSelectedRunId);
     });
     panel.querySelector('#cgm-ai-body').addEventListener('click', onAiItemClick);
     return panel;
@@ -1245,12 +1253,55 @@
     var open = panel.classList.toggle('open');
     if (open) {
       loadAiModels();
-      loadAiLatest();
-      if (!aiLatestTimer) aiLatestTimer = window.setInterval(loadAiLatest, 60000);
+      loadAiRuns(true);
+      // Ververst alleen de run-lijst (selectie/inhoud blijven), zodat nieuwe
+      // achtergrond-runs in de selector verschijnen zonder je weg te trekken.
+      if (!aiLatestTimer) aiLatestTimer = window.setInterval(function () { loadAiRuns(false); }, 60000);
     } else if (aiLatestTimer) {
       window.clearInterval(aiLatestTimer);
       aiLatestTimer = null;
     }
+  }
+
+  // Vult de run-selector (puur Mongo-reads, geen LLM/quota). selectLatest=true
+  // springt naar de nieuwste run (bij openen of na "Review draaien").
+  function loadAiRuns(selectLatest) {
+    fetchWithTimeout('/_ai-review/runs', { cache: 'no-store' }, 12000)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (json) {
+        var sel = document.getElementById('cgm-ai-run-select');
+        if (!sel) return;
+        var runs = json && Array.isArray(json.runs) ? json.runs : [];
+        if (!runs.length) {
+          // Alleen oude data zonder runId: verberg selector, val terug op latest.
+          sel.style.display = 'none';
+          loadAiLatest();
+          return;
+        }
+        sel.style.display = '';
+        sel.innerHTML = runs.map(function (run) {
+          var label = (run.createdAt ? new Date(run.createdAt).toLocaleString() : '?') +
+            ' · ' + (run.model || '?') + ' · ' + (run.observations || 0) + ' obs';
+          return '<option value="' + escapeHtml(run.runId) + '">' + escapeHtml(label) + '</option>';
+        }).join('');
+        var stillPresent = aiSelectedRunId && runs.some(function (run) { return run.runId === aiSelectedRunId; });
+        var target = (selectLatest || !stillPresent) ? runs[0].runId : aiSelectedRunId;
+        sel.value = target;
+        if (target !== aiSelectedRunId) {
+          aiSelectedRunId = target;
+          loadAiRun(target);
+        }
+      })
+      .catch(function () {});
+  }
+
+  function loadAiRun(runId) {
+    fetchWithTimeout('/_ai-review/run?id=' + encodeURIComponent(runId), { cache: 'no-store' }, 12000)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (json) {
+        if (json && json.ok) renderAiLatest(json.observations || [], json.questions || []);
+      })
+      .catch(function () {});
   }
 
   function setAiStatus(text) {
@@ -1302,7 +1353,7 @@
         else setAiStatus('Klaar — model ' + (res.json.model || '?') + ', ' +
           (res.json.observations ? res.json.observations.length : 0) + ' observaties, ' +
           (res.json.questions ? res.json.questions.length : 0) + ' vragen.');
-        loadAiLatest();
+        loadAiRuns(true);
       })
       .catch(function (err) { setAiStatus('Fout: ' + (err && err.message ? err.message : err)); })
       .then(function () { if (runBtn) runBtn.disabled = false; });

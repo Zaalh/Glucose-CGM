@@ -801,6 +801,35 @@ function startServer() {
       return
     }
 
+    if (url.pathname === '/ai-review/runs' && req.method === 'GET') {
+      try {
+        const limit = parsePositiveInt(url.searchParams.get('limit'), 50, 200)
+        const runs = await getAiRuns(limit)
+        res.end(JSON.stringify({ ok: true, runs }))
+      } catch (err) {
+        res.writeHead(500)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
+    if (url.pathname === '/ai-review/run' && req.method === 'GET') {
+      try {
+        const id = url.searchParams.get('id')
+        if (!id) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ ok: false, message: 'runId (id) ontbreekt.' }))
+          return
+        }
+        const result = await getAiRun(id)
+        res.end(JSON.stringify({ ok: true, runId: id, ...result }))
+      } catch (err) {
+        res.writeHead(500)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
     if (url.pathname === '/ai-review/models' && req.method === 'GET') {
       try {
         const models = await listAiModels()
@@ -1006,6 +1035,41 @@ async function getLatestAiReview(limit) {
       db.collection('ai_questions').find(filter).sort({ createdAt: -1 }).limit(limit).toArray(),
     ])
     return { observations, questions, runId }
+  } finally {
+    if (client) await client.close().catch(() => undefined)
+  }
+}
+
+// Lijst van review-runs (voor de run-selector). Puur Mongo-aggregatie, geen LLM.
+async function getAiRuns(limit) {
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    const runs = await client.db().collection('ai_observations').aggregate([
+      { $match: { runId: { $ne: null } } },
+      { $group: { _id: '$runId', createdAt: { $max: '$createdAt' }, model: { $last: '$model' }, observations: { $sum: 1 } } },
+      { $sort: { createdAt: -1 } },
+      { $limit: limit },
+    ]).toArray()
+    return runs.map((r) => ({ runId: r._id, createdAt: r.createdAt, model: r.model, observations: r.observations }))
+  } finally {
+    if (client) await client.close().catch(() => undefined)
+  }
+}
+
+// Observaties + vragen van één specifieke run. Puur Mongo-reads, geen LLM.
+async function getAiRun(runId) {
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    const db = client.db()
+    const [observations, questions] = await Promise.all([
+      db.collection('ai_observations').find({ runId }).sort({ createdAt: -1 }).limit(50).toArray(),
+      db.collection('ai_questions').find({ runId }).sort({ createdAt: -1 }).limit(50).toArray(),
+    ])
+    return { observations, questions }
   } finally {
     if (client) await client.close().catch(() => undefined)
   }
