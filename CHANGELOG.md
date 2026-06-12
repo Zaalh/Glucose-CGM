@@ -248,7 +248,7 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   losse hand-gemaakte map, zodat `prediction_snapshots.features` exact dezelfde velden
   bevat als de V2-detector (incl. `acceleration`, `effectiveLagMinutes`, herstelsignalen).
 - `.gitignore` uitgebreid (`dist/`, `.env*`, `nightscout-mongo-data/`, `.npm-cache/`,
-  `.claude/`, `influxdb-data/`, `grafana-data/`) en `.env.*.example` expliciet
+  `influxdb-data/`, `grafana-data/`) en `.env.*.example` expliciet
   trackbaar gemaakt.
 - Pattern-correctiegewicht schaalt nu tot ~30 min (`w = min(1, h/30)`), samengevoegd
   met de horizon-saturatie.
