@@ -23,14 +23,16 @@ betekenisvoller te maken dan alleen "samenvatten achteraf".
 | Verdiepte hypo-analyse | Eerste slice gebouwd | Deterministische episode-metrics, severity, burden, recovery, rebound |
 | CGM-datakwaliteit/artefacten | Eerste slice gebouwd | Quality flags/score voor datagaten, single-point lows, lag, mogelijke compression lows |
 | SmartXdrip-achtige review-workflow | Deels gebouwd | Dagreview, high episodes, high->low context en heatmap live; History/detail nog open |
+| SmartXdrip productlagen | Te bouwen | Reminder core, settings/source-health, notes en niet-klinische UI-taal |
 | Safety guardrails + evaluatie | Te bouwen | Vooral belangrijk voor chat en narratieve rapporten |
 
 **Nieuwe prioriteit na online review (12 juni 2026):**
 1. Verdiepte hypo-analyse + CGM-datakwaliteit (sectie 15/16).
 2. Event-/maaltijdlogging uitbreiden (sectie 14, gekoppeld aan 15).
 3. History + echte High/Low Episode detail-workflow (sectie 19).
-4. Safety guardrails + evaluatie (sectie 17/18).
-5. Pas daarna interactieve chat (sectie 13), omdat elk bericht quota kost en medisch
+4. SmartXdrip productlagen: reminders/source-health/settings/notes (sectie 20).
+5. Safety guardrails + evaluatie (sectie 17/18).
+6. Pas daarna interactieve chat (sectie 13), omdat elk bericht quota kost en medisch
    gevoeliger is dan deterministische rapportage.
 
 ---
@@ -815,6 +817,162 @@ Aanbevolen volgorde:
 3. History-tab met dagcards en datumselectie.
 4. Pattern cards op Inzichten-tab.
 5. Optioneel: persistente high-episode builder als live detectie te traag/onhandig wordt.
+
+---
+
+## 20. SmartXdrip productlagen die nog missen — plan
+
+**Status: niet gebouwd.** Deze sectie vangt de onderdelen uit SmartXdrip die niet alleen
+over analyse gaan, maar over productgedrag: local helper reminders, source-health tasks,
+settings/data-source/storage, notities vanuit History en begrijpelijke taal. Niet alles
+hoeft in deze overlay groot gebouwd te worden, maar het plan moet ze expliciet meenemen.
+
+### 20.1 Local helper reminders / Alerting Core
+SmartXdrip noemt een **Alerting Core** met lokale glucose reminder rules, notification,
+sound, vibration en snooze foundations. Voor deze repo geldt een hardere safety-grens:
+Nightscout/CGM blijven bron en bestaande alarmworkflow; deze laag mag hooguit
+**helper-reminders** tonen.
+
+Mogelijke eerste slice:
+- `helper_reminders` collectie:
+  `{ id, createdAt, type, title, message, severity, source, expiresAt, snoozedUntil,
+     relatedEntryId, relatedEpisodeKey, acknowledgedAt }`.
+- Deterministische triggers, geen LLM:
+  - source stale / geen recente CGM-data;
+  - lang datagat;
+  - review later: ernstige episode zonder feedback;
+  - "dagrapport beschikbaar" of "moeilijke dag gemarkeerd".
+- UI:
+  - kleine banner/chip in overlay;
+  - acties: `snooze 30m`, `gezien`, `open detail`.
+
+Niet doen:
+- Geen behandeladvies.
+- Geen vervanging voor hypo-/Nightscout-alarmen.
+- Geen automatische acties op basis van LLM.
+
+### 20.2 Source-health tasks
+SmartXdrip behandelt sync/source health als productonderdeel. Wij hebben al coverage en
+laatste meting, maar nog geen expliciete health-tasks.
+
+Server:
+- `GET /ai-review/source-health`
+  - laatste entry tijd + leeftijd;
+  - expected interval vs median interval;
+  - langste gat 24h/14d;
+  - coverage vandaag/14d;
+  - status `good` / `watch` / `bad`;
+  - reasons[] zoals `stale`, `large_gap`, `low_coverage`.
+
+UI:
+- Altijd zichtbaar in Home/Insights of bovenaan Statistiek.
+- Als status `bad`: rapporten/chat tonen "data onvolledig" en zijn minder stellig.
+- Als status `stale`: helper-reminder, geen medische alarmtekst.
+
+### 20.3 Settings / data-source / storage laag
+SmartXdrip heeft Settings voor display, target range, storage, sync en app info. In deze
+repo zit veel nog in env/config. Voor de overlay is een kleine instellingenlaag genoeg:
+
+- target range zichtbaar/configureerbaar:
+  - low threshold default 3.9;
+  - very-low 3.0;
+  - high 10.0;
+  - very-high 13.9.
+- vensters:
+  - stats: 7/14/30/90 dagen;
+  - episode context: 1h/2h/4h rondom event;
+  - History-lijst: 7/14/30 dagen.
+- opslag/retentie tonen:
+  - AI observations/reports retentie;
+  - chat wel/niet opslaan;
+  - localStorage-gebruik voor modelkeuze/chatgeschiedenis.
+
+Belangrijk: instellingen mogen de veiligheidskritische detector niet stilletjes wijzigen.
+Detector-tuning blijft via aparte scripts/evaluatie.
+
+### 20.4 Notes / event logging vanuit History
+SmartXdrip-docs vragen expliciet of users notes voor meals/exercise/medication moeten
+kunnen toevoegen. Voor reactieve hypo is dit een kernfeature.
+
+UI-punten:
+- Vanuit dagreview: "notitie toevoegen".
+- Vanuit episode-detail: "maaltijd/snack/symptoom/beweging/stress/alcohol/vingerprik".
+- Snelle presets:
+  - maaltijd/snack;
+  - voelde hypo;
+  - vingerprik bevestigd;
+  - beweging;
+  - stress/slaap/ziekte;
+  - actie genomen / gegeten.
+
+Server/datamodel:
+- Breid `user_feedback` uit of maak `cgm_events`:
+  `{ createdAt, eventAt, type, note, carbLevel, proteinFat, exerciseIntensity,
+     symptoms[], fingerstickMmol, relatedEpisodeKey, relatedEntryId }`.
+- Koppel events aan episodes via tijdvenster:
+  - maaltijd -> low binnen 4 uur;
+  - symptoom -> nearby low;
+  - vingerprik -> quality/Whipple-classificatie.
+
+### 20.5 Episode chart UX
+SmartXdrip episode pages tonen een event met omliggende curve. Onze overlay moet dit niet
+als ruwe tabel tonen, maar als compacte reviewkaart.
+
+Low Episode chart:
+- 2h voor piek t/m 2h na herstel/nadir;
+- low-zone shading (<3.9 en <3.0);
+- markers: peak, nadir, recovered;
+- labels: severity, burden, quality;
+- "mogelijk artefact" prominent als flags dat aangeven.
+
+High Episode chart:
+- 2h voor start t/m 4h na end;
+- high-zone shading (>10 en >13.9);
+- markers: start, peak, end/recovered;
+- label als er een low volgt binnen 4h.
+
+Implementatie:
+- Simpele SVG/polyline in `rate-overlay.js` is genoeg.
+- Geen chart-library nodig voor eerste slice.
+- Altijd escape/sanitize; geen raw HTML uit data.
+
+### 20.6 Niet-klinische UI-taal
+SmartXdrip vraagt expliciet welke termen duidelijk zijn voor gewone gebruikers. Onze UI
+moet interne metrics vertalen:
+
+| Intern | UI-label |
+|--------|----------|
+| `areaBelow3_9` | Hypo-belasting (diepte x duur) |
+| `areaAbove10` | High-belasting (hoogte x duur) |
+| `nadir` | Laagste punt |
+| `peak` | Hoogste punt |
+| `qualityFlags` | Datakwaliteit |
+| `possible_compression_low` | Mogelijk sensor-/drukartefact |
+| `lag_sensitive` | Snelle verandering; CGM kan achterlopen |
+| `postprandialCandidate` | Mogelijk na maaltijd |
+
+Regel: technische veldnamen mogen in API blijven, maar niet als primaire UI-tekst.
+
+### 20.7 Navigatieflow expliciet maken
+De beoogde flow wordt:
+
+1. **AI/Inzichten**: dagelijkse banner + pattern cards.
+2. **History**: kies moeilijke dag.
+3. **Dagdetail**: high/low markers + dagstats.
+4. **Episode detail**: low/high detail met curve en context.
+5. **Notitie/feedback**: gebruiker voegt context toe.
+6. **Rapport/chat**: gebruikt die context later voor duiding.
+
+Deze flow is belangrijker dan extra losse metrics: het maakt inzichten terugvindbaar en
+actiegericht zonder behandeladvies te worden.
+
+### 20.8 Prioriteit
+Aanbevolen volgorde na sectie 19:
+1. Episode chart UX + niet-klinische labels.
+2. Notes/event logging vanuit episode-detail.
+3. Source-health endpoint + banner.
+4. History settings: 7/14/30 dagen en target range zichtbaar.
+5. Helper-reminders als aparte, expliciet niet-medische laag.
 
 ---
 
