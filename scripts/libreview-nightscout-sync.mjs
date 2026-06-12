@@ -5,7 +5,7 @@ import { MongoClient } from 'mongodb'
 import { buildHypoFeatures, cleanGlucoseTimeline } from './lib/hypo-features.mjs'
 import { evaluateReactiveHypoRiskV2 } from './lib/reactive-hypo-detector.mjs'
 import { findSimilarEpisodes, patternFromFeatures } from './lib/episode-similarity.mjs'
-import { aiRouterConfigured, resolveAiRouterConfig, runAiReview } from './lib/ai-review-core.mjs'
+import { aiRouterConfigured, resolveAiRouterConfig, runAiReview, runAiReport } from './lib/ai-review-core.mjs'
 
 const LIBRE_API = 'https://api-eu.libreview.io'
 const DEFAULT_INTERVAL_SECONDS = 60
@@ -854,6 +854,30 @@ function startServer() {
       return
     }
 
+    if (url.pathname === '/ai-review/report' && req.method === 'POST') {
+      try {
+        const body = await readJsonBody(req)
+        const result = await runAiReportOnce({ type: body && body.type })
+        res.end(JSON.stringify(result))
+      } catch (err) {
+        res.writeHead(err && err.statusCode ? err.statusCode : 500)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
+    if (url.pathname === '/ai-review/reports' && req.method === 'GET') {
+      try {
+        const limit = parsePositiveInt(url.searchParams.get('limit'), 20, 100)
+        const reports = await getAiReports(limit)
+        res.end(JSON.stringify({ ok: true, reports }))
+      } catch (err) {
+        res.writeHead(500)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
     if (url.pathname === '/ai-review/models' && req.method === 'GET') {
       try {
         const models = await listAiModels()
@@ -1151,6 +1175,58 @@ async function getAiStats(days) {
       lows: { count: lowEpisodes, longestMin: longestLowMin },
       perHour,
     }
+  } finally {
+    if (client) await client.close().catch(() => undefined)
+  }
+}
+
+// D/C — Genereert één narratief rapport (1 LLM-call) achter dezelfde lock als de
+// review, zodat de free-tier nooit door spam wordt geraakt.
+async function runAiReportOnce({ type } = {}) {
+  if (aiReviewRunning) {
+    const err = new Error('Er draait al een AI-taak.')
+    err.statusCode = 409
+    throw err
+  }
+  const since = Date.now() - aiReviewLastAt
+  if (aiReviewLastAt && since < AI_REVIEW_MIN_INTERVAL_MS) {
+    const err = new Error(`Te snel achter elkaar; wacht ${Math.ceil((AI_REVIEW_MIN_INTERVAL_MS - since) / 1000)}s.`)
+    err.statusCode = 429
+    throw err
+  }
+  const aiRouter = resolveAiRouterConfig()
+  if (!aiRouterConfigured(aiRouter)) {
+    return { ok: true, skipped: true, reason: 'Geen AI-provider geconfigureerd.' }
+  }
+  aiReviewRunning = true
+  let client = null
+  try {
+    const [stats, episodes] = await Promise.all([getAiStats(14), getAiEpisodes(20)])
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    const db = client.db()
+    const feedback = await db.collection('user_feedback')
+      .find({}, { projection: { createdAt: 1, type: 1, note: 1, relatedEntryIdentifier: 1, relatedEntryMmol: 1, riskAtFeedback: 1 } })
+      .sort({ createdAt: -1 }).limit(20).toArray()
+    const result = await runAiReport({ db, aiRouter, stats, episodes, feedback, type })
+    aiReviewLastAt = Date.now()
+    return result
+  } finally {
+    aiReviewRunning = false
+    if (client) await client.close().catch(() => undefined)
+  }
+}
+
+async function getAiReports(limit) {
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    return await client.db().collection('ai_reports')
+      .find({}, { projection: { 'stats.perHour': 0 } })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .toArray()
   } finally {
     if (client) await client.close().catch(() => undefined)
   }

@@ -22,6 +22,8 @@ async function ensureAiIndexes(db) {
   await db.collection('ai_observations').createIndex({ runId: 1 })
   await db.collection('ai_questions').createIndex({ createdAt: -1 })
   await db.collection('ai_questions').createIndex({ runId: 1 })
+  await db.collection('ai_reports').createIndex({ createdAt: -1 })
+  await db.collection('ai_reports').createIndex({ type: 1 })
   aiIndexesEnsured = true
 }
 
@@ -30,6 +32,7 @@ async function pruneOldAiDocs(db) {
   await Promise.all([
     db.collection('ai_observations').deleteMany({ createdAt: { $lt: cutoff } }),
     db.collection('ai_questions').deleteMany({ createdAt: { $lt: cutoff } }),
+    db.collection('ai_reports').deleteMany({ createdAt: { $lt: cutoff } }),
   ])
 }
 
@@ -295,4 +298,76 @@ export async function runAiReview({ db, aiRouter, dryRun = false, force = false,
   }
 
   return { ok: true, dryRun, runId, provider: ai.provider, model: ai.model, observations, questions }
+}
+
+// --- Rapporten (C/D): narratief dag-/triggerverslag bovenop de cijfers --------
+const AI_REPORT_TYPES = new Set(['daily', 'weekly', 'trigger'])
+
+function reportSystemPrompt() {
+  return [
+    'Je schrijft een kort, feitelijk CGM-overzichtsrapport voor één gebruiker met reactieve hypoglykemie (geen insuline, geen closed-loop).',
+    'Schrijf in het Nederlands. Wees beschrijvend en voorzichtig: GEEN medisch advies, geen voorschriften, geen alarm-/actiebeslissingen.',
+    'Gebruik UITSLUITEND de meegegeven cijfers (statistiek, episodes, feedback). Verzin niets en noem geen waarden die er niet staan.',
+    'Benoem concrete patronen: op welke tijdstippen lows clusteren (uit perHour), piek→dal-gedrag uit de episodes, en mogelijke samenhang met gemelde feedback.',
+    'Je mag algemeen bekende, niet-persoonlijke context noemen (bv. dat eiwit/vet vóór koolhydraten de piek vertraagt) maar formuleer dit als observatie, niet als instructie.',
+    'Antwoord UITSLUITEND met geldige JSON: {"title":"...","body":"..."}. body = 3–6 korte zinnen of bullets in platte tekst (geen markdown-koppen).',
+  ].join('\n')
+}
+
+function reportUserPrompt({ stats, episodes, feedback, type }) {
+  return JSON.stringify({
+    reportType: type,
+    stats: stats || null,
+    episodes: Array.isArray(episodes) ? episodes.slice(0, 20) : [],
+    recentUserFeedback: Array.isArray(feedback) ? feedback.map(compactFeedback) : [],
+  })
+}
+
+// Genereert één narratief rapport (1 LLM-call) en slaat het op in `ai_reports`.
+// stats/episodes/feedback worden door de aanroeper (server) aangeleverd.
+export async function runAiReport({ db, aiRouter, stats, episodes = [], feedback = [], type = 'daily' } = {}) {
+  if (!aiRouterConfigured(aiRouter)) {
+    return { ok: true, skipped: true, reason: 'Geen AI-provider geconfigureerd.' }
+  }
+  const t = AI_REPORT_TYPES.has(type) ? type : 'daily'
+  const messages = [
+    { role: 'system', content: reportSystemPrompt() },
+    { role: 'user', content: reportUserPrompt({ stats, episodes, feedback, type: t }) },
+  ]
+  let result = await callAiRouter(aiRouter, { temperature: 0.2, response_format: { type: 'json_object' }, messages })
+  let parsed
+  try {
+    parsed = JSON.parse(result.content)
+  } catch {
+    result = await callAiRouter(aiRouter, {
+      temperature: 0,
+      response_format: { type: 'json_object' },
+      messages: [
+        ...messages,
+        { role: 'assistant', content: String(result.content).slice(0, 2000) },
+        { role: 'user', content: 'Je vorige antwoord was geen geldige JSON. Geef nu UITSLUITEND {"title":"...","body":"..."}.' },
+      ],
+    })
+    try {
+      parsed = JSON.parse(result.content)
+    } catch {
+      throw new Error(`AI-provider ${result.provider} gaf geen geldige JSON terug (rapport).`)
+    }
+  }
+
+  const doc = {
+    createdAt: new Date().toISOString(),
+    runId: randomUUID(),
+    model: result.model,
+    source: sourceName(result),
+    type: t,
+    period: stats && stats.window ? stats.window : null,
+    stats: stats || null,
+    title: String(parsed?.title || 'Rapport').slice(0, 200),
+    body: String(parsed?.body || '').slice(0, 4000),
+  }
+  await ensureAiIndexes(db)
+  await db.collection('ai_reports').insertOne(doc)
+  await pruneOldAiDocs(db)
+  return { ok: true, provider: result.provider, model: result.model, report: doc }
 }

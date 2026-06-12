@@ -1260,10 +1260,16 @@
       '  <div id="cgm-ai-body"></div>',
       '</div>',
       '<div class="ai-pane" data-pane="stats" hidden><div id="cgm-ai-stats"><div class="ai-empty">Laden…</div></div></div>',
-      '<div class="ai-pane" data-pane="rapporten" hidden><div class="ai-empty">Binnenkort: dag- en triggerrapporten (worden door de AI gegenereerd).</div></div>'
+      '<div class="ai-pane" data-pane="rapporten" hidden>',
+      '  <div class="ai-row"><button type="button" class="ai-run" id="cgm-ai-genreport">Genereer dagrapport</button></div>',
+      '  <div class="ai-status" id="cgm-ai-repstatus"></div>',
+      '  <div id="cgm-ai-reports"><div class="ai-empty">Nog geen rapporten.</div></div>',
+      '</div>'
     ].join('');
     document.body.appendChild(panel);
     panel.querySelector('#cgm-ai-run').addEventListener('click', runAiReviewFromUi);
+    panel.querySelector('#cgm-ai-genreport').addEventListener('click', generateAiReport);
+    panel.querySelector('#cgm-ai-reports').addEventListener('click', onAiItemClick);
     panel.querySelector('#cgm-ai-model').addEventListener('change', function (e) {
       try { localStorage.setItem(AI_MODEL_KEY, e.target.value); } catch (err) {}
     });
@@ -1289,6 +1295,55 @@
       p.hidden = p.getAttribute('data-pane') !== tab;
     });
     if (tab === 'stats') loadAiStats();
+    if (tab === 'rapporten') loadAiReports();
+  }
+
+  // --- Rapporten-tab (C/D): genereren kost 1 LLM-call; lezen is gratis.
+  var aiReportsLoaded = false;
+  function setRepStatus(t) { var el = document.getElementById('cgm-ai-repstatus'); if (el) el.textContent = t || ''; }
+
+  function loadAiReports(force) {
+    if (aiReportsLoaded && !force) return;
+    aiReportsLoaded = true;
+    fetchWithTimeout('/_ai-review/reports?limit=20', { cache: 'no-store' }, 15000)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (json) { if (json && json.ok) renderAiReports(json.reports || []); })
+      .catch(function () { aiReportsLoaded = false; });
+  }
+
+  function generateAiReport() {
+    var btn = document.getElementById('cgm-ai-genreport');
+    if (btn) btn.disabled = true;
+    setRepStatus('Rapport genereren… (kan ~10s duren)');
+    fetchWithTimeout('/_ai-review/report', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'daily' })
+    }, 120000)
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, json: j }; }); })
+      .then(function (res) {
+        if (!res.ok || !res.json || res.json.ok === false) { setRepStatus('Fout: ' + ((res.json && res.json.message) || 'onbekend')); return; }
+        if (res.json.skipped) { setRepStatus('Overgeslagen: ' + res.json.reason); return; }
+        setRepStatus('Klaar — model ' + ((res.json.report && res.json.report.model) || res.json.model || '?'));
+        loadAiReports(true);
+      })
+      .catch(function (err) { setRepStatus('Fout: ' + (err && err.message ? err.message : err)); })
+      .then(function () { if (btn) btn.disabled = false; });
+  }
+
+  function renderAiReports(reports) {
+    var box = document.getElementById('cgm-ai-reports');
+    if (!box) return;
+    if (!reports.length) { box.innerHTML = '<div class="ai-empty">Nog geen rapporten. Klik "Genereer dagrapport".</div>'; return; }
+    var h = [];
+    reports.forEach(function (rep) {
+      var meta = (rep.createdAt ? new Date(rep.createdAt).toLocaleString() : '') + ' · ' + (rep.type || '') + (rep.model ? ' · ' + rep.model : '');
+      var body = escapeHtml(rep.body || '').replace(/\n/g, '<br>');
+      var statsLine = rep.stats ? '<div class="ai-d-meta">TIR ' + aiNum(rep.stats.tir, '%') + ' · CV ' + aiNum(rep.stats.cv, '%') +
+        ' · lows ' + (rep.stats.lows ? rep.stats.lows.count : '–') + '</div>' : '';
+      h.push('<div class="ai-item"><div class="ai-item-head"><span class="ai-chev">▸</span><span class="ai-item-title">' +
+        escapeHtml(rep.title || 'Rapport') + '</span></div><div class="ai-meta">' + escapeHtml(meta) + '</div>' +
+        '<div class="ai-detail"><div class="ai-d-row">' + body + '</div>' + statsLine + '</div></div>');
+    });
+    box.innerHTML = h.join('');
   }
 
   function toggleAiPanel() {
