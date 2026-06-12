@@ -315,7 +315,7 @@ meta-regel getoond).
 > nul extra LLM-calls, nul GPU-quota.** Géén enkele klik in de detailweergave mag Ollama
 > aanroepen. Alleen "Review draaien" (en optioneel 11.3) raakt de quota.
 
-### 11.1 Inline uitklap (minimaal — aanbevolen als eerste stap)
+### 11.1 Inline uitklap (minimaal — aanbevolen als eerste stap) — **GEDAAN (live)**
 - Elk lijst-item (`.ai-item`) wordt klikbaar; klik toggelt een detail-blok eronder
   (accordion). Tweede klik klapt weer dicht.
 - Detail toont **alle opgeslagen velden**, leesbaar en volledig (niet afgekapt):
@@ -330,7 +330,7 @@ meta-regel getoond).
 - Bestand: alleen `nightscout-overlay/rate-overlay.js` (`renderAiLatest` uitbreiden +
   click-to-expand + wat detail-CSS). Geen server-/nginx-wijziging.
 
-### 11.2 Run-historie bladeren (optioneel — ook nul LLM-kost)
+### 11.2 Run-historie bladeren (optioneel — ook nul LLM-kost) — **GEDAAN (live)**
 Nu toont het paneel alleen de laatste run. Om **oudere rapporten** in te zien:
 - Nieuw endpoint `GET /ai-review/runs` → lijst van runs: distinct `runId` +
   `createdAt` + `model` + aantallen, nieuw→oud. **Alleen Mongo-reads.**
@@ -364,9 +364,92 @@ echt te mager blijken — en dan strikt rate-limited i.v.m. de free-tier.
 
 ---
 
+## 12. Rapportages (naast observaties/vragen)
+
+**Doel:** naast losse observaties/vragen ook **echte rapporten** tonen, gebaseerd op de
+klinische CGM-standaard (AGP) en op reactieve-hypo-onderzoek.
+
+**Achtergrond (zie Bronnen):**
+- **AGP (Ambulatory Glucose Profile)** is de standaard CGM-rapportage (ADA 2025):
+  Time in Range (TIR, 3,9–10 mmol/L), Time Below/Above Range (TBR/TAR), gemiddelde
+  glucose, variabiliteit (**CV%**, doel <36%), en een mediaan-curve per tijdstip van de
+  dag. ~14 dagen data geeft een betrouwbaar beeld.
+- **Reactieve hypo** (niet-diabetici): dips meestal **binnen 4u na eten**, daling begint
+  **~30–40 min na de piek**; relevant zijn minimumwaarden en piek→dal per episode.
+
+**Gratis-tier kernprincipe:** de **cijfers zijn deterministisch** (rechtstreeks uit
+Mongo gerekend → **0 LLM-calls**). Alleen de *tekstuele duiding* (C/D) kost 1 call, en
+draait bij voorkeur via de periodieke loop, niet per klik.
+
+**Veiligheidsgrens:** rapporten zijn **beschrijvend** (cijfers + patronen), nooit een
+medisch voorschrift. "Afvlakken van de piek" e.d. alleen als observatie, niet als advies.
+
+### 12.1 A — Statistiek / AGP-light (deterministisch, gratis)
+- **Berekend uit `entries`** (sgv → mmol /18.0182) over een venster (`?days=14`):
+  TIR / TBR (<3,9; very-low <3,0) / TAR (>10; very-high >13,9), gemiddelde, SD, **CV%**,
+  aantal low-episodes + langste low, en **per-uur profiel** (gemiddelde + %low per uur 0–23
+  = AGP-light "wanneer dip ik"). Plus datadekking (% van verwachte metingen).
+- **Endpoint:** `GET /ai-review/stats?days=14` → `{ ok, window, tir, tbr, tar, mean, cv,
+  lows, perHour:[...] }`. **Geen LLM.** Live berekenen (single-user = goedkoop), evt. 5-min cache.
+- **UI:** metric-kaartjes + een simpele per-uur balk/sparkline.
+
+### 12.2 B — Reactieve-hypo episode-rapport (deterministisch, gratis)
+- **Bron:** bestaande `reactive_hypo_episodes` (gebouwd door
+  `scripts/build-reactive-hypo-episodes.mjs`). Verifieer de veldnamen bij het bouwen.
+- **Toont:** lijst recente dips met piek→dal (mmol), **diepte**, **tijdstip**, **duur**,
+  en minuten piek→nadir. Sorteer nieuw→oud.
+- **Endpoint:** `GET /ai-review/episodes?limit=20` → `{ ok, episodes:[...] }`. **Geen LLM.**
+- **UI:** compacte tabel; klikbaar voor detail (zoals 11.1).
+
+### 12.3 C — Trigger / tijd-van-dag duiding (1 LLM-call, via loop)
+- Neemt de aggregaten van A/B (+ `user_feedback`) en laat het model in **lopende tekst**
+  duiden wanneer dips clusteren en welke triggers waarschijnlijk zijn ("dips vooral
+  werkdagen 11–12u, ~2u na lunch"). Sluit aan op roadmap 10.2.
+- **Eén** call, user-getriggerd of via de loop (max 1×/dag). Opgeslagen als rapport (zie 12.5).
+
+### 12.4 D — Dagrapport (digest) (1 LLM-call/dag, via loop)
+- Combineert A+B-cijfers + korte duiding tot één **samenhangend dagverslag**.
+- Via de periodieke loop max **1×/dag**; opgeslagen als rapport. Sluit aan op roadmap 10.4.
+
+### 12.5 Opslag van rapporten (C/D)
+- Nieuwe collectie **`ai_reports`**: `{ _id, createdAt, runId, model, source, type:
+  'trigger'|'daily'|'weekly', period:{from,to}, stats (snapshot van A), content (tekst) }`.
+- Indexen `{createdAt:-1}` + `{type:1}`; zelfde retentie als observaties
+  (`AI_REVIEW_RETENTION_DAYS`).
+- A/B (12.1/12.2) hoeven **niet** opgeslagen — altijd live/deterministisch berekend.
+- **Endpoint:** `GET /ai-review/reports?type=&limit=` → lees-only, geen LLM.
+
+### 12.6 UI-structuur in het paneel
+Drie tabs bovenin het AI-paneel (de panel-inhoud wordt anders te vol):
+- **Inzichten** — huidige obs/vragen + run-selector (11.1/11.2, bestaand).
+- **Statistiek** — A (metric-kaartjes) + B (episode-tabel), live/gratis.
+- **Rapporten** — C/D narratieve verslagen (uit `ai_reports`), klikbaar detail.
+
+### 12.7 Endpoints & nginx (samenvatting)
+Nieuw (allemaal `/_ai-review/*` via nginx, zelfde patroon):
+`GET /stats`, `GET /episodes`, `GET /reports` (gratis, lees-only) en het genereren van
+C/D hangt aan de bestaande `runAiReviewOnce`-achtige flow (lock + min-interval).
+
+### 12.8 Gratis-tier discipline (samengevat)
+- **Bekijken/berekenen = gratis:** A, B, en het lezen van opgeslagen C/D-rapporten zijn
+  puur Mongo (deterministisch) → nooit Ollama.
+- **Genereren = quota:** alleen C/D (en "Review draaien") raken Ollama; user-getriggerd of
+  max 1×/dag via de loop.
+
+### Prioriteit / volgorde
+**A + B eerst** (deterministisch, gratis, klinische standaard, directe waarde). Daarna de
+UI-tabs (12.6). Daarna **C/D** (narratief, 1 call), gekoppeld aan de periodieke loop.
+
+---
+
 ## Bronnen
 
 - [OpenAI compatibility — Ollama docs](https://docs.ollama.com/api/openai-compatibility)
 - [Structured outputs — Ollama docs](https://docs.ollama.com/capabilities/structured-outputs)
 - [Structured outputs — Ollama blog](https://ollama.com/blog/structured-outputs)
 - [OpenAI compatibility — Ollama blog](https://ollama.com/blog/openai-compatibility)
+- [Clinical Targets for CGM / Time in Range — ADA consensus (Diabetes Care)](https://diabetesjournals.org/care/article/42/8/1593/36184/Clinical-Targets-for-Continuous-Glucose-Monitoring)
+- [Time in Range in the 2025 ADA Standards of Care](https://www.timeinrange.org/time-in-range-in-the-2025-ada-standards-of-care/)
+- [AGP report — uitleg (DiaTribe)](https://diatribe.org/diabetes-technology/making-most-cgm-uncover-magic-your-ambulatory-glucose-profile)
+- [CGM voor reactieve hypoglykemie bij niet-diabetici (PMC)](https://pmc.ncbi.nlm.nih.gov/articles/PMC6232734/)
+- [Postprandiale glykemische respons bij personen zonder diabetes (Metabolism)](https://www.metabolismjournal.com/article/S0026-0495(23)00244-5/fulltext)
