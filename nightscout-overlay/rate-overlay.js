@@ -841,6 +841,10 @@
       '#cgm-ai-panel .ai-runrow{margin-bottom:8px}',
       '#cgm-ai-panel .ai-runlabel{font-size:11px;opacity:.7;margin-right:6px;white-space:nowrap}',
       '#cgm-ai-panel .ai-sec{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;opacity:.7;margin:8px 0 4px}',
+      '#cgm-ai-panel button.ai-sec{display:flex;width:100%;align-items:center;gap:5px;text-align:left;border:0;background:transparent;color:inherit;cursor:pointer;padding:0}',
+      '#cgm-ai-panel .ai-section-body{display:none}',
+      '#cgm-ai-panel .ai-episode-section.open>.ai-section-body{display:block}',
+      '#cgm-ai-panel .ai-episode-section.open>button.ai-sec .ai-chev{transform:rotate(90deg)}',
       '#cgm-ai-panel .ai-item{border-top:1px solid rgba(255,255,255,.1);padding:6px 0;cursor:pointer}',
       '#cgm-ai-panel .ai-item:hover{background:rgba(255,255,255,.04)}',
       '#cgm-ai-panel .ai-item-head{display:flex;gap:6px;align-items:flex-start}',
@@ -1630,6 +1634,13 @@
   // (deterministisch, alleen Mongo-reads — geen LLM/quota).
   function onAiStatsClick(event) {
     var t = event.target;
+    var secBtn = t && t.closest ? t.closest('[data-ai-section-toggle]') : null;
+    if (secBtn) {
+      event.preventDefault();
+      var sec = secBtn.closest('[data-ai-section]');
+      if (sec) sec.classList.toggle('open');
+      return;
+    }
     var navBtn = t && t.closest ? t.closest('[data-ep-nav]') : null;
     if (navBtn) { event.stopPropagation(); aiEpisodeNav(navBtn.closest('.ai-item'), navBtn.getAttribute('data-ep-nav')); return; }
     var noteBtn = t && t.closest ? t.closest('[data-ep-note]') : null;
@@ -2183,16 +2194,12 @@
     var nearList = episodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol >= 3.9 && e.nadirMmol < 4.5; });
     var dipsList = episodes.filter(function (e) { return !(e.nadirMmol != null && e.nadirMmol < 4.5); });
     h.push(renderRecentEpisodes(episodes));
-    h.push('<div class="ai-sec">Lows (' + lowsList.length + ' getoond) · nadir onder 3.9</div>');
-    if (!lowsList.length) h.push('<div class="ai-empty">Geen echte lows in dit venster.</div>');
-    lowsList.forEach(function (e) { h.push(aiEpisodeListItem(e)); });
+    h.push(aiEpisodeSection('Lows (' + lowsList.length + ' getoond) · nadir onder 3.9', lowsList, 'Geen echte lows in dit venster.'));
     if (nearList.length) {
-      h.push('<div class="ai-sec">Near-hypo’s (' + nearList.length + ' getoond) · nadir 3.9–4.5</div>');
-      nearList.forEach(function (e) { h.push(aiEpisodeListItem(e)); });
+      h.push(aiEpisodeSection('Near-hypo’s (' + nearList.length + ' getoond) · nadir 3.9–4.5', nearList, null));
     }
     if (dipsList.length) {
-      h.push('<div class="ai-sec">Dips (' + dipsList.length + ' getoond) · daling vanaf piek — vroeg signaal, niet onder 4.5</div>');
-      dipsList.forEach(function (e) { h.push(aiEpisodeListItem(e)); });
+      h.push(aiEpisodeSection('Dips (' + dipsList.length + ' getoond) · daling vanaf piek — vroeg signaal, niet onder 4.5', dipsList, null));
     }
     if (evaluation && evaluation.ok) h.push(renderAiEvaluation(evaluation));
     box.innerHTML = h.join('');
@@ -2217,6 +2224,15 @@
       h.push('<div class="ai-fine">' + escapeHtml(line + (meta.length ? ' · ' + meta.join(' · ') : '')) + '</div>');
     });
     return h.join('');
+  }
+
+  function aiEpisodeSection(title, list, emptyText) {
+    var rows = [];
+    (list || []).forEach(function (e) { rows.push(aiEpisodeListItem(e)); });
+    if (!rows.length && emptyText) rows.push('<div class="ai-empty">' + escapeHtml(emptyText) + '</div>');
+    return '<div class="ai-episode-section" data-ai-section>' +
+      '<button type="button" class="ai-sec" data-ai-section-toggle><span class="ai-chev">▸</span><span>' + escapeHtml(title) + '</span></button>' +
+      '<div class="ai-section-body">' + rows.join('') + '</div></div>';
   }
 
   function renderReactiveHypoSummary(r) {
