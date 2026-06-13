@@ -1300,7 +1300,7 @@
     var btn = document.createElement('button');
     btn.id = 'cgm-ai-toggle';
     btn.type = 'button';
-    btn.textContent = 'AI';
+    btn.textContent = 'Stats & AI';
     btn.addEventListener('click', toggleAiPanel);
     document.body.appendChild(btn);
     return btn;
