@@ -854,6 +854,20 @@ function startServer() {
       return
     }
 
+    if (url.pathname === '/ai-review/episode-detail' && req.method === 'GET') {
+      try {
+        const detail = await getAiEpisodeDetail({
+          type: url.searchParams.get('type'),
+          peakAt: url.searchParams.get('peakAt'),
+        })
+        res.end(JSON.stringify({ ok: true, ...detail }))
+      } catch (err) {
+        res.writeHead(err && err.statusCode ? err.statusCode : 500)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
     if (url.pathname === '/ai-review/day' && req.method === 'GET') {
       try {
         const day = await getAiDayReview(url.searchParams.get('date'))
@@ -1570,6 +1584,164 @@ async function getAiEpisodes(limit) {
       .sort({ peakAt: -1 })
       .limit(limit)
       .toArray()
+  } finally {
+    if (client) await client.close().catch(() => undefined)
+  }
+}
+
+// Trapezoïdale integratie boven/onder een grens over reading-punten ({t:ms, mmol}).
+// Gaten > 30 min worden overgeslagen (geen interpolatie over ontbrekende data).
+function integrateBeyond(pts, threshold, direction) {
+  let minutes = 0
+  let area = 0
+  for (let i = 1; i < pts.length; i += 1) {
+    const dtMin = (pts[i].t - pts[i - 1].t) / 60000
+    if (!(dtMin > 0) || dtMin > 30) continue
+    const a = direction === 'above' ? pts[i - 1].mmol - threshold : threshold - pts[i - 1].mmol
+    const b = direction === 'above' ? pts[i].mmol - threshold : threshold - pts[i].mmol
+    const aPos = Math.max(0, a)
+    const bPos = Math.max(0, b)
+    area += ((aPos + bPos) / 2) * dtMin
+    if (aPos > 0 && bPos > 0) minutes += dtMin
+    else if (aPos > 0 || bPos > 0) minutes += dtMin / 2
+  }
+  return { minutes: round(minutes, 0), area: round(area, 1) }
+}
+
+// B-detail — één low- of high-episode met omliggende curve, metrics, datakwaliteit en
+// deterministische "waarom opvallend"-redenen. Géén LLM, alleen Mongo-reads (free-tier safe).
+async function getAiEpisodeDetail({ type, peakAt } = {}) {
+  const kind = type === 'high' ? 'high' : 'low'
+  const peakMs = Date.parse(peakAt || '')
+  if (!Number.isFinite(peakMs)) {
+    const err = new Error('Ongeldige of ontbrekende peakAt (ISO-datum).')
+    err.statusCode = 400
+    throw err
+  }
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    const db = client.db()
+
+    let episode = null
+    if (kind === 'low') {
+      episode = await db.collection('reactive_hypo_episodes')
+        .findOne({ peakAt: new Date(peakMs).toISOString() }, { projection: { _id: 0 } })
+      // Tolerante match: brondata kan iets afwijken; zoek dichtstbijzijnde piek binnen 5 min.
+      if (!episode) {
+        const near = await db.collection('reactive_hypo_episodes')
+          .find({ peakAt: { $gte: new Date(peakMs - 5 * 60000).toISOString(), $lte: new Date(peakMs + 5 * 60000).toISOString() } }, { projection: { _id: 0 } })
+          .toArray()
+        episode = near.sort((a, b) => Math.abs(Date.parse(a.peakAt) - peakMs) - Math.abs(Date.parse(b.peakAt) - peakMs))[0] || null
+      }
+      if (!episode) {
+        const err = new Error('Low-episode niet gevonden voor deze peakAt.')
+        err.statusCode = 404
+        throw err
+      }
+    }
+
+    // Vensterbepaling: low = piek-2u .. (recovery|nadir)+2u; high = piek-2u .. +4u.
+    const anchorEnd = kind === 'low'
+      ? Date.parse(episode.recoveredAt || episode.nadirAt || peakAt) || peakMs
+      : peakMs
+    const windowFrom = peakMs - 2 * 3_600_000
+    const windowTo = kind === 'low' ? anchorEnd + 2 * 3_600_000 : peakMs + 4 * 3_600_000
+
+    const rows = await db.collection('entries')
+      .find({ type: 'sgv', sgv: { $exists: true }, date: { $gte: windowFrom, $lt: windowTo } }, { projection: { _id: 0, sgv: 1, date: 1 } })
+      .sort({ date: 1 })
+      .toArray()
+    const pts = rows.map((r) => ({ t: r.date, mmol: Number(r.sgv) / MGDL_PER_MMOL }))
+    const readings = pts.map((p) => ({ t: new Date(p.t).toISOString(), mmol: round(p.mmol, 1) }))
+
+    const feedbackRaw = await db.collection('user_feedback')
+      .find({}, { projection: { _id: 0, createdAt: 1, type: 1, note: 1, relatedEntryIdentifier: 1, relatedEntryMmol: 1 } })
+      .sort({ createdAt: -1 }).limit(100).toArray()
+    const inWindow = (iso) => {
+      const t = Date.parse(iso)
+      return Number.isFinite(t) && t >= windowFrom && t < windowTo
+    }
+    const feedback = feedbackRaw.filter((f) => inWindow(f.createdAt))
+
+    if (kind === 'low') {
+      const nearbyHighs = buildHighEpisodes(rows).filter((h) => Date.parse(h.peakAt) < peakMs)
+      const reasons = []
+      if (Number(episode.nadirMmol) < 3.0) reasons.push('Diepe low: laagste punt onder 3.0 mmol/L.')
+      if (Number(episode.timeBelow3_9Minutes) > 20) reasons.push('Lang onder 3.9: meer dan 20 minuten.')
+      const lastHigh = nearbyHighs[nearbyHighs.length - 1]
+      if (lastHigh && Number(lastHigh.peakMmol) > 10 && Number(episode.dropFromPeakMmol) >= 3) {
+        reasons.push('Hoge piek vooraf gevolgd door snelle daling.')
+      }
+      const flags = Array.isArray(episode.qualityFlags) ? episode.qualityFlags : []
+      if (flags.includes('single_point_low') || flags.includes('possible_compression_low')) {
+        reasons.push('Mogelijk sensorartefact: single-point-low of compression-low gemarkeerd.')
+      }
+      if (Number(episode.recoveryMinutes) > 30) reasons.push('Herstel traag: meer dan 30 minuten.')
+      if (episode.reboundHigh) reasons.push('Rebound-high na herstel.')
+      if (!reasons.length) reasons.push('Geen bijzondere risicokenmerken; korte, ondiepe dip.')
+      return {
+        type: 'low',
+        episode,
+        window: { from: new Date(windowFrom).toISOString(), to: new Date(windowTo).toISOString() },
+        readings,
+        nearbyHighs,
+        feedback,
+        notableReasons: reasons,
+      }
+    }
+
+    // High-detail: metrics live uit de omliggende readings (highs zijn niet gepersisteerd).
+    let peakMmol = -Infinity
+    let realPeakAt = peakMs
+    let startAt = null
+    let endAt = null
+    for (const p of pts) {
+      if (p.mmol > 10.0) {
+        if (startAt == null) startAt = p.t
+        endAt = p.t
+        if (p.mmol > peakMmol) { peakMmol = p.mmol; realPeakAt = p.t }
+      }
+    }
+    const above10 = integrateBeyond(pts, 10.0, 'above')
+    const above139 = integrateBeyond(pts, 13.9, 'above')
+    let recoveryAt = null
+    for (const p of pts) {
+      if (p.t > realPeakAt && p.mmol < 10.0) { recoveryAt = p.t; break }
+    }
+    const followLow = await db.collection('reactive_hypo_episodes')
+      .find({ peakAt: { $gte: new Date(realPeakAt).toISOString(), $lte: new Date((endAt || realPeakAt) + 4 * 3_600_000).toISOString() } }, {
+        projection: { _id: 0, peakAt: 1, nadirAt: 1, nadirMmol: 1, severity: 1 },
+      })
+      .sort({ peakAt: 1 }).limit(1).next()
+    const metrics = {
+      startAt: startAt ? new Date(startAt).toISOString() : null,
+      endAt: endAt ? new Date(endAt).toISOString() : null,
+      peakAt: new Date(realPeakAt).toISOString(),
+      peakMmol: Number.isFinite(peakMmol) ? round(peakMmol, 1) : null,
+      durationAbove10Minutes: above10.minutes,
+      durationAbove13_9Minutes: above139.minutes,
+      areaAbove10: above10.area,
+      areaAbove13_9: above139.area,
+      recoveryMinutes: recoveryAt ? round((recoveryAt - realPeakAt) / 60000, 0) : null,
+      followedByLow: followLow
+        ? { peakAt: followLow.peakAt, nadirMmol: followLow.nadirMmol, severity: followLow.severity, minutesToLowPeak: round((Date.parse(followLow.peakAt) - (endAt || realPeakAt)) / 60000, 0) }
+        : null,
+    }
+    const reasons = []
+    if (Number(metrics.peakMmol) > 13.9) reasons.push('Hoge piek: boven 13.9 mmol/L.')
+    if (Number(metrics.durationAbove10Minutes) > 120) reasons.push('Lang boven 10: meer dan 2 uur.')
+    if (followLow) reasons.push('Gevolgd door een low binnen 4 uur (mogelijk reactief).')
+    if (!reasons.length) reasons.push('Kortdurende, milde piek.')
+    return {
+      type: 'high',
+      metrics,
+      window: { from: new Date(windowFrom).toISOString(), to: new Date(windowTo).toISOString() },
+      readings,
+      feedback,
+      notableReasons: reasons,
+    }
   } finally {
     if (client) await client.close().catch(() => undefined)
   }

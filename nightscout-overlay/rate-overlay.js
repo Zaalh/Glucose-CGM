@@ -854,6 +854,11 @@
       '#cgm-ai-panel .ai-d-row b{opacity:.8}',
       '#cgm-ai-panel .ai-d-meta{font-size:10px;opacity:.65;margin-top:4px}',
       '#cgm-ai-panel .ai-d-id{font-size:9px;opacity:.4;margin-top:3px;font-family:monospace}',
+      '#cgm-ai-panel .ai-curve{margin-top:6px}',
+      '#cgm-ai-panel .ai-svg{width:100%;height:auto;display:block;background:rgba(0,0,0,.25);border-radius:4px}',
+      '#cgm-ai-panel .ai-reasons{margin-top:5px}',
+      '#cgm-ai-panel .ai-reasons ul{margin:3px 0 0;padding-left:16px}',
+      '#cgm-ai-panel .ai-reasons li{margin-bottom:2px;line-height:1.3}',
       '#cgm-ai-panel .ai-empty{opacity:.6;font-style:italic}',
       '#cgm-ai-panel .ai-tabs{display:flex;gap:4px;margin-bottom:8px}',
       '#cgm-ai-panel .ai-tab{flex:1;font-size:11px;font-weight:700;padding:5px 4px;border:1px solid rgba(255,255,255,.18);border-radius:5px;background:#1e293b;color:#cbd5e1;cursor:pointer}',
@@ -1304,6 +1309,7 @@
       loadAiRun(aiSelectedRunId);
     });
     panel.querySelector('#cgm-ai-body').addEventListener('click', onAiItemClick);
+    panel.querySelector('#cgm-ai-stats').addEventListener('click', onAiStatsClick);
     panel.querySelector('.ai-tabs').addEventListener('click', onAiTabClick);
     return panel;
   }
@@ -1559,6 +1565,125 @@
     item.classList.toggle('open');
   }
 
+  // Statistiek-tab: zelfde accordion, maar bij een episode laden we lui de curve
+  // (deterministisch, alleen Mongo-reads — geen LLM/quota).
+  function onAiStatsClick(event) {
+    var item = event.target && event.target.closest ? event.target.closest('.ai-item') : null;
+    if (!item) return;
+    item.classList.toggle('open');
+    if (item.classList.contains('open') && item.getAttribute('data-ep-peak') && !item.getAttribute('data-curve-loaded')) {
+      aiLoadEpisodeCurve(item);
+    }
+  }
+
+  function aiLoadEpisodeCurve(item) {
+    var host = item.querySelector('.ai-curve');
+    if (!host) return;
+    var peak = item.getAttribute('data-ep-peak');
+    var kind = item.getAttribute('data-ep-kind') || 'low';
+    if (!peak) { host.innerHTML = ''; return; }
+    item.setAttribute('data-curve-loaded', '1');
+    host.innerHTML = '<div class="ai-empty">Curve laden…</div>';
+    fetchWithTimeout('/_ai-review/episode-detail?type=' + encodeURIComponent(kind) + '&peakAt=' + encodeURIComponent(peak), { cache: 'no-store' }, 15000)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.ok) { host.innerHTML = '<div class="ai-empty">Curve niet beschikbaar.</div>'; item.removeAttribute('data-curve-loaded'); return; }
+        host.innerHTML = aiRenderEpisodeCurve(d);
+      })
+      .catch(function () { host.innerHTML = '<div class="ai-empty">Curve laden mislukt.</div>'; item.removeAttribute('data-curve-loaded'); });
+  }
+
+  function aiRenderEpisodeCurve(d) {
+    var kind = d.type === 'high' ? 'high' : 'low';
+    var readings = d.readings || [];
+    var markers = [];
+    if (kind === 'low' && d.episode) {
+      markers.push({ t: d.episode.peakAt, label: 'piek', color: '#fbbf24' });
+      markers.push({ t: d.episode.nadirAt, label: 'nadir', color: '#f43f5e' });
+      if (d.episode.recoveredAt) markers.push({ t: d.episode.recoveredAt, label: 'herstel', color: '#34d399' });
+    } else if (kind === 'high' && d.metrics) {
+      var m = d.metrics;
+      if (m.startAt) markers.push({ t: m.startAt, label: 'start', color: '#34d399' });
+      markers.push({ t: m.peakAt, label: 'piek', color: '#fbbf24' });
+      if (m.endAt) markers.push({ t: m.endAt, label: 'einde', color: '#93c5fd' });
+    }
+    var h = [aiEpisodeSvg(readings, markers, kind)];
+    if (kind === 'high' && d.metrics) {
+      var m2 = d.metrics, mh = [];
+      mh.push('boven 10: ' + aiNum(m2.durationAbove10Minutes, 'm'));
+      if (m2.durationAbove13_9Minutes) mh.push('boven 13.9: ' + aiNum(m2.durationAbove13_9Minutes, 'm'));
+      mh.push('high-belasting ' + aiNum(m2.areaAbove10, ''));
+      if (m2.recoveryMinutes != null) mh.push('herstel ' + aiNum(m2.recoveryMinutes, 'm'));
+      if (m2.followedByLow) mh.push('→ low na ' + aiNum(m2.followedByLow.minutesToLowPeak, 'm') + ' (nadir ' + aiNum(m2.followedByLow.nadirMmol, '') + ')');
+      h.push('<div class="ai-d-row"><b>Metrics:</b> ' + escapeHtml(mh.join(' · ')) + '</div>');
+    }
+    if (d.notableReasons && d.notableReasons.length) {
+      h.push('<div class="ai-reasons"><b>Waarom opvallend</b><ul>' +
+        d.notableReasons.map(function (r) { return '<li>' + escapeHtml(r) + '</li>'; }).join('') + '</ul></div>');
+    }
+    if (d.feedback && d.feedback.length) {
+      h.push('<div class="ai-d-row"><b>Feedback in venster:</b> ' +
+        escapeHtml(d.feedback.map(function (f) { return f.type + (f.note ? ' (' + f.note + ')' : ''); }).join(' · ')) + '</div>');
+    }
+    h.push('<div class="ai-d-id">review, geen behandeladvies · alleen je eigen data</div>');
+    return h.join('');
+  }
+
+  // Mini-curve als simpele SVG-polyline met zone-shading en markers. Geen library.
+  function aiEpisodeSvg(readings, markers, kind) {
+    if (!readings || readings.length < 2) return '<div class="ai-empty">Te weinig punten voor een curve.</div>';
+    var W = 480, H = 120, padL = 26, padR = 8, padT = 8, padB = 14;
+    var t0 = Date.parse(readings[0].t), t1 = Date.parse(readings[readings.length - 1].t);
+    var span = Math.max(1, t1 - t0);
+    var ys = readings.map(function (p) { return p.mmol; });
+    var lo = Math.min.apply(null, ys), hi = Math.max.apply(null, ys);
+    lo = Math.min(lo, kind === 'high' ? 9 : 3.0);
+    hi = Math.max(hi, kind === 'high' ? 14 : 5);
+    lo = Math.floor(lo - 0.5); hi = Math.ceil(hi + 0.5);
+    var rangeY = Math.max(1, hi - lo);
+    function X(t) { return padL + (Date.parse(t) - t0) / span * (W - padL - padR); }
+    function Y(v) { return padT + (hi - v) / rangeY * (H - padT - padB); }
+    function nearest(t) {
+      var tt = Date.parse(t), best = null, bd = Infinity;
+      readings.forEach(function (p) { var dd = Math.abs(Date.parse(p.t) - tt); if (dd < bd) { bd = dd; best = p; } });
+      return best ? best.mmol : null;
+    }
+    function band(top, bot, color) {
+      var y1 = Y(top), y2 = Y(bot);
+      return '<rect x="' + padL + '" y="' + y1.toFixed(1) + '" width="' + (W - padL - padR).toFixed(1) + '" height="' + Math.max(0, y2 - y1).toFixed(1) + '" fill="' + color + '"/>';
+    }
+    function hline(v, color) {
+      var y = Y(v).toFixed(1);
+      return '<line x1="' + padL + '" y1="' + y + '" x2="' + (W - padR) + '" y2="' + y + '" stroke="' + color + '" stroke-width="0.6" stroke-dasharray="3 3"/>';
+    }
+    var pts = readings.map(function (p) { return X(p.t).toFixed(1) + ',' + Y(p.mmol).toFixed(1); }).join(' ');
+    var svg = ['<svg class="ai-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Glucose-curve rond episode">'];
+    if (kind === 'high') {
+      svg.push(band(hi, Math.max(lo, 10), 'rgba(251,191,36,0.12)'));
+      if (hi > 13.9) svg.push(band(hi, 13.9, 'rgba(248,113,113,0.14)'));
+      svg.push(hline(10, 'rgba(251,191,36,0.8)'));
+    } else {
+      svg.push(band(3.9, lo, 'rgba(251,113,133,0.12)'));
+      svg.push(band(3.0, lo, 'rgba(220,38,38,0.18)'));
+      svg.push(hline(3.9, 'rgba(251,113,133,0.8)'));
+    }
+    svg.push('<text x="2" y="' + (Y(hi) + 8).toFixed(1) + '" fill="#94a3b8" font-size="8">' + hi + '</text>');
+    svg.push('<text x="2" y="' + Y(lo).toFixed(1) + '" fill="#94a3b8" font-size="8">' + lo + '</text>');
+    svg.push('<polyline fill="none" stroke="#93c5fd" stroke-width="1.6" points="' + pts + '"/>');
+    (markers || []).forEach(function (mk) {
+      if (!mk.t) return;
+      var mv = nearest(mk.t);
+      if (mv == null) return;
+      var x = X(mk.t), y = Y(mv);
+      svg.push('<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="2.6" fill="' + mk.color + '"/>');
+      var anchor = x > W - 60 ? 'end' : 'start';
+      var tx = anchor === 'end' ? x - 4 : x + 4;
+      svg.push('<text x="' + tx.toFixed(1) + '" y="' + Math.max(8, y - 4).toFixed(1) + '" fill="' + mk.color + '" font-size="8" text-anchor="' + anchor + '">' + escapeHtml(mk.label) + '</text>');
+    });
+    svg.push('</svg>');
+    return svg.join('');
+  }
+
   // --- Statistiek-tab (A + B): deterministisch, puur Mongo-reads, geen LLM/quota.
   var aiStatsLoaded = false;
   function loadAiStats(force) {
@@ -1684,7 +1809,7 @@
       if (e.qualityScore != null) meta.push('kwaliteit ' + e.qualityScore + '%');
       if (e.qualityFlags && e.qualityFlags.length) meta.push('flags: ' + e.qualityFlags.join(', '));
       meta.push(when);
-      h.push('<div class="ai-ep ai-item"><div class="ai-ep-head ai-item-head"><span class="ai-chev">▸</span>' + escapeHtml(head) + '</div><div class="ai-meta">' + escapeHtml(meta.join(' · ')) + '</div>' + aiEpisodeDetailHtml(e) + '</div>');
+      h.push('<div class="ai-ep ai-item" data-ep-kind="low" data-ep-peak="' + escapeHtml(e.peakAt || '') + '"><div class="ai-ep-head ai-item-head"><span class="ai-chev">▸</span>' + escapeHtml(head) + '</div><div class="ai-meta">' + escapeHtml(meta.join(' · ')) + '</div>' + aiEpisodeDetailHtml(e) + '</div>');
     });
     box.innerHTML = h.join('');
   }
@@ -1713,7 +1838,9 @@
     if (day.highEpisodes && day.highEpisodes.length) {
       h.push('<div class="ai-sec">High episodes vandaag</div>');
       day.highEpisodes.slice(0, 5).forEach(function (e) {
-        h.push('<div class="ai-ep"><div class="ai-ep-head">' + escapeHtml(aiTime(e.peakAt) + ' · piek ' + e.peakMmol + ' mmol · ' + e.durationMinutes + 'm') + '</div></div>');
+        h.push('<div class="ai-ep ai-item" data-ep-kind="high" data-ep-peak="' + escapeHtml(e.peakAt || '') + '">' +
+          '<div class="ai-ep-head ai-item-head"><span class="ai-chev">▸</span>' + escapeHtml(aiTime(e.peakAt) + ' · piek ' + e.peakMmol + ' mmol · ' + e.durationMinutes + 'm') + '</div>' +
+          '<div class="ai-detail"><div class="ai-curve"></div></div></div>');
       });
     }
     if (day.highToLow && day.highToLow.length) {
@@ -1749,6 +1876,7 @@
     rows.push('<div class="ai-d-row"><b>Herstel/context:</b> herstel ' + escapeHtml(aiNum(e.recoveryMinutes, 'm')) + ' · rebound ' + escapeHtml(e.reboundHigh ? aiNum(e.reboundPeakMmol, '') + ' mmol' : 'nee') + '</div>');
     rows.push('<div class="ai-d-row"><b>Classificatie:</b> ' + escapeHtml([e.outcome, e.severity, e.shape, 'kwaliteit ' + aiNum(e.qualityScore, '%')].filter(Boolean).join(' · ')) + '</div>');
     if (e.qualityFlags && e.qualityFlags.length) rows.push('<div class="ai-d-row"><b>Datakwaliteit:</b> ' + escapeHtml(e.qualityFlags.join(', ')) + '</div>');
+    rows.push('<div class="ai-curve"></div>');
     return '<div class="ai-detail">' + rows.join('') + '</div>';
   }
 

@@ -12,6 +12,16 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Toegevoegd
 
+- **Low/High Episode-detail met SVG-curve (SmartXdrip-stijl, gratis)** — nieuw endpoint
+  `GET /ai-review/episode-detail?type=low|high&peakAt=<iso>` (`getAiEpisodeDetail`) geeft
+  de omliggende readings (low: piek−2u…herstel/nadir+2u; high: piek−2u…+4u), deterministische
+  metrics, datakwaliteit-flags, nabije feedback en `notableReasons[]`. High-metrics worden
+  live uit `entries` berekend (trapezoïdale `integrateBeyond`: duur/area boven 10 en 13.9,
+  herstel, `followedByLow`). De overlay maakt low- (Statistiek-tab) en high-episodes
+  (dagreview) klikbaar en laadt **lui** een compacte **SVG mini-curve** (zone-shading +
+  peak/nadir/herstel-markers) — puur Mongo-reads, **geen LLM/quota**. Geproxyd via nginx als
+  `/_ai-review/episode-detail`. Zie llm.md §19.3/19.4 en §20.5.
+
 - **AI-review met overlay-knop (Ollama Cloud)** — de optionele AI-laag is nu bedienbaar
   vanuit de overlay. Nieuwe gedeelde kern `scripts/lib/ai-review-core.mjs` (`runAiReview`,
   JSON-mode + schema-in-prompt + retry omdat Ollama Cloud geen strikt schema afdwingt),

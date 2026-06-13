@@ -22,8 +22,8 @@ betekenisvoller te maken dan alleen "samenvatten achteraf".
 | Chat | Plan | Nuttig, maar quota- en safety-gevoelig |
 | Verdiepte hypo-analyse | Eerste slice gebouwd | Deterministische episode-metrics, severity, burden, recovery, rebound |
 | CGM-datakwaliteit/artefacten | Eerste slice gebouwd | Quality flags/score voor datagaten, single-point lows, lag, mogelijke compression lows |
-| SmartXdrip-achtige review-workflow | Deels gebouwd | Dagreview, high episodes, high->low context en heatmap live; History/detail nog open |
-| SmartXdrip productlagen | Te bouwen | Reminder core, settings/source-health, notes en niet-klinische UI-taal |
+| SmartXdrip-achtige review-workflow | Deels gebouwd | Dagreview, high episodes, high->low context, heatmap en **low/high episode-detail met SVG-curve** live; History-tab + pattern cards nog open |
+| SmartXdrip productlagen | Deels gebouwd | **Episode chart UX (SVG-curve) live**; reminder core, settings/source-health-endpoint, notes en niet-klinische UI-taal nog open |
 | Safety guardrails + evaluatie | Te bouwen | Vooral belangrijk voor chat en narratieve rapporten |
 
 **Nieuwe prioriteit na online review (12 juni 2026):**
@@ -699,12 +699,15 @@ De volgende stap is pas geslaagd als:
 
 ## 19. SmartXdrip-achtige review-workflow — plan
 
-**Status: eerste slice gebouwd.** Geinspireerd door SmartXdrip Community Preview:
+**Status: tweede slice gebouwd.** Geinspireerd door SmartXdrip Community Preview:
 companion review naast Nightscout/xDrip, met Home/Insights/History/High Episode/Low
 Episode/Stats. In deze repo is al live: `GET /ai-review/day`, dagcards in de
 Statistiek-tab, high episodes, high->low context, source health en weekdag×uur heatmap.
-Nog open: echte **History-tab**, aparte **High/Low Episode detailweergave** met
-omliggende curve, en pattern cards in de Inzichten-tab.
+**Nieuw live: `GET /ai-review/episode-detail?type=low|high&peakAt=<iso>`** met omliggende
+readings, deterministische metrics, datakwaliteit, `notableReasons[]` en een **SVG
+mini-curve** (zone-shading + markers) die lui inklapt onder elke low/high episode-rij —
+puur Mongo-reads, geen LLM. Nog open: echte **History-tab** met datumselectie en pattern
+cards in de Inzichten-tab.
 
 ### 19.1 Wat SmartXdrip toevoegt boven "stats"
 De sterke productkeuze is niet alleen meer metrics, maar een review-flow:
@@ -738,8 +741,11 @@ Waarde:
 - Dit maakt moeilijke dagen vindbaar zonder door ruwe Nightscout-curves te scrollen.
 - Past direct bij SmartXdrip "History -> High/Low Episode".
 
-### 19.3 Low Episode detail
+### 19.3 Low Episode detail — **GEDAAN (live)**
 Doel: niet alleen een rij in Statistiek, maar een echte detailkaart voor één low.
+Geïmplementeerd in `getAiEpisodeDetail({type:'low', peakAt})` + route
+`/ai-review/episode-detail`; overlay laadt de curve lui bij het uitklappen van een
+episode-rij (`aiLoadEpisodeCurve` → `aiRenderEpisodeCurve` → `aiEpisodeSvg`).
 
 Server:
 - `GET /ai-review/episode-detail?type=low&peakAt=<iso>`
@@ -766,19 +772,21 @@ Overlay:
 - Mini-curve als simpele SVG/polyline of compacte tabel/sparkline.
 - Toon "review, geen behandeladvies" subtiel onderaan.
 
-### 19.4 High Episode detail
+### 19.4 High Episode detail — **GEDAAN (live, optie A)**
 Highs zijn relevant omdat reactieve dips vaak beginnen na een hoge postprandiale piek.
+Geïmplementeerd via `getAiEpisodeDetail({type:'high', peakAt})`: metrics worden **live uit
+`entries` rond de piek** berekend (optie A; geen persistente builder). De high-episodes in
+de dagreview zijn nu klikbaar en tonen dezelfde SVG-curve + metrics + `followedByLow`.
 
-Server:
-- Maak high-episodes first-class:
-  - optie A: live detecteren uit `entries` per dag/window;
-  - optie B: persistente `glucose_high_episodes` builder als dit vaker nodig wordt.
-- Metrics:
+Server (live):
+- High-episodes blijven **optie A** (live uit `entries` per window); persistente
+  `glucose_high_episodes` builder (optie B) alleen later indien live te traag wordt.
+- Metrics (berekend met trapezoïdale integratie `integrateBeyond`):
   - `startAt`, `endAt`, `peakAt`, `peakMmol`;
   - `durationAbove10Minutes`, `durationAbove13_9Minutes`;
   - `areaAbove10`, `areaAbove13_9`;
-  - recovery naar <10;
-  - opvolgende low binnen 4 uur (`followedByLowEpisodeId` / `minutesToLowPeak`).
+  - `recoveryMinutes` (naar <10);
+  - opvolgende low binnen 4 uur (`followedByLow.{peakAt,nadirMmol,severity,minutesToLowPeak}`).
 
 Overlay:
 - High episode detail toont piek, duur, area-above-threshold, herstel en eventuele
@@ -812,9 +820,9 @@ Regel: als source health slecht is, moeten Inzichten/Rapporten expliciet minder 
 
 ### 19.7 Prioriteit
 Aanbevolen volgorde:
-1. `episode-detail` endpoint + low detail UI (meeste waarde, data bestaat al).
-2. High episode metrics uitbreiden met area-above/recovery/followed-by-low.
-3. History-tab met dagcards en datumselectie.
+1. ~~`episode-detail` endpoint + low detail UI~~ — **GEDAAN**.
+2. ~~High episode metrics (area-above/recovery/followed-by-low)~~ — **GEDAAN** (live, optie A).
+3. **History-tab met dagcards en datumselectie** ← volgende stap.
 4. Pattern cards op Inzichten-tab.
 5. Optioneel: persistente high-episode builder als live detectie te traag/onhandig wordt.
 
@@ -914,27 +922,29 @@ Server/datamodel:
   - symptoom -> nearby low;
   - vingerprik -> quality/Whipple-classificatie.
 
-### 20.5 Episode chart UX
-SmartXdrip episode pages tonen een event met omliggende curve. Onze overlay moet dit niet
-als ruwe tabel tonen, maar als compacte reviewkaart.
+### 20.5 Episode chart UX — **GEDAAN (eerste slice live)**
+SmartXdrip episode pages tonen een event met omliggende curve. Onze overlay toont dit nu
+als compacte reviewkaart (`aiEpisodeSvg` in `rate-overlay.js`), niet als ruwe tabel.
 
-Low Episode chart:
-- 2h voor piek t/m 2h na herstel/nadir;
-- low-zone shading (<3.9 en <3.0);
+Low Episode chart (live):
+- piek-2u t/m (herstel|nadir)+2u venster (server `getAiEpisodeDetail`);
+- low-zone shading (<3.9 en <3.0) + stippellijn op 3.9;
 - markers: peak, nadir, recovered;
-- labels: severity, burden, quality;
-- "mogelijk artefact" prominent als flags dat aangeven.
+- labels/metrics: severity, burden, quality (uit `aiEpisodeDetailHtml`);
+- `notableReasons[]` benoemt "mogelijk artefact" als de quality-flags dat aangeven.
 
-High Episode chart:
-- 2h voor start t/m 4h na end;
-- high-zone shading (>10 en >13.9);
-- markers: start, peak, end/recovered;
-- label als er een low volgt binnen 4h.
+High Episode chart (live):
+- piek-2u t/m piek+4u venster;
+- high-zone shading (>10 en >13.9) + stippellijn op 10;
+- markers: start, peak, einde;
+- `followedByLow` als label/metric als er een low volgt binnen 4h.
 
-Implementatie:
-- Simpele SVG/polyline in `rate-overlay.js` is genoeg.
-- Geen chart-library nodig voor eerste slice.
-- Altijd escape/sanitize; geen raw HTML uit data.
+Implementatie (gedaan):
+- Simpele SVG/polyline in `rate-overlay.js` (vaste viewBox, `width:100%;height:auto`).
+- Geen chart-library; alles via `escapeHtml`, geen raw HTML uit data.
+
+Nog open (volgende slice): zwaardere zoom/scrub-interactie en een aparte modal i.p.v. de
+inline accordion, indien gewenst.
 
 ### 20.6 Niet-klinische UI-taal
 SmartXdrip vraagt expliciet welke termen duidelijk zijn voor gewone gebruikers. Onze UI
@@ -968,8 +978,8 @@ actiegericht zonder behandeladvies te worden.
 
 ### 20.8 Prioriteit
 Aanbevolen volgorde na sectie 19:
-1. Episode chart UX + niet-klinische labels.
-2. Notes/event logging vanuit episode-detail.
+1. ~~Episode chart UX~~ — **GEDAAN**. Niet-klinische labels nog open.
+2. Notes/event logging vanuit episode-detail ← volgende stap (grootste hefboom, sectie 14).
 3. Source-health endpoint + banner.
 4. History settings: 7/14/30 dagen en target range zichtbaar.
 5. Helper-reminders als aparte, expliciet niet-medische laag.
