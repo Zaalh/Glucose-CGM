@@ -34,6 +34,8 @@
     "spike-filter:check": "node scripts/run-spike-filter-check.mjs",
     "data-quality:check": "node scripts/run-data-quality-check.mjs",
     "episodes:check": "node scripts/run-episode-builder-check.mjs",
+    "ai:tdz-check": "node scripts/run-ai-tdz-check.mjs",
+    "ai:check": "node --check scripts/libreview-nightscout-sync.mjs && node --check scripts/lib/ai-review-core.mjs && node --check nightscout-overlay/rate-overlay.js && node scripts/run-ai-tdz-check.mjs",
     "model:retrain:balanced": "TRAIN_POLICY=balanced node scripts/retrain-and-export-model.mjs",
     "model:retrain:precision": "TRAIN_POLICY=precision-first node scripts/retrain-and-export-model.mjs"
   },
