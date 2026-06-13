@@ -12,6 +12,20 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Toegevoegd
 
+- **Automatische episode-build in de sync-loop** — de `libreview-sync` `--loop`-modus
+  herbouwt `reactive_hypo_episodes` nu vanzelf elke `EPISODES_BUILD_INTERVAL_MINUTES`
+  (default 15, in de compose-`environment`; 0 = uit). Voorheen liep de collectie achter
+  tot iemand handmatig `episodes:build` draaide (kon uren staleness opleveren). De CLI
+  `build-reactive-hypo-episodes.mjs` is herschreven naar een exporteerbare
+  `buildReactiveHypoEpisodes()`, zodat CLI en loop dezelfde builder delen (CLI blijft
+  werken via een `import.meta`-guard).
+- **High→low context met alle vier de tijdstippen** — de high→low-regels (Statistiek-tab
+  én dagdetail) tonen nu expliciet high-piek, high-einde, start-daling (low-piek) en
+  low-nadir, plus de deelintervallen (high-duur, high→daling-gap, dalingsduur). Voorheen
+  mengde één regel referentiepunten (getoond high-piek→low-nadir, maar gemeten
+  high-einde→low-piek), waardoor er tijd leek te missen. Beide views delen nu
+  `renderHighToLowItem`; het dag-endpoint levert daarvoor `highEndAt`/`highDurationMinutes`.
+
 - **Episode-review in de overlay zonder eigen curve** — de low/high-detailweergave
   tekent géén SVG mini-curve meer: Nightscout toont de glucosegrafiek al, dus
   `getAiEpisodeDetail` levert geen `readings` meer terug. In plaats daarvan is de
@@ -77,6 +91,18 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   `AI_ROUTER_PROVIDERS` + per-provider `AI_<NAAM>_*`; legacy `AI_CHAT_*` blijft werken.
 
 ### Gewijzigd
+
+- **Overlay-knop hernoemd `AI` → `Stats & AI`** — het paneel is grotendeels
+  deterministische statistiek (Statistiek/History/Inzichten, alleen Mongo-reads);
+  alleen Rapporten/Chat/Review gebruiken een LLM. De nieuwe naam dekt de lading beter.
+- **Freshness-melding meet build-achterstand i.p.v. tijd sinds laatste daling** — de
+  Statistiek-tab en de patterns-`freshness`-card waarschuwden ("draai episodes:build")
+  zodra de nieuwste meting >3u nieuwer was dan de laatste episode-piek — wat juist de
+  gezonde toestand is (stabiel in range, geen recente hypo/dip). Nu komt er een
+  `episodesBuiltAt` (max `updatedAt` op de episodes) en wordt alleen gewaarschuwd als de
+  build de nieuwste metingen >60 min niet verwerkt heeft. Het dubbele freshness-blok in
+  de Statistiek-tab (`renderRecentEpisodes` + `renderStatsFreshness`) is teruggebracht
+  tot één.
 
 - **Precision-analyse en kandidaat-dempingen voor V2 (nog niet live geactiveerd)** —
   toegevoegd: read-only `scripts/analyze-hypo-quality.mjs` voor reproduceerbare

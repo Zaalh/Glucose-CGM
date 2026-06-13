@@ -105,6 +105,8 @@ npm run hypo:tune
 
 Reactieve-hypo detector V2 (`hypo.md`): bouwt `reactive_hypo_episodes`, draait de V1-vs-V2 backtest (precision/recall/lead-time), en auto-tunet de V2-parameters met een temporele train/test-split naar `scripts/reactive-hypo-v2-state.json`. Draaien in het Docker-netwerk (Mongo bereikbaar).
 
+> `episodes:build` hoeft niet meer handmatig: de `libreview-sync` `--loop`-modus bouwt `reactive_hypo_episodes` automatisch opnieuw elke `EPISODES_BUILD_INTERVAL_MINUTES` (default 15, in de compose-`environment`; 0 = uit). De CLI (`npm run episodes:build`) en de loop delen dezelfde `buildReactiveHypoEpisodes()`.
+
 ```bash
 npm run detector:fixtures
 npm run episodes:check
@@ -343,11 +345,18 @@ hypotheses en vragen. Staat uit tot `.env.ai` (een AI-provider) is gezet.
 - **Write-hardening:** de schrijf-endpoints `/_ai-review/events` en `/_ai-review/reminders`
   accepteren `POST` alleen vanaf private ranges + Tailscale + localhost (`limit_except GET`);
   lezen blijft open op het LAN.
-- **Overlay:** een AI-knop rechtsonder opent een paneel met een model-dropdown
-  (⭐ aanbevolen-groep + volledige lijst uit `/api/tags`), een "Review draaien"-knop en
-  de recente observaties/vragen, plus Statistiek/Rapporten/History-tabs. Episode-detail is
-  een gefocuste review (metrics, pattern, vergelijkbare episodes) **zonder eigen curve** —
-  Nightscout toont de glucosegrafiek al.
+- **Overlay:** een **"Stats & AI"-knop** rechtsonder opent een paneel met vijf tabs:
+  **Inzichten** (patroon-kaarten + "Review draaien"), **Statistiek**, **History**,
+  **Rapporten** en **Chat**. Het meeste is deterministische statistiek (alleen
+  Mongo-reads, geen LLM/quota); alleen Rapporten/Chat/Review gebruiken het model —
+  vandaar "Stats & AI" i.p.v. enkel "AI". De Statistiek-tab toont o.a. TIR/episodes/
+  heatmap, een **reactieve-hypo profiel** en **High→low context** (high→low-koppelingen
+  met alle vier de tijdstippen: high-piek, high-einde, start daling, nadir + de
+  deelintervallen). Episode-detail is een gefocuste review (metrics, pattern,
+  vergelijkbare episodes) **zonder eigen curve** — Nightscout toont de grafiek al.
+  Een **freshness-regel** waarschuwt alleen als de episode-build áchterloopt op de data
+  (`episodesBuiltAt` vs nieuwste meting > 60 min), niet wanneer er simpelweg geen
+  recente daling was.
 - **Periodiek (optioneel):** `AI_REVIEW_INTERVAL_MINUTES>0` laat de server elk interval
   automatisch een review draaien.
 - Volledige ontwerp + roadmap voor rijkere AI-rollen staat in `llm.md`.
