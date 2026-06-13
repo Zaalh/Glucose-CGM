@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0e0c">
+<title>CGM Review</title>
+<style>
+  :root{
+    --bg:#0a0e0c; --card:#121a16; --card2:#0f1714; --line:rgba(255,255,255,.08);
+    --tx:#e6ede9; --mut:#8aa399; --grn:#4ade80; --grn2:#34d399; --amb:#fbbf24;
+    --red:#f87171; --red2:#dc2626; --blu:#60a5fa;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+  #app{max-width:520px;margin:0 auto;padding:14px 14px 86px;min-height:100vh}
+  .scr-title{font-size:30px;font-weight:800;margin:6px 0 2px}
+  .scr-sub{color:var(--mut);margin-bottom:14px}
+  .sec{font-size:12px;letter-spacing:.06em;color:var(--mut);text-transform:uppercase;margin:18px 2px 8px;font-weight:700}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px}
+  .grid{display:grid;gap:10px}
+  .g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:1fr 1fr 1fr}.g4{grid-template-columns:repeat(4,1fr)}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:13px}
+  .stat .l{font-size:11px;letter-spacing:.05em;color:var(--mut);text-transform:uppercase}
+  .stat .v{font-size:30px;font-weight:800;line-height:1.1;margin-top:3px}
+  .stat .v small{font-size:14px;font-weight:700}
+  .stat .u{font-size:12px;color:var(--mut)}
+  .stat .d{margin-top:7px;font-size:11px;font-weight:700;color:var(--grn);background:rgba(52,211,153,.12);display:inline-block;padding:2px 8px;border-radius:8px}
+  .green{color:var(--grn)}.amber{color:var(--amb)}.red{color:var(--red)}.blue{color:var(--blu)}.mut{color:var(--mut)}
+  .seg{display:flex;gap:8px;margin:8px 0 4px}
+  .seg button{flex:1;padding:11px 0;border:1px solid var(--line);background:var(--card2);color:var(--mut);border-radius:12px;font-weight:700;font-size:14px}
+  .seg button.on{color:var(--grn);border-color:rgba(74,222,128,.5);background:rgba(74,222,128,.08)}
+  svg.chart{width:100%;height:auto;display:block}
+  .ins{border-left:3px solid var(--grn);padding:14px 14px 14px 16px}
+  .ins .h{color:var(--grn);font-weight:800;letter-spacing:.05em;font-size:13px;display:flex;justify-content:space-between}
+  .ins p{margin:10px 0 6px;font-size:17px;line-height:1.5}
+  .ins a{color:var(--grn);font-weight:700;text-decoration:none}
+  .row{display:flex;align-items:center;gap:12px;padding:13px 0;border-top:1px solid var(--line)}
+  .row:first-child{border-top:0}
+  .ic{width:42px;height:42px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;background:var(--card2);border:1px solid var(--line)}
+  .row .t{flex:1;min-width:0}
+  .row .t .ti{font-size:16px;font-weight:700}.row .t .su{color:var(--mut);font-size:13px}
+  .row .tm{color:var(--mut);font-size:13px;flex-shrink:0}
+  .chev{color:var(--mut)}
+  .dayc{display:flex;justify-content:space-between;align-items:center;padding:13px;border:1px solid var(--line);border-left-width:4px;border-radius:13px;margin-bottom:8px;background:var(--card)}
+  .dayc.ok{border-left-color:var(--grn2)}.dayc.low{border-left-color:var(--blu)}.dayc.high{border-left-color:var(--amb)}
+  .dayc .dd{font-weight:800;font-size:16px}.dayc .dm{color:var(--mut);font-size:12px;margin-top:2px}
+  .bar{height:26px;border-radius:8px;overflow:hidden;display:flex;margin:6px 0 10px}
+  .bar i{display:block;height:100%}
+  .leg{display:flex;flex-wrap:wrap;gap:14px;font-size:13px}
+  .leg b{font-weight:800}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:middle}
+  .ep-hd{display:flex;align-items:center;gap:12px;margin:4px 0 14px}
+  .ep-hd button{width:42px;height:42px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--tx);font-size:20px}
+  .ep-hd .h1{font-size:26px;font-weight:800;line-height:1}
+  .ep-hd .h2{color:var(--mut);margin-top:3px}
+  .big{display:flex;justify-content:space-between;gap:10px}
+  .big .v{font-size:40px;font-weight:800;line-height:1}
+  .sev{border-left:4px solid var(--mut);padding:9px 12px;margin:9px 0;border-radius:0 8px 8px 0;background:var(--card2)}
+  .sev.on{background:rgba(248,113,113,.08)}
+  .sev .st{font-weight:800;font-size:16px}
+  .sev .tag{font-size:11px;font-weight:800;color:var(--amb);border:1px solid var(--amb);border-radius:7px;padding:2px 7px;margin-left:8px}
+  .sim{border-left:4px solid var(--red);background:var(--card);border-radius:12px;padding:12px 13px;margin-bottom:9px;display:flex;justify-content:space-between}
+  .sim.low{border-left-color:var(--blu)}
+  .disc{color:var(--mut);font-size:12px;text-align:center;margin:18px 6px 4px;line-height:1.5}
+  .ctxrow{display:flex;gap:10px;padding:11px 0;border-top:1px solid var(--line)}
+  .ctxrow:first-child{border-top:0}
+  .ctxrow .L{width:22px;font-weight:800;color:var(--grn2);flex-shrink:0}
+  .ctxrow .x{flex:1}.ctxrow .x .tt{font-size:11px;color:var(--mut)}
+  .ctxrow .rt{color:var(--mut);font-size:11px;flex-shrink:0;text-align:right}
+  .pill{display:inline-block;font-size:12px;padding:2px 9px;border-radius:9px;background:rgba(99,102,241,.16);border:1px solid rgba(129,140,248,.3);margin:3px 4px 0 0}
+  .loader{color:var(--mut);text-align:center;padding:40px}
+  #tabbar{position:fixed;left:0;right:0;bottom:0;background:rgba(10,14,12,.95);backdrop-filter:blur(8px);border-top:1px solid var(--line);display:flex;max-width:520px;margin:0 auto}
+  #tabbar a{flex:1;text-align:center;padding:9px 0 11px;color:var(--mut);text-decoration:none;font-size:11px}
+  #tabbar a.on{color:var(--grn)}
+  #tabbar a .ti{font-size:20px;display:block}
+  .err{color:var(--red);text-align:center;padding:30px}
+</style>
+</head>
+<body>
+<div id="app"><div class="loader">Laden…</div></div>
+<nav id="tabbar">
+  <a href="#/home" data-tab="home"><span class="ti">⌂</span>Home</a>
+  <a href="#/history" data-tab="history"><span class="ti">▤</span>History</a>
+  <a href="#/stats" data-tab="stats"><span class="ti">▥</span>Stats</a>
+  <a href="#/explore" data-tab="explore"><span class="ti">⌕</span>Explore</a>
+</nav>
+<script>
+(function(){
+  "use strict";
+  var MGDL=18.0182;
+  var app=document.getElementById('app');
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+  function api(p){return fetch(p,{cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;});}
+  function num(v,u){return (v==null||v!==v)?'–':(v+(u||''));}
+  function hm(t){var d=new Date(t);return isNaN(d)?'':d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}
+  function dmon(t){var d=new Date(t);return isNaN(d)?'':d.toLocaleDateString('nl-NL',{day:'numeric',month:'short'});}
+  function loading(){app.innerHTML='<div class="loader">Laden…</div>';}
+
+  // ---- Chart: SVG-lijn met zones, episode-arcering, markers, event-glyphs, tijd-as ----
+  var GLYPH={meal:'🍽',snack:'🍪',symptom:'😵',fingerstick:'🩸',exercise:'🏃',stress:'⚡',sleep:'🛌',illness:'🤒',alcohol:'🍷',action:'✅',note:'📝'};
+  function chart(readings,o){
+    o=o||{};var W=480,H=o.height||190,pl=26,pr=10,pt=14,pb=20;
+    if(!readings||readings.length<2)return '<div class="loader">Te weinig data.</div>';
+    var t0=Date.parse(readings[0].t),t1=Date.parse(readings[readings.length-1].t),sp=Math.max(1,t1-t0);
+    var ys=readings.map(function(p){return p.mmol;});
+    var lo=Math.min.apply(null,ys),hi=Math.max.apply(null,ys);
+    lo=Math.min(lo,3.0);hi=Math.max(hi,o.zone==='high'?14:10.5);
+    lo=Math.floor(lo-0.4);hi=Math.ceil(hi+0.4);var ry=Math.max(1,hi-lo);
+    function X(t){return pl+(Date.parse(t)-t0)/sp*(W-pl-pr);}
+    function Y(v){return pt+(hi-v)/ry*(H-pt-pb);}
+    var s=['<svg class="chart" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'];
+    // target band 3.9-10
+    s.push('<rect x="'+pl+'" y="'+Y(10).toFixed(1)+'" width="'+(W-pl-pr)+'" height="'+(Y(3.9)-Y(10)).toFixed(1)+'" fill="rgba(74,222,128,0.06)"/>');
+    if(o.spanStart&&o.spanEnd){var xs=X(o.spanStart),xe=X(o.spanEnd);s.push('<rect x="'+Math.min(xs,xe).toFixed(1)+'" y="'+pt+'" width="'+Math.abs(xe-xs).toFixed(1)+'" height="'+(H-pt-pb).toFixed(1)+'" fill="rgba(148,163,184,0.10)"/>');}
+    // gridlines + labels
+    var st=ry>7?2:1;for(var v=Math.ceil(lo);v<=hi;v+=st){s.push('<line x1="'+pl+'" y1="'+Y(v).toFixed(1)+'" x2="'+(W-pr)+'" y2="'+Y(v).toFixed(1)+'" stroke="rgba(148,163,184,0.10)" stroke-width="0.5"/>');s.push('<text x="2" y="'+(Y(v)+3).toFixed(1)+'" fill="#5b7268" font-size="9">'+v+'</text>');}
+    // threshold dashes
+    [3.9,10].forEach(function(thr){s.push('<line x1="'+pl+'" y1="'+Y(thr).toFixed(1)+'" x2="'+(W-pr)+'" y2="'+Y(thr).toFixed(1)+'" stroke="rgba(138,163,153,0.45)" stroke-width="0.7" stroke-dasharray="4 4"/>');});
+    // line, colored by value (split into segments low/in/high)
+    var d='';readings.forEach(function(p,i){d+=(i?'L':'M')+X(p.t).toFixed(1)+' '+Y(p.mmol).toFixed(1)+' ';});
+    s.push('<path d="'+d+'" fill="none" stroke="#4ade80" stroke-width="2" stroke-linejoin="round"/>');
+    // event glyphs
+    (o.events||[]).forEach(function(ev){var et=Date.parse(ev.eventAt);if(!(et>=t0&&et<=t1))return;var x=X(ev.eventAt);s.push('<line x1="'+x.toFixed(1)+'" y1="'+pt+'" x2="'+x.toFixed(1)+'" y2="'+(H-pb).toFixed(1)+'" stroke="rgba(99,102,241,0.4)" stroke-width="0.8"/>');s.push('<text x="'+x.toFixed(1)+'" y="'+(pt+8)+'" font-size="10" text-anchor="middle">'+(GLYPH[ev.type]||'•')+'</text>');});
+    // markers
+    (o.markers||[]).forEach(function(m){if(!m.t)return;var mv=null,bd=1/0;readings.forEach(function(p){var dd=Math.abs(Date.parse(p.t)-Date.parse(m.t));if(dd<bd){bd=dd;mv=p.mmol;}});if(mv==null)return;var x=X(m.t),y=Y(mv);s.push('<circle cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="4" fill="'+m.c+'"/>');});
+    // time axis
+    [t0,t0+sp/2,t1].forEach(function(tx,i){var x=X(new Date(tx).toISOString());s.push('<text x="'+x.toFixed(1)+'" y="'+(H-5)+'" fill="#5b7268" font-size="9" text-anchor="'+(i===0?'start':i===2?'end':'middle')+'">'+esc(hm(tx))+'</text>');});
+    s.push('</svg>');return s.join('');
+  }
+
+  // ---------- HOME ----------
+  function home(){
+    loading();
+    Promise.all([api('/_prediction/latest'),api('/_ai-review/day'),api('/_ai-review/stats?days=7'),api('/_ai-review/source-health'),api('/_overlay/entries?count=1500'),api('/_ai-review/reports?limit=1')]).then(function(r){
+      var snap=(r[0]&&r[0].snapshot)||{},day=r[1]||{},st7=r[2]||{},sh=r[3]||{},ents=(r[4]&&r[4].entries)||[],rep=(r[5]&&r[5].reports&&r[5].reports[0])||null;
+      var stat=day.stats||{};
+      var cur=snap.currentMmol!=null?snap.currentMmol:(ents.length?(ents[ents.length-1].sgv/MGDL).toFixed(1):'–');
+      window.__ents=ents;
+      var h=['<div class="scr-title">'+esc(cur)+' <small class="mut" style="font-size:16px">mmol/L</small></div>',
+        '<div class="scr-sub">'+esc(hm(Date.now()))+' · bron '+esc(sh.status||'?')+' ('+num(sh.coverage14d,'%')+' dekking)</div>'];
+      h.push('<div class="seg" id="winseg"><button data-w="4">4u</button><button data-w="8">8u</button><button data-w="24" class="on">24u</button></div>');
+      h.push('<div class="card" id="homechart"></div>');
+      h.push('<div class="grid g3" style="margin-top:12px">');
+      h.push(statc('AVG 24u',num(stat.mean,''),'mmol/L'));
+      h.push(statc('TIR 24u',num(stat.tir,'')+'<small>%</small>','in bereik','green'));
+      h.push(statc('CV 7d',num(st7.cv,'')+'<small>%</small>',(st7.cv!=null&&st7.cv<36)?'stabiel':'wisselend','green'));
+      h.push('</div>');
+      // donut
+      h.push('<div class="card" style="margin-top:12px;display:flex;gap:16px;align-items:center">'+donut(stat.tir||0)+'<div style="flex:1">'+
+        brk('Hoog >10.0',num(stat.tar,'%'),'red')+brk('In bereik',num(stat.tir,'%'),'green')+brk('Laag <3.9',num(stat.tbr,'%'),'blue')+
+        '<div class="mut" style="font-size:12px;margin-top:6px">3.9-10.0 mmol/L · 24u</div></div></div>');
+      // insight
+      var itxt=rep&&rep.body?rep.body:(day.summary||'Nog geen samenvatting.');
+      h.push('<div class="card ins" style="margin-top:12px"><div class="h"><span>✦ INZICHT VANDAAG</span></div><p>'+esc(itxt)+'</p>'+(rep?'<a href="#/stats">Volledige statistiek ›</a>':'')+'</div>');
+      app.innerHTML=h.join('');
+      drawHome(24);
+      document.getElementById('winseg').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;[].forEach.call(this.children,function(x){x.classList.toggle('on',x===b);});drawHome(+b.getAttribute('data-w'));});
+    });
+  }
+  function drawHome(hrs){
+    var box=document.getElementById('homechart');if(!box)return;
+    var since=Date.now()-hrs*3600000;
+    var rd=(window.__ents||[]).filter(function(e){return e.date>=since;}).map(function(e){return{t:new Date(e.date).toISOString(),mmol:e.sgv/MGDL};});
+    box.innerHTML='<div class="sec" style="margin:0 0 6px">Laatste '+hrs+'u</div>'+chart(rd,{height:180});
+  }
+  function statc(l,v,u,cls){return '<div class="stat"><div class="l">'+esc(l)+'</div><div class="v '+(cls||'')+'">'+v+'</div><div class="u">'+esc(u)+'</div></div>';}
+  function brk(l,v,cls){return '<div style="display:flex;justify-content:space-between;padding:3px 0"><span class="mut">'+esc(l)+'</span><b class="'+cls+'">'+esc(v)+'</b></div>';}
+  function donut(tir){var r=34,c=2*Math.PI*r,off=c*(1-(tir||0)/100);return '<svg width="92" height="92" viewBox="0 0 92 92"><circle cx="46" cy="46" r="'+r+'" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="9"/><circle cx="46" cy="46" r="'+r+'" fill="none" stroke="#4ade80" stroke-width="9" stroke-linecap="round" stroke-dasharray="'+c.toFixed(1)+'" stroke-dashoffset="'+off.toFixed(1)+'" transform="rotate(-90 46 46)"/><text x="46" y="44" text-anchor="middle" font-size="20" font-weight="800" fill="#e6ede9">'+Math.round(tir||0)+'%</text><text x="46" y="60" text-anchor="middle" font-size="10" fill="#8aa399">TIR</text></svg>';}
+
+  // ---------- STATS ----------
+  function stats(days){
+    days=days||14;loading();
+    api('/_ai-review/stats?days='+days).then(function(j){
+      if(!j||!j.ok){app.innerHTML='<div class="err">Geen statistiek.</div>';return;}
+      var t=j.trend||{};
+      var h=['<div class="scr-title">Statistiek</div>'];
+      h.push('<div class="seg" id="dseg">'+[7,14,30,90].map(function(d){return '<button data-d="'+d+'"'+(d===days?' class="on"':'')+'>'+d+'d</button>';}).join('')+'</div>');
+      h.push('<div class="sec">Kernmetrics · laatste '+days+' dagen</div>');
+      h.push('<div class="grid g2">');
+      h.push(statc('Time in Range',num(j.tir,'')+'<small>%</small>','3.9-10.0 mmol/L','green')+'');
+      h.push(statc('Gem. glucose',num(j.mean,''),'mmol/L · GMI '+num(j.gmi,'%')));
+      h.push(statc('Variabiliteit CV',num(j.cv,'')+'<small>%</small>',(j.cv!=null&&j.cv<36)?'stabiel (<36%)':'wisselend','green'));
+      h.push(statc('Std-deviatie',num(j.sd,''),'mmol/L'));
+      h.push('</div>');
+      // breakdown
+      var low=j.tbr||0,inr=j.tir||0,high=Math.max(0,(j.tar||0)-(j.veryHigh||0)),vh=j.veryHigh||0;
+      h.push('<div class="sec">Time in range breakdown</div><div class="card">');
+      h.push('<div class="bar"><i style="width:'+low+'%;background:#60a5fa"></i><i style="width:'+inr+'%;background:#4ade80"></i><i style="width:'+high+'%;background:#f87171"></i><i style="width:'+vh+'%;background:#dc2626"></i></div>');
+      h.push('<div class="leg"><span><i class="dot" style="background:#60a5fa"></i>Laag <b>'+num(j.tbr,'%')+'</b></span><span><i class="dot" style="background:#4ade80"></i>In range <b>'+num(j.tir,'%')+'</b></span><span><i class="dot" style="background:#f87171"></i>Hoog <b>'+high.toFixed(0)+'%</b></span><span><i class="dot" style="background:#dc2626"></i>Zeer hoog <b>'+num(j.veryHigh,'%')+'</b></span></div>');
+      h.push('<div class="grid g2" style="margin-top:12px"><div><div class="mut" style="font-size:11px">ZEER LAAG &lt;3.0</div><div style="font-size:22px;font-weight:800" class="blue">'+num(j.veryLow,'%')+'</div><div class="mut" style="font-size:11px">~'+Math.round((j.veryLow||0)*14.4)+' min/dag</div></div>');
+      h.push('<div><div class="mut" style="font-size:11px">ZEER HOOG &gt;13.9</div><div style="font-size:22px;font-weight:800" class="red">'+num(j.veryHigh,'%')+'</div><div class="mut" style="font-size:11px">~'+Math.round((j.veryHigh||0)*14.4)+' min/dag</div></div></div></div>');
+      // AGP (per-uur gemiddelde)
+      h.push('<div class="sec">AGP · gemiddelde per uur ('+days+'d)</div><div class="card">'+agp(j.perHour||[])+'</div>');
+      // hourly TIR heatmap
+      h.push('<div class="sec">TIR per uur</div><div class="card">'+hourTir(j.perHour||[])+'</div>');
+      app.innerHTML=h.join('');
+      document.getElementById('dseg').addEventListener('click',function(e){var b=e.target.closest('button');if(b)stats(+b.getAttribute('data-d'));});
+    });
+  }
+  function agp(ph){
+    if(!ph.length)return '<div class="loader">Geen data.</div>';
+    var rd=ph.filter(function(p){return p.mean!=null;}).map(function(p){return{t:new Date(2020,0,1,p.hour).toISOString(),mmol:p.mean};});
+    return chart(rd,{height:170});
+  }
+  function hourTir(ph){
+    var s='<div style="display:flex;gap:2px">';
+    ph.forEach(function(p){var tir=p.tir||0;var a=Math.max(.12,tir/100);s+='<div title="'+p.hour+':00 · TIR '+tir+'%" style="flex:1;height:30px;border-radius:3px;background:rgba(74,222,128,'+a.toFixed(2)+')"></div>';});
+    s+='</div><div style="display:flex;justify-content:space-between;color:#5b7268;font-size:10px;margin-top:4px"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>';
+    return s;
+  }
+
+  // ---------- HISTORY ----------
+  function history(){
+    loading();
+    api('/_ai-review/history?days=14').then(function(j){
+      if(!j||!j.ok){app.innerHTML='<div class="err">Geen history.</div>';return;}
+      var h=['<div class="scr-title">History</div><div class="scr-sub">Dag voor dag — tik voor detail</div>'];
+      (j.history||[]).forEach(function(d){
+        var cls=(d.lowCount>0||(d.tbr||0)>=4)?'low':(d.highCount>2?'high':'ok');
+        h.push('<a href="#/day/'+esc(d.date)+'" style="text-decoration:none;color:inherit"><div class="dayc '+cls+'"><div><div class="dd">'+esc(dmon(d.date+'T12:00'))+'</div><div class="dm">TIR '+num(d.tir,'%')+' · laag '+num(d.tbr,'%')+' · '+d.lowCount+' low / '+d.highCount+' high</div></div><span class="chev">›</span></div></a>');
+      });
+      app.innerHTML=h.join('');
+    });
+  }
+  function day(date){
+    loading();
+    api('/_ai-review/day?date='+encodeURIComponent(date)).then(function(j){
+      if(!j||!j.ok){app.innerHTML='<div class="err">Geen dagdetail.</div>';return;}
+      var st=j.stats||{},no=j.notable||{};
+      var h=['<div class="ep-hd"><button onclick="history.back()">‹</button><div><div class="h1">'+esc(dmon(date+'T12:00'))+'</div><div class="h2">Dagreview</div></div></div>'];
+      h.push('<div class="grid g4">'+statc('TIR',num(st.tir,'%'),'','green')+statc('Gem',num(st.mean,''),'mmol')+statc('Low',num((j.lowEpisodes||[]).length,''),'eps','blue')+statc('High',num((j.highEpisodes||[]).length,''),'eps','red')+'</div>');
+      h.push('<div class="sec">Glucose-events</div>');
+      var evs=[];
+      (j.lowEpisodes||[]).forEach(function(e){evs.push({t:e.peakAt,ic:'↓',cls:'blue',ti:'Low episode',su:num(e.peakMmol,'')+'→'+num(e.nadirMmol,'')+' mmol',href:'#/episode/low/'+encodeURIComponent(e.peakAt)});});
+      (j.highEpisodes||[]).forEach(function(e){evs.push({t:e.peakAt,ic:'↑',cls:'red',ti:'High episode',su:'piek '+num(e.peakMmol,'')+' mmol · '+num(e.durationMinutes,'m'),href:'#/episode/high/'+encodeURIComponent(e.peakAt)});});
+      evs.sort(function(a,b){return Date.parse(a.t)-Date.parse(b.t);});
+      h.push('<div class="card">');
+      if(!evs.length)h.push('<div class="mut">Geen low/high episodes deze dag.</div>');
+      evs.forEach(function(e){h.push('<a href="'+e.href+'" style="text-decoration:none;color:inherit"><div class="row"><div class="ic '+e.cls+'">'+e.ic+'</div><div class="t"><div class="ti">'+esc(e.ti)+'</div><div class="su">'+esc(e.su)+'</div></div><div class="tm">'+esc(hm(e.t))+'</div></div></a>');});
+      h.push('</div>');
+      if(no.worstLow)h.push('<div class="disc">Diepste low '+num(no.worstLow.nadirMmol,'')+' mmol · hypo-belasting '+num(no.hypoBurden3_9,'')+'</div>');
+      app.innerHTML=h.join('');
+    });
+  }
+
+  // ---------- EXPLORE ----------
+  function explore(){
+    loading();
+    Promise.all([api('/_ai-review/episodes?limit=1'),api('/_ai-review/day')]).then(function(r){
+      var lowPeak=(r[0]&&r[0].episodes&&r[0].episodes[0]&&r[0].episodes[0].peakAt)||null;
+      var highs=(r[1]&&r[1].highEpisodes)||[];var highPeak=highs.length?highs[highs.length-1].peakAt:null;
+      var h=['<div class="scr-title">Explore</div><div class="scr-sub">Diepte-analyse</div><div class="sec">Episodes</div>'];
+      h.push(card2('↑','red','High Episode','Hyperglykemie-analyse',highPeak?'#/episode/high/'+encodeURIComponent(highPeak):'#/history'));
+      h.push(card2('↓','blue','Low Episode','Hypoglykemie-analyse',lowPeak?'#/episode/low/'+encodeURIComponent(lowPeak):'#/history'));
+      app.innerHTML=h.join('');
+    });
+  }
+  function card2(ic,cls,ti,su,href){return '<a href="'+href+'" style="text-decoration:none;color:inherit"><div class="row card" style="margin-bottom:10px"><div class="ic '+cls+'">'+ic+'</div><div class="t"><div class="ti">'+esc(ti)+'</div><div class="su">'+esc(su)+'</div></div><span class="chev">›</span></div></a>';}
+
+  // ---------- EPISODE DETAIL ----------
+  function episode(type,peak){
+    loading();
+    api('/_ai-review/episode-detail?type='+encodeURIComponent(type)+'&peakAt='+encodeURIComponent(peak)).then(function(d){
+      if(!d||!d.ok){app.innerHTML='<div class="err">Episode niet gevonden.</div>';return;}
+      type=d.type;var isLow=type==='low';
+      var ep=d.episode||{},m=d.metrics||{};
+      var ttl=isLow?'Low Episode':'High Episode';
+      var when=isLow?(ep.nadirAt||ep.peakAt):m.peakAt;
+      var h=['<div class="ep-hd"><button onclick="history.back()">‹</button><div><div class="h1">'+ttl+'</div><div class="h2">'+esc(dmon(when))+' · '+esc(hm(when))+'</div></div></div>'];
+      // metric card
+      var val=isLow?ep.nadirMmol:m.peakMmol;
+      var dur=isLow?(ep.recoveryMinutes!=null?(ep.minutesPeakToNadir||0)+(ep.recoveryMinutes||0):ep.minutesPeakToNadir):m.durationAbove10Minutes;
+      h.push('<div class="card" style="border-color:'+(isLow?'rgba(96,165,250,.3)':'rgba(248,113,113,.3)')+'">');
+      h.push('<div class="big"><div><div class="mut" style="font-size:11px">'+(isLow?'NADIR':'PIEK')+'</div><div class="v '+(isLow?'blue':'red')+'">'+num(val,'')+'</div><div class="mut">mmol/L</div></div>'+
+        '<div style="text-align:right"><div class="mut" style="font-size:11px">DUUR</div><div class="v">'+num(dur,'')+' <small style="font-size:16px">min</small></div></div></div>');
+      h.push('<div class="grid g3" style="margin-top:14px">');
+      if(isLow){
+        h.push(mc(isLow?'DALING':'STIJGING',num(ep.fallRateMmolPerMin,'')+'/min','blue'));
+        h.push(mc('HERSTEL',num(ep.recoveryMinutes,'m'),'green'));
+        h.push(mc('AREA <doel',num(ep.areaBelow3_9,''),'blue'));
+      }else{
+        h.push(mc('STIJGING',num(m.areaAbove10!=null?'':'',''))); // placeholder replaced below
+        h.push(mc('HERSTEL',num(m.recoveryMinutes,'m'),'green'));
+        h.push(mc('AREA >doel',num(m.areaAbove10,''),'red'));
+      }
+      h.push('</div></div>');
+      // timeline
+      var markers=isLow?[{t:ep.peakAt,c:'#fbbf24'},{t:ep.nadirAt,c:'#60a5fa'},{t:ep.recoveredAt,c:'#34d399'}]:[{t:m.startAt,c:'#34d399'},{t:m.peakAt,c:'#fbbf24'},{t:m.endAt,c:'#60a5fa'}];
+      var span=isLow?[ep.peakAt,ep.recoveredAt||ep.nadirAt]:[m.startAt,m.endAt];
+      h.push('<div class="sec">Episode-tijdlijn</div><div class="card">'+chart(d.readings||[],{height:200,zone:isLow?'low':'high',markers:markers,events:d.events||[],spanStart:span[0],spanEnd:span[1]})+'</div>');
+      // CGM context
+      var ctx=[];
+      if(d.trigger)ctx.push(crow('M',ttl,(GLYPH[d.trigger.type]||'')+' '+d.trigger.type+(d.trigger.note?' ('+d.trigger.note+')':''),'~'+d.trigger.minutesBefore+'m vóór'));
+      (d.events||[]).forEach(function(ev){ctx.push(crow((GLYPH[ev.type]||'•'),'',ev.type+(ev.note?' — '+ev.note:'')+(ev.fingerstickMmol!=null?' '+ev.fingerstickMmol+' mmol':''),hm(ev.eventAt)));});
+      if(isLow&&d.nearbyHighs&&d.nearbyHighs.length){var nh=d.nearbyHighs[d.nearbyHighs.length-1];ctx.push(crow('H','','Hoge piek vooraf '+num(nh.peakMmol,'')+' mmol',hm(nh.peakAt)));}
+      (d.feedback||[]).forEach(function(f){ctx.push(crow('F','',f.type+(f.note?' ('+f.note+')':''),hm(f.createdAt)));});
+      h.push('<div class="sec">CGM-context — venster rond episode</div><div class="card">'+(ctx.length?ctx.join(''):'<div class="mut">Geen notities/events. Log context in de overlay.</div>')+'</div>');
+      // severity bands (low)
+      if(isLow){
+        var nadir=+ep.nadirMmol;
+        h.push('<div class="sec">Severity</div><div class="card">');
+        [['Mild','3.0–3.9 mmol/L',nadir>=3.0&&nadir<3.9],['Significant','2.8–3.0 mmol/L',nadir>=2.8&&nadir<3.0],['Severe','<2.8 mmol/L',nadir<2.8]].forEach(function(b){
+          h.push('<div class="sev'+(b[2]?' on':'')+'"><div class="st">'+b[0]+(b[2]?'<span class="tag">DEZE</span>':'')+' <span class="mut" style="font-size:12px;font-weight:400">'+b[1]+'</span></div><div class="mut" style="font-size:13px">Nadir '+num(ep.nadirMmol,'')+' mmol/L vergeleken met deze band.</div></div>');
+        });
+        h.push('</div>');
+      }
+      // cohort
+      if(isLow&&d.cohort&&d.cohort.count>2){var c=d.cohort;h.push('<div class="card" style="margin-top:10px"><b>Vergeleken met je '+c.count+' recente dips:</b> nadir '+num(ep.nadirMmol,'')+' vs mediaan '+num(c.medianNadirMmol,'')+' · herstel '+num(ep.recoveryMinutes,'m')+' vs '+num(c.medianRecoveryMin,'m')+'</div>');}
+      // notable
+      if(d.notableReasons&&d.notableReasons.length){h.push('<div class="sec">Waarom opvallend</div><div class="card"><ul style="margin:0;padding-left:18px">'+d.notableReasons.map(function(r){return '<li style="margin-bottom:5px">'+esc(r)+'</li>';}).join('')+'</ul></div>');}
+      h.push('<div class="disc">Observationele CGM-analyse, geen medisch advies. Raadpleeg je arts voor klinische beslissingen.</div>');
+      app.innerHTML=h.join('');
+      // fix high onset placeholder
+      if(!isLow){var cards=app.querySelectorAll('.card .grid.g3 .stat');if(cards[0]){cards[0].querySelector('.v').textContent=num(m.durationAbove13_9Minutes,'m');cards[0].querySelector('.l').textContent='>13.9';}}
+    });
+  }
+  function mc(l,v,cls){return '<div class="stat" style="padding:10px"><div class="l">'+esc(l)+'</div><div class="v '+(cls||'')+'" style="font-size:18px">'+v+'</div></div>';}
+  function crow(L,tt,main,rt){return '<div class="ctxrow"><div class="L">'+esc(L)+'</div><div class="x">'+(tt?'<div class="tt">'+esc(tt)+'</div>':'')+'<div>'+esc(main)+'</div></div><div class="rt">'+esc(rt)+'</div></div>';}
+
+  // ---------- ROUTER ----------
+  function route(){
+    var hsh=location.hash.replace(/^#\/?/,'')||'home';
+    var parts=hsh.split('/');
+    var tab=parts[0];
+    [].forEach.call(document.querySelectorAll('#tabbar a'),function(a){a.classList.toggle('on',a.getAttribute('data-tab')===tab);});
+    window.scrollTo(0,0);
+    if(tab==='home')return home();
+    if(tab==='stats')return stats(14);
+    if(tab==='history')return history();
+    if(tab==='explore')return explore();
+    if(tab==='day')return day(decodeURIComponent(parts[1]||''));
+    if(tab==='episode')return episode(parts[1],decodeURIComponent(parts[2]||''));
+    home();
+  }
+  window.addEventListener('hashchange',route);
+  if(!location.hash)location.hash='#/home';
+  route();
+})();
+</script>
+</body>
+</html>

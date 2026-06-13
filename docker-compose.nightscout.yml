@@ -80,6 +80,7 @@ services:
       - ./nightscout-overlay/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./nightscout-overlay/app-locations.conf:/etc/nginx/overlay/app-locations.conf:ro
       - ./nightscout-overlay/rate-overlay.js:/etc/nginx/overlay/rate-overlay.js:ro
+      - ./nightscout-overlay/ai-app.html:/etc/nginx/overlay/ai-app.html:ro
       - ./nightscout-overlay/sw.js:/etc/nginx/overlay/sw.js:ro
       - ./nightscout-overlay/certs:/etc/nginx/certs:ro
     ports:
