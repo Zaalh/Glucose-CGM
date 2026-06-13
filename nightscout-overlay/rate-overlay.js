@@ -2201,7 +2201,7 @@
     var lowsList = episodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol < 3.9; });
     var nearList = episodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol >= 3.9 && e.nadirMmol < 4.5; });
     var dipsList = episodes.filter(function (e) { return !(e.nadirMmol != null && e.nadirMmol < 4.5); });
-    h.push(renderRecentEpisodes(episodes, stats));
+    h.push(renderRecentEpisodes(episodes));
     h.push(aiEpisodeSection('Lows (' + lowsList.length + ' getoond) · nadir onder 3.9', lowsList, 'Geen echte lows in dit venster.'));
     if (nearList.length) {
       h.push(aiEpisodeSection('Near-hypo’s (' + nearList.length + ' getoond) · nadir 3.9–4.5', nearList, null));
@@ -2213,22 +2213,11 @@
     box.innerHTML = h.join('');
   }
 
-  function renderRecentEpisodes(episodes, stats) {
+  // Freshness (nieuwste CGM/episode/build) staat al in renderStatsFreshness;
+  // hier alleen de records zelf, om dubbele weergave te voorkomen.
+  function renderRecentEpisodes(episodes) {
     var recent = (episodes || []).slice(0, 8);
     var h = ['<div class="ai-sec">Laatste episode-records</div>'];
-    var latestEntry = stats && stats.latestEntryAt ? new Date(stats.latestEntryAt) : null;
-    var latestEpisode = recent.length && recent[0].peakAt ? new Date(recent[0].peakAt) : null;
-    var builtAt = stats && stats.episodesBuiltAt ? new Date(stats.episodesBuiltAt) : null;
-    var meta = [];
-    if (latestEntry) meta.push('nieuwste CGM ' + latestEntry.toLocaleString());
-    if (latestEpisode) meta.push('nieuwste episode ' + latestEpisode.toLocaleString());
-    if (builtAt) meta.push('episodes bijgewerkt ' + builtAt.toLocaleString());
-    // Alleen waarschuwen als de build achterloopt op de data, niet als er
-    // simpelweg geen recente daling was.
-    if (latestEntry && builtAt && latestEntry.getTime() - builtAt.getTime() > 60 * 60 * 1000) {
-      meta.push('build loopt achter (' + Math.round((latestEntry.getTime() - builtAt.getTime()) / 3600000) + 'u): draai episodes:build');
-    }
-    if (meta.length) h.push('<div class="ai-fine">' + escapeHtml(meta.join(' · ')) + '</div>');
     if (!recent.length) {
       h.push('<div class="ai-empty">Geen episode-records in dit venster.</div>');
       return h.join('');
