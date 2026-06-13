@@ -52,11 +52,12 @@ function isLocalPeak(timeline, i) {
 function troughBefore(timeline, i, lookbackMin) {
   const from = timeline[i].date - lookbackMin * MS_PER_MIN
   let lo = mmol(timeline[i])
+  let loAt = timeline[i]
   for (let j = i - 1; j >= 0 && timeline[j].date >= from; j -= 1) {
     const v = mmol(timeline[j])
-    if (v < lo) lo = v
+    if (v < lo) { lo = v; loAt = timeline[j] }
   }
-  return lo
+  return { mmol: lo, at: loAt }
 }
 
 // Hoogste waarde in het lookback-venster vóór index i (voor de daalhoogte).
@@ -104,7 +105,8 @@ export function buildGlucoseEvents(timeline, options = {}) {
           // Piek binnen de run.
           let pIdx = runStart
           for (let j = runStart; j <= endIdx; j += 1) { if (mmol(tl[j]) > mmol(tl[pIdx])) pIdx = j; inHighRun[j] = true }
-          const rise = mmol(tl[pIdx]) - troughBefore(tl, runStart, opt.riseLookbackMin)
+          const trough = troughBefore(tl, runStart, opt.riseLookbackMin)
+          const rise = mmol(tl[pIdx]) - trough.mmol
           const onsetMin = Math.max(1, (tl[pIdx].date - tl[runStart].date) / MS_PER_MIN)
           events.push({
             type: 'high_episode',
@@ -138,14 +140,16 @@ export function buildGlucoseEvents(timeline, options = {}) {
   for (let i = 1; i < tl.length - 1; i += 1) {
     if (inHighRun[i]) continue
     if (!isLocalPeak(tl, i)) continue
-    const rise = mmol(tl[i]) - troughBefore(tl, i, opt.riseLookbackMin)
+    const trough = troughBefore(tl, i, opt.riseLookbackMin)
+    const rise = mmol(tl[i]) - trough.mmol
     if (rise < opt.minRiseMmol) continue
+    const minutes = Math.max(1, (tl[i].date - trough.at.date) / MS_PER_MIN)
     events.push({
       type: 'rise_local_peak',
       at: isoOf(tl[i]),
       mmol: round(mmol(tl[i]), 1),
       label: 'Stijging gedetecteerd',
-      detail: round(mmol(tl[i]), 1) + ' mmol/L · lokale piek',
+      detail: '+' + round(rise, 1) + ' mmol vanaf dal · +' + round(rise / minutes, 2) + ' mmol/L/min',
     })
   }
 
