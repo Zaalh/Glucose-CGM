@@ -1977,9 +1977,20 @@
     history.forEach(function (d) {
       var sev = d.lowCount > 0 || (d.tbr || 0) >= 4 ? 'low' : (d.highCount > 2 ? 'high' : 'ok');
       var lvl = d.sourceLevel && d.sourceLevel !== 'goed' ? ' · dekking ' + d.coverage + '%' : '';
+      var parts = [
+        'TIR ' + aiNum(d.tir, '%'),
+        'laag ' + aiNum(d.tbr, '%'),
+        (d.lowCount || 0) + ' low',
+        (d.nearHypoCount || 0) + ' near',
+        (d.dipCount || 0) + ' dip',
+        (d.highCount || 0) + ' high'
+      ];
+      if (d.hypoBurden3_9) parts.push('burden ' + d.hypoBurden3_9);
+      if (d.worstLowMmol != null) parts.push('diepste low ' + d.worstLowMmol);
+      else if (d.worstEpisodeMmol != null) parts.push('laagste episode ' + d.worstEpisodeMmol);
       h.push('<div class="ai-hday ' + sev + '" data-hist-date="' + escapeHtml(d.date) + '">' +
         '<span class="ai-hday-d">' + escapeHtml(d.date) + '</span>' +
-        '<span class="ai-hday-m">TIR ' + aiNum(d.tir, '%') + ' · laag ' + aiNum(d.tbr, '%') + ' · ' + d.lowCount + ' low / ' + d.highCount + ' high' + lvl + '</span></div>');
+        '<span class="ai-hday-m">' + escapeHtml(parts.join(' · ') + lvl) + '</span></div>');
     });
     box.innerHTML = h.join('');
   }
@@ -2002,17 +2013,26 @@
         if (!day || !day.ok) { box.innerHTML = '<div class="ai-empty">Geen dagdetail.</div>'; return; }
         var h = ['<div class="ai-sec">Dagdetail ' + escapeHtml(date) + '</div>', renderAiDayReview(day)];
         if (day.lowEpisodes && day.lowEpisodes.length) {
-          h.push('<div class="ai-sec">Low episodes</div>');
-          day.lowEpisodes.forEach(function (e) {
-            var head = aiTime(e.peakAt) + ' · ' + aiNum(e.peakMmol, '') + '→' + aiNum(e.nadirMmol, '') + ' mmol';
-            h.push('<div class="ai-ep ai-item" data-ep-kind="low" data-ep-peak="' + escapeHtml(e.peakAt || '') + '">' +
-              '<div class="ai-ep-head ai-item-head"><span class="ai-chev">▸</span>' + escapeHtml(head) + '</div>' +
-              '<div class="ai-detail"><div class="ai-curve"></div></div></div>');
-          });
+          h.push(renderDayEpisodeGroup('Lows dagdetail', day.lowEpisodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol < 3.9; })));
+          h.push(renderDayEpisodeGroup('Near-hypo’s dagdetail', day.lowEpisodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol >= 3.9 && e.nadirMmol < 4.5; })));
+          h.push(renderDayEpisodeGroup('Dips dagdetail', day.lowEpisodes.filter(function (e) { return !(e.nadirMmol != null && e.nadirMmol < 4.5); })));
         }
         box.innerHTML = h.join('');
       })
       .catch(function () { box.innerHTML = '<div class="ai-empty">Kon dag niet laden.</div>'; });
+  }
+
+  function renderDayEpisodeGroup(title, list) {
+    if (!list || !list.length) return '';
+    var h = ['<div class="ai-sec">' + escapeHtml(title + ' (' + list.length + ')') + '</div>'];
+    list.forEach(function (e) {
+      var head = aiTime(e.peakAt) + ' · ' + aiNum(e.peakMmol, '') + '→' + aiNum(e.nadirMmol, '') + ' mmol' +
+        (e.outcome ? ' · ' + e.outcome : '');
+      h.push('<div class="ai-ep ai-item" data-ep-kind="low" data-ep-peak="' + escapeHtml(e.peakAt || '') + '">' +
+        '<div class="ai-ep-head ai-item-head"><span class="ai-chev">▸</span>' + escapeHtml(head) + '</div>' +
+        '<div class="ai-detail"><div class="ai-curve"></div></div></div>');
+    });
+    return h.join('');
   }
 
   // --- Settings (SmartXdrip §20.3): vensters in localStorage. Raakt de detector niet.
@@ -2081,7 +2101,9 @@
     h.push(aiCard('Lows', aiNum(stats.lows ? stats.lows.count : null, '') + (stats.lows && stats.lows.longestMin ? ' · ' + stats.lows.longestMin + 'm' : ''), 'low'));
     h.push('</div>');
     h.push('<div class="ai-fine">GMI ' + aiNum(stats.gmi, '%') + ' · mediaan ' + aiNum(stats.median, '') + ' (IQR ' + aiNum(stats.p25, '') + '–' + aiNum(stats.p75, '') + ') · very-low &lt;3.0: ' + aiNum(stats.veryLow, '%') + ' · very-high &gt;13.9: ' + aiNum(stats.veryHigh, '%') + ' · min ' + aiNum(stats.min, '') + ' · max ' + aiNum(stats.max, '') + '</div>');
+    h.push(renderStatsFreshness(stats));
     if (stats.reactive) h.push(renderReactiveHypoSummary(stats.reactive));
+    if (stats.highToLowContext) h.push(renderHighToLowContext(stats.highToLowContext));
     h.push(renderReactiveHypoInfo());
     if (day && day.ok) {
       h.push(renderAiDayReview(day));
@@ -2156,16 +2178,43 @@
     }
     // Splitsen: echte lows (nadir <3.9) vs dips (daling vanaf piek, niet onder 3.9).
     var lowsList = episodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol < 3.9; });
-    var dipsList = episodes.filter(function (e) { return !(e.nadirMmol != null && e.nadirMmol < 3.9); });
+    var nearList = episodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol >= 3.9 && e.nadirMmol < 4.5; });
+    var dipsList = episodes.filter(function (e) { return !(e.nadirMmol != null && e.nadirMmol < 4.5); });
+    h.push(renderRecentEpisodes(episodes));
     h.push('<div class="ai-sec">Lows (' + lowsList.length + ' getoond) · nadir onder 3.9</div>');
     if (!lowsList.length) h.push('<div class="ai-empty">Geen echte lows in dit venster.</div>');
     lowsList.forEach(function (e) { h.push(aiEpisodeListItem(e)); });
+    if (nearList.length) {
+      h.push('<div class="ai-sec">Near-hypo’s (' + nearList.length + ' getoond) · nadir 3.9–4.5</div>');
+      nearList.forEach(function (e) { h.push(aiEpisodeListItem(e)); });
+    }
     if (dipsList.length) {
-      h.push('<div class="ai-sec">Dips (' + dipsList.length + ' getoond) · daling vanaf piek — vroeg signaal, niet onder 3.9</div>');
+      h.push('<div class="ai-sec">Dips (' + dipsList.length + ' getoond) · daling vanaf piek — vroeg signaal, niet onder 4.5</div>');
       dipsList.forEach(function (e) { h.push(aiEpisodeListItem(e)); });
     }
     if (evaluation && evaluation.ok) h.push(renderAiEvaluation(evaluation));
     box.innerHTML = h.join('');
+  }
+
+  function renderRecentEpisodes(episodes) {
+    var recent = (episodes || []).slice(0, 8);
+    var h = ['<div class="ai-sec">Recente lows/dips</div>'];
+    if (!recent.length) {
+      h.push('<div class="ai-empty">Geen recente lows/dips in dit venster.</div>');
+      return h.join('');
+    }
+    recent.forEach(function (e) {
+      var kind = e.nadirMmol != null && e.nadirMmol < 3.9 ? 'Low' : 'Dip';
+      var line = kind + ' · ' + aiTime(e.nadirAt || e.peakAt) + ' · piek ' + aiNum(e.peakMmol, '') +
+        ' → nadir ' + aiNum(e.nadirMmol, '') + ' mmol';
+      var meta = [];
+      if (e.minutesPeakToNadir != null) meta.push(e.minutesPeakToNadir + 'm');
+      if (e.dropFromPeakMmol != null) meta.push('daling ' + e.dropFromPeakMmol + ' mmol');
+      if (e.outcome) meta.push(e.outcome);
+      if (e.severity) meta.push(e.severity);
+      h.push('<div class="ai-fine">' + escapeHtml(line + (meta.length ? ' · ' + meta.join(' · ') : '')) + '</div>');
+    });
+    return h.join('');
   }
 
   function renderReactiveHypoSummary(r) {
@@ -2184,6 +2233,41 @@
     if (r.artefactFlags && (r.artefactFlags.singlePoint || r.artefactFlags.possibleCompression)) {
       h.push('<div class="ai-fine">Artefact-check: single-point lows ' + r.artefactFlags.singlePoint + ' · mogelijke compressie-lows ' + r.artefactFlags.possibleCompression + '</div>');
     }
+    return h.join('');
+  }
+
+  function renderStatsFreshness(stats) {
+    var latestEntry = stats.latestEntryAt ? new Date(stats.latestEntryAt) : null;
+    var latestEpisode = stats.reactive && stats.reactive.latestPeakAt ? new Date(stats.reactive.latestPeakAt) : null;
+    var parts = [];
+    if (latestEntry) parts.push('nieuwste CGM ' + latestEntry.toLocaleString());
+    if (latestEpisode) parts.push('nieuwste episode ' + latestEpisode.toLocaleString());
+    var stale = latestEntry && latestEpisode && (latestEntry.getTime() - latestEpisode.getTime()) > 3 * 60 * 60 * 1000;
+    if (!parts.length) return '';
+    return '<div class="ai-fine">' + escapeHtml(parts.join(' · ')) +
+      (stale ? ' · als recente lows/dips ontbreken: draai episodes:build om episodes bij te werken' : '') + '</div>';
+  }
+
+  function renderHighToLowContext(ctx) {
+    var h = ['<div class="ai-sec">High→low context · relevant</div>'];
+    h.push('<div class="ai-fine">' + aiNum(ctx.relevant, '') + ' relevante koppeling(en) van ' + aiNum(ctx.total, '') + ' high→low patroon(en) in dit venster.</div>');
+    var list = (ctx.top && ctx.top.length ? ctx.top : (ctx.recent || [])).slice(0, 5);
+    if (!list.length) {
+      h.push('<div class="ai-empty">Geen high→low koppelingen in dit venster.</div>');
+      return h.join('');
+    }
+    list.forEach(function (x) {
+      var line = aiTime(x.highPeakAt) + ' high ' + aiNum(x.highPeakMmol, '') + ' mmol → ' +
+        aiTime(x.lowNadirAt || x.lowPeakAt) + ' low ' + aiNum(x.lowNadirMmol, '') + ' mmol';
+      var meta = [];
+      if (x.minutesHighEndToLowPeak != null) meta.push(x.minutesHighEndToLowPeak + 'm na high');
+      if (x.lowDropFromPeakMmol != null) meta.push('daling ' + x.lowDropFromPeakMmol + ' mmol');
+      if (x.lowAreaBelow3_9 != null) meta.push('burden ' + x.lowAreaBelow3_9);
+      if (x.lowOutcome) meta.push(x.lowOutcome);
+      if (x.lowSeverity) meta.push(x.lowSeverity);
+      if (x.relevantReasons && x.relevantReasons.length) meta.push('relevant: ' + x.relevantReasons.join(', '));
+      h.push('<div class="ai-fine">' + escapeHtml(line + ' · ' + meta.join(' · ')) + '</div>');
+    });
     return h.join('');
   }
 
@@ -2272,12 +2356,35 @@
           '<div class="ai-detail"><div class="ai-curve"></div></div></div>');
       });
     }
+    if (day.lowEpisodes && day.lowEpisodes.length) {
+      h.push(renderTodayEpisodeGroup('Low episodes vandaag', day.lowEpisodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol < 3.9; })));
+      h.push(renderTodayEpisodeGroup('Near-hypo’s vandaag', day.lowEpisodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol >= 3.9 && e.nadirMmol < 4.5; })));
+      h.push(renderTodayEpisodeGroup('Dips vandaag', day.lowEpisodes.filter(function (e) { return !(e.nadirMmol != null && e.nadirMmol < 4.5); })));
+    }
     if (day.highToLow && day.highToLow.length) {
       h.push('<div class="ai-sec">High→low context</div>');
       day.highToLow.slice(0, 5).forEach(function (x) {
         h.push('<div class="ai-fine">' + escapeHtml('High ' + x.highPeakMmol + ' mmol → low ' + x.lowNadirMmol + ' mmol (' + x.minutesHighEndToLowPeak + 'm later)') + '</div>');
       });
     }
+    return h.join('');
+  }
+
+  function renderTodayEpisodeGroup(title, list) {
+    if (!list || !list.length) return '';
+    var h = ['<div class="ai-sec">' + escapeHtml(title + ' (' + list.length + ')') + '</div>'];
+    list.slice(0, 5).forEach(function (e) {
+      var meta = [];
+      if (e.outcome) meta.push(e.outcome);
+      if (e.severity) meta.push(e.severity);
+      if (e.shape) meta.push(e.shape);
+      if (e.timeBelow3_9Minutes != null) meta.push('<3.9 ' + e.timeBelow3_9Minutes + 'm');
+      if (e.areaBelow3_9 != null) meta.push('burden ' + e.areaBelow3_9);
+      h.push('<div class="ai-ep ai-item" data-ep-kind="low" data-ep-peak="' + escapeHtml(e.peakAt || '') + '">' +
+        '<div class="ai-ep-head ai-item-head"><span class="ai-chev">▸</span>' +
+        escapeHtml(aiTime(e.peakAt) + ' · ' + aiNum(e.peakMmol, '') + '→' + aiNum(e.nadirMmol, '') + ' mmol' + (meta.length ? ' · ' + meta.join(' · ') : '')) +
+        '</div><div class="ai-detail"><div class="ai-curve"></div></div></div>');
+    });
     return h.join('');
   }
 

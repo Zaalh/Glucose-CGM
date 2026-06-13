@@ -1365,6 +1365,9 @@ async function getAiStats(days) {
       .find({ peakAt: { $gte: reactiveSince } }, {
         projection: {
           _id: 0,
+          peakAt: 1,
+          nadirAt: 1,
+          recoveredAt: 1,
           outcome: 1,
           severity: 1,
           shape: 1,
@@ -1383,17 +1386,19 @@ async function getAiStats(days) {
         },
       })
       .toArray()
+    const highToLowContext = buildHighToLowContext(buildHighEpisodes(rows), reactiveEpisodes)
     const reactive = summarizeReactiveEpisodes(reactiveEpisodes)
     return {
       window: { days, from: new Date(from).toISOString(), to: new Date(to).toISOString() },
       count: n,
+      latestEntryAt: rows.length ? new Date(rows[rows.length - 1].date).toISOString() : null,
       coveragePct: round(Math.min(100, expected ? (n / expected) * 100 : 0), 0),
       mean: n ? round(mean, 1) : null, sd: n ? round(sd, 1) : null, cv: mean ? round((sd / mean) * 100, 0) : null,
       gmi, median: q(0.5), p25: q(0.25), p75: q(0.75),
       tir: pct(inRange), tbr: pct(below), veryLow: pct(veryLow), tar: pct(above), veryHigh: pct(veryHigh),
       min: n ? round(min, 1) : null, max: n ? round(max, 1) : null,
       lows: { count: lowEpisodes, longestMin: longestLowMin },
-      perHour, perWeekday, heatmap, trend, reactive,
+      perHour, perWeekday, heatmap, trend, reactive, highToLowContext,
     }
   } finally {
     if (client) await client.close().catch(() => undefined)
@@ -1427,6 +1432,7 @@ function summarizeReactiveEpisodes(episodes) {
   const nadirs = []
   const peakToNadir = []
   const recoveries = []
+  let latestPeakAt = null
   for (const e of episodes) {
     inc(byOutcome, e.outcome)
     inc(bySeverity, e.severity)
@@ -1444,6 +1450,7 @@ function summarizeReactiveEpisodes(episodes) {
     nadirs.push(Number(e.nadirMmol))
     peakToNadir.push(Number(e.minutesPeakToNadir))
     recoveries.push(Number(e.recoveryMinutes))
+    if (!latestPeakAt || Date.parse(e.peakAt) > Date.parse(latestPeakAt)) latestPeakAt = e.peakAt || latestPeakAt
   }
   const total = episodes.length
   return {
@@ -1465,6 +1472,63 @@ function summarizeReactiveEpisodes(episodes) {
     artefactFlags: { singlePoint, possibleCompression: compression },
     pctPostprandialCandidate: total ? round((postprandial / total) * 100, 0) : 0,
     reboundHigh: rebound,
+    latestPeakAt,
+  }
+}
+
+function buildHighToLowContext(highEpisodes, lowEpisodes) {
+  const lows = lowEpisodes
+    .filter((l) => Number.isFinite(Date.parse(l.peakAt)))
+    .sort((a, b) => Date.parse(a.peakAt) - Date.parse(b.peakAt))
+  const pairs = []
+  for (const high of highEpisodes) {
+    const highEnd = Date.parse(high.endAt)
+    if (!Number.isFinite(highEnd)) continue
+    const low = lows.find((l) => {
+      const peak = Date.parse(l.peakAt)
+      return peak >= highEnd && peak <= highEnd + 4 * 3_600_000
+    })
+    if (!low) continue
+    const minutes = round((Date.parse(low.peakAt) - highEnd) / 60000, 0)
+    const lowNadir = Number(low.nadirMmol)
+    const drop = Number(low.dropFromPeakMmol)
+    const burden = Number(low.areaBelow3_9) || 0
+    const relevantReasons = []
+    if (lowNadir < 3.9) relevantReasons.push('hypo')
+    else if (lowNadir < 4.5) relevantReasons.push('near-hypo')
+    if (drop >= 3) relevantReasons.push('grote daling')
+    if (minutes <= 120) relevantReasons.push('binnen 2 uur')
+    if (burden >= 4) relevantReasons.push('burden')
+    if (low.reboundHigh) relevantReasons.push('rebound')
+    pairs.push({
+      highPeakAt: high.peakAt,
+      highEndAt: high.endAt,
+      highPeakMmol: high.peakMmol,
+      highDurationMinutes: high.durationMinutes,
+      lowPeakAt: low.peakAt,
+      lowNadirAt: low.nadirAt,
+      lowNadirMmol: low.nadirMmol,
+      lowOutcome: low.outcome || null,
+      lowSeverity: low.severity || null,
+      lowShape: low.shape || null,
+      lowDropFromPeakMmol: low.dropFromPeakMmol,
+      lowAreaBelow3_9: low.areaBelow3_9,
+      minutesHighEndToLowPeak: minutes,
+      relevantReasons,
+      relevanceScore:
+        (lowNadir < 3.9 ? 3 : (lowNadir < 4.5 ? 1 : 0)) +
+        (drop >= 3 ? 1 : 0) +
+        (minutes <= 120 ? 1 : 0) +
+        (burden >= 4 ? 1 : 0) +
+        (low.reboundHigh ? 1 : 0),
+    })
+  }
+  const relevant = pairs.filter((p) => p.relevanceScore >= 2)
+  return {
+    total: pairs.length,
+    relevant: relevant.length,
+    recent: pairs.slice().sort((a, b) => Date.parse(b.lowPeakAt) - Date.parse(a.lowPeakAt)).slice(0, 10),
+    top: pairs.slice().sort((a, b) => b.relevanceScore - a.relevanceScore || Date.parse(b.lowPeakAt) - Date.parse(a.lowPeakAt)).slice(0, 5),
   }
 }
 
@@ -1729,8 +1793,21 @@ async function getAiHistory(days) {
     const rows = await db.collection('entries')
       .find({ type: 'sgv', sgv: { $exists: true }, date: { $gte: from } }, { projection: { _id: 0, sgv: 1, date: 1 } })
       .sort({ date: 1 }).toArray()
-    const lows = await db.collection('reactive_hypo_episodes')
-      .find({ peakAt: { $gte: new Date(from).toISOString() } }, { projection: { _id: 0, peakAt: 1, nadirMmol: 1, areaBelow3_9: 1, severity: 1 } })
+    const episodes = await db.collection('reactive_hypo_episodes')
+      .find({ peakAt: { $gte: new Date(from).toISOString() } }, {
+        projection: {
+          _id: 0,
+          peakAt: 1,
+          nadirAt: 1,
+          peakMmol: 1,
+          nadirMmol: 1,
+          outcome: 1,
+          severity: 1,
+          shape: 1,
+          dropFromPeakMmol: 1,
+          areaBelow3_9: 1,
+        },
+      })
       .toArray()
     const byDay = new Map()
     for (const r of rows) {
@@ -1738,26 +1815,39 @@ async function getAiHistory(days) {
       if (!byDay.has(key)) byDay.set(key, [])
       byDay.get(key).push(r)
     }
-    const lowsByDay = new Map()
-    for (const l of lows) {
+    const episodesByDay = new Map()
+    for (const l of episodes) {
       const key = dayKeyInTz(new Date(Date.parse(l.peakAt)), tz)
-      if (!lowsByDay.has(key)) lowsByDay.set(key, [])
-      lowsByDay.get(key).push(l)
+      if (!episodesByDay.has(key)) episodesByDay.set(key, [])
+      episodesByDay.get(key).push(l)
     }
     const history = []
     for (const [date, dayRows] of byDay) {
       const stats = summarizeEntries(dayRows, 1440)
-      const dayLows = lowsByDay.get(date) || []
+      const dayEpisodes = episodesByDay.get(date) || []
+      const dayLows = dayEpisodes.filter((e) => Number(e.nadirMmol) < 3.9)
+      const dayNear = dayEpisodes.filter((e) => Number(e.nadirMmol) >= 3.9 && Number(e.nadirMmol) < 4.5)
+      const dayDips = dayEpisodes.filter((e) => Number(e.nadirMmol) >= 4.5)
       const highs = buildHighEpisodes(dayRows)
       const burden = dayLows.reduce((s, e) => s + (Number(e.areaBelow3_9) || 0), 0)
       const worstLow = dayLows.slice().sort((a, b) => (Number(a.nadirMmol) || 99) - (Number(b.nadirMmol) || 99))[0] || null
+      const worstEpisode = dayEpisodes.slice().sort((a, b) => (Number(a.nadirMmol) || 99) - (Number(b.nadirMmol) || 99))[0] || null
       history.push({
         date,
         tir: stats.tir, tbr: stats.tbr, tar: stats.tar, mean: stats.mean, cv: stats.cv,
         min: stats.min, max: stats.max, coverage: stats.coveragePct,
-        lowCount: dayLows.length, highCount: highs.length,
+        episodeCount: dayEpisodes.length,
+        lowCount: dayLows.length,
+        nearHypoCount: dayNear.length,
+        dipCount: dayDips.length,
+        highCount: highs.length,
         hypoBurden3_9: round(burden, 1),
         worstLowMmol: worstLow ? worstLow.nadirMmol : null,
+        worstEpisodeMmol: worstEpisode ? worstEpisode.nadirMmol : null,
+        recentEpisodes: dayEpisodes
+          .slice()
+          .sort((a, b) => Date.parse(b.peakAt) - Date.parse(a.peakAt))
+          .slice(0, 3),
         worstHighMmol: highs.length ? Math.max(...highs.map((h) => h.peakMmol)) : null,
         sourceLevel: stats.coveragePct >= 80 ? 'goed' : (stats.coveragePct >= 50 ? 'matig' : 'slecht'),
       })
@@ -1835,6 +1925,23 @@ async function getAiPatterns() {
     const since14 = new Date(Date.now() - 14 * 86_400_000).toISOString()
     const eps = await db.collection('reactive_hypo_episodes')
       .find({ peakAt: { $gte: since14 } }, { projection: { _id: 0, qualityFlags: 1 } }).toArray()
+    const recentEpisodes = await db.collection('reactive_hypo_episodes')
+      .find({ peakAt: { $gte: since14 } }, {
+        projection: {
+          _id: 0,
+          peakAt: 1,
+          nadirAt: 1,
+          peakMmol: 1,
+          nadirMmol: 1,
+          outcome: 1,
+          severity: 1,
+          dropFromPeakMmol: 1,
+          areaBelow3_9: 1,
+        },
+      })
+      .sort({ peakAt: -1 })
+      .limit(5)
+      .toArray()
     const rows = await db.collection('entries')
       .find({ type: 'sgv', sgv: { $exists: true }, date: { $gte: Date.now() - 14 * 86_400_000 } }, { projection: { _id: 0, sgv: 1, date: 1 } })
       .sort({ date: 1 }).toArray()
@@ -1851,8 +1958,47 @@ async function getAiPatterns() {
     const worstDay = (stats.perWeekday || []).filter((p) => p.n >= 30).sort((a, b) => b.lowPct - a.lowPct)[0] || null
     const cards = []
     cards.push({ key: 'week', title: 'Deze week vs vorige', body: `TIR ${stats.trend.recentTir ?? '–'}% (was ${stats.trend.prevTir ?? '–'}%, Δ ${stats.trend.tirDelta ?? '–'}) · laag ${stats.trend.recentLowPct ?? '–'}% (was ${stats.trend.prevLowPct ?? '–'}%)` })
+    if (stats.reactive) {
+      const r = stats.reactive
+      cards.push({
+        key: 'reactive_mix',
+        title: 'Hypo’s, near-hypo’s en dips',
+        body: `${r.hypo} hypo · ${r.nearHypo} near-hypo · ${r.safeDrop} dips/safe drops · mediane nadir ${r.medianNadirMmol ?? '–'} mmol`,
+      })
+      cards.push({
+        key: 'hypo_burden',
+        title: 'Hypo-belasting',
+        body: `<3.9 totaal ${r.totalTimeBelow3_9Min ?? '–'} min · burden ${r.totalAreaBelow3_9 ?? '–'} mmol·min · artefactflags ${r.artefactFlags?.singlePoint ?? 0}/${r.artefactFlags?.possibleCompression ?? 0}`,
+      })
+      if (stats.latestEntryAt || r.latestPeakAt) {
+        const gapMin = stats.latestEntryAt && r.latestPeakAt
+          ? round((Date.parse(stats.latestEntryAt) - Date.parse(r.latestPeakAt)) / 60000, 0)
+          : null
+        cards.push({
+          key: 'freshness',
+          title: 'Recentheid episodes',
+          body: `Nieuwste CGM ${stats.latestEntryAt ? new Date(stats.latestEntryAt).toLocaleString('nl-NL') : '–'} · nieuwste episode ${r.latestPeakAt ? new Date(r.latestPeakAt).toLocaleString('nl-NL') : '–'}${gapMin != null && gapMin > 180 ? ' · check episodes:build als recente lows ontbreken' : ''}`,
+        })
+      }
+    }
+    if (recentEpisodes.length) {
+      const parts = recentEpisodes.slice(0, 3).map((e) => {
+        const kind = Number(e.nadirMmol) < 3.9 ? 'low' : 'dip'
+        return `${new Date(e.nadirAt || e.peakAt).toLocaleString('nl-NL')} ${kind} ${e.nadirMmol} mmol (${e.outcome || '–'})`
+      })
+      cards.push({ key: 'recent_episodes', title: 'Recente lows/dips', body: parts.join(' · ') })
+    }
     if (worstHour) cards.push({ key: 'window', title: 'Kwetsbaar venster', body: `Meeste laag rond ${worstHour.hour}:00 (${worstHour.lowPct}% laag)${worstDay ? ` · zwaarste dag ${worstDay.day} (${worstDay.lowPct}%)` : ''}` })
-    cards.push({ key: 'high_low', title: 'High→low patroon', body: `${highToLow} gekoppelde high→low gebeurtenis(sen) in 14 dagen` })
+    if (stats.highToLowContext) {
+      const top = stats.highToLowContext.top && stats.highToLowContext.top[0]
+      cards.push({
+        key: 'high_low',
+        title: 'High→low patroon',
+        body: `${stats.highToLowContext.relevant} relevant van ${stats.highToLowContext.total} koppeling(en) · ${top ? `sterkste: high ${top.highPeakMmol} → low ${top.lowNadirMmol} mmol (${(top.relevantReasons || []).join(', ')})` : `${highToLow} gekoppeld`}`,
+      })
+    } else {
+      cards.push({ key: 'high_low', title: 'High→low patroon', body: `${highToLow} gekoppelde high→low gebeurtenis(sen) in 14 dagen` })
+    }
     cards.push({ key: 'quality', title: 'Datakwaliteit', body: `14d-dekking ${health.coverage14d}% · langste gat 24u ${health.longestGap24hMin}m · status ${health.status}` })
     cards.push({ key: 'artefacts', title: 'Artefact-check', body: `${artefacts} episode(s) met single-point/compression-low flag` })
     return { cards, sourceHealth: health }
