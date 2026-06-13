@@ -2225,12 +2225,12 @@
       var kind = e.nadirMmol != null && e.nadirMmol < 3.9 ? 'Low' : 'Dip';
       var line = kind + ' · ' + aiTime(e.nadirAt || e.peakAt) + ' · piek ' + aiNum(e.peakMmol, '') +
         ' → nadir ' + aiNum(e.nadirMmol, '') + ' mmol';
-      var meta = [];
-      if (e.minutesPeakToNadir != null) meta.push(e.minutesPeakToNadir + 'm');
-      if (e.dropFromPeakMmol != null) meta.push('daling ' + e.dropFromPeakMmol + ' mmol');
-      if (e.outcome) meta.push(e.outcome);
-      if (e.severity) meta.push(e.severity);
-      h.push('<div class="ai-fine">' + escapeHtml(line + (meta.length ? ' · ' + meta.join(' · ') : '')) + '</div>');
+      var epMeta = [];
+      if (e.minutesPeakToNadir != null) epMeta.push(e.minutesPeakToNadir + 'm');
+      if (e.dropFromPeakMmol != null) epMeta.push('daling ' + e.dropFromPeakMmol + ' mmol');
+      if (e.outcome) epMeta.push(e.outcome);
+      if (e.severity) epMeta.push(e.severity);
+      h.push('<div class="ai-fine">' + escapeHtml(line + (epMeta.length ? ' · ' + epMeta.join(' · ') : '')) + '</div>');
     });
     return h.join('');
   }
