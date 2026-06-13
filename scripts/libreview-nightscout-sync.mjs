@@ -856,8 +856,9 @@ function startServer() {
     if (url.pathname === '/ai-review/episodes' && req.method === 'GET') {
       try {
         const limit = parsePositiveInt(url.searchParams.get('limit'), 20, 200)
-        const episodes = await getAiEpisodes(limit)
-        res.end(JSON.stringify({ ok: true, episodes }))
+        const days = parsePositiveInt(url.searchParams.get('days'), 14, 90)
+        const result = await getAiEpisodes(limit, days)
+        res.end(JSON.stringify({ ok: true, ...result }))
       } catch (err) {
         res.writeHead(500)
         res.end(JSON.stringify({ ok: false, message: formatError(err) }))
@@ -1359,6 +1360,30 @@ async function getAiStats(days) {
       recentLowPct: recN ? round((recBelow / recN) * 100, 1) : null,
       prevLowPct: prevN ? round((prevBelow / prevN) * 100, 1) : null,
     }
+    const reactiveSince = new Date(from).toISOString()
+    const reactiveEpisodes = await client.db().collection('reactive_hypo_episodes')
+      .find({ peakAt: { $gte: reactiveSince } }, {
+        projection: {
+          _id: 0,
+          outcome: 1,
+          severity: 1,
+          shape: 1,
+          peakMmol: 1,
+          nadirMmol: 1,
+          dropFromPeakMmol: 1,
+          minutesPeakToNadir: 1,
+          recoveryMinutes: 1,
+          timeBelow3_9Minutes: 1,
+          areaBelow3_9: 1,
+          qualityScore: 1,
+          qualityFlags: 1,
+          reboundHigh: 1,
+          postprandialCandidate: 1,
+          timeOfDayBucket: 1,
+        },
+      })
+      .toArray()
+    const reactive = summarizeReactiveEpisodes(reactiveEpisodes)
     return {
       window: { days, from: new Date(from).toISOString(), to: new Date(to).toISOString() },
       count: n,
@@ -1368,10 +1393,78 @@ async function getAiStats(days) {
       tir: pct(inRange), tbr: pct(below), veryLow: pct(veryLow), tar: pct(above), veryHigh: pct(veryHigh),
       min: n ? round(min, 1) : null, max: n ? round(max, 1) : null,
       lows: { count: lowEpisodes, longestMin: longestLowMin },
-      perHour, perWeekday, heatmap, trend,
+      perHour, perWeekday, heatmap, trend, reactive,
     }
   } finally {
     if (client) await client.close().catch(() => undefined)
+  }
+}
+
+function inc(map, key) {
+  const k = key || 'onbekend'
+  map[k] = (map[k] || 0) + 1
+}
+
+function median(values) {
+  const xs = values.filter(Number.isFinite).sort((a, b) => a - b)
+  if (!xs.length) return null
+  return round(xs[Math.floor(xs.length / 2)], 1)
+}
+
+function summarizeReactiveEpisodes(episodes) {
+  const byOutcome = {}
+  const bySeverity = {}
+  const byShape = {}
+  const byTimeOfDay = {}
+  let burden39 = 0
+  let timeBelow39 = 0
+  let poorQuality = 0
+  let singlePoint = 0
+  let compression = 0
+  let postprandial = 0
+  let rebound = 0
+  const drops = []
+  const nadirs = []
+  const peakToNadir = []
+  const recoveries = []
+  for (const e of episodes) {
+    inc(byOutcome, e.outcome)
+    inc(bySeverity, e.severity)
+    inc(byShape, e.shape)
+    inc(byTimeOfDay, e.timeOfDayBucket)
+    const flags = Array.isArray(e.qualityFlags) ? e.qualityFlags : []
+    if (Number(e.qualityScore) < 70) poorQuality += 1
+    if (flags.includes('single_point_low')) singlePoint += 1
+    if (flags.includes('possible_compression_low')) compression += 1
+    if (e.postprandialCandidate) postprandial += 1
+    if (e.reboundHigh) rebound += 1
+    burden39 += Number(e.areaBelow3_9) || 0
+    timeBelow39 += Number(e.timeBelow3_9Minutes) || 0
+    drops.push(Number(e.dropFromPeakMmol))
+    nadirs.push(Number(e.nadirMmol))
+    peakToNadir.push(Number(e.minutesPeakToNadir))
+    recoveries.push(Number(e.recoveryMinutes))
+  }
+  const total = episodes.length
+  return {
+    total,
+    hypo: byOutcome.hypo || 0,
+    nearHypo: byOutcome.near_hypo || 0,
+    safeDrop: byOutcome.safe_drop || 0,
+    byOutcome,
+    bySeverity,
+    byShape,
+    byTimeOfDay,
+    medianDropMmol: median(drops),
+    medianNadirMmol: median(nadirs),
+    medianPeakToNadirMin: median(peakToNadir),
+    medianRecoveryMin: median(recoveries),
+    totalTimeBelow3_9Min: round(timeBelow39, 0),
+    totalAreaBelow3_9: round(burden39, 1),
+    pctPoorQuality: total ? round((poorQuality / total) * 100, 0) : 0,
+    artefactFlags: { singlePoint, possibleCompression: compression },
+    pctPostprandialCandidate: total ? round((postprandial / total) * 100, 0) : 0,
+    reboundHigh: rebound,
   }
 }
 
@@ -1912,7 +2005,8 @@ async function runAiReportOnce({ type } = {}) {
   aiReviewRunning = true
   let client = null
   try {
-    const [stats, episodes] = await Promise.all([getAiStats(14), getAiEpisodes(20)])
+    const [stats, episodeResult] = await Promise.all([getAiStats(14), getAiEpisodes(20, 14)])
+    const episodes = episodeResult.episodes || []
     client = new MongoClient(config.mongoUri)
     await client.connect()
     const db = client.db()
@@ -1943,7 +2037,8 @@ async function runAiChatOnce({ messages } = {}) {
   aiReviewRunning = true
   let client = null
   try {
-    const [stats, episodes] = await Promise.all([getAiStats(14), getAiEpisodes(10)])
+    const [stats, episodeResult] = await Promise.all([getAiStats(14), getAiEpisodes(10, 14)])
+    const episodes = episodeResult.episodes || []
     client = new MongoClient(config.mongoUri)
     await client.connect()
     const db = client.db()
@@ -1976,13 +2071,16 @@ async function getAiReports(limit) {
 }
 
 // B — Reactieve-hypo episodes. Deterministisch uit `reactive_hypo_episodes`, geen LLM.
-async function getAiEpisodes(limit) {
+async function getAiEpisodes(limit, days = null) {
   let client = null
   try {
     client = new MongoClient(config.mongoUri)
     await client.connect()
-    return await client.db().collection('reactive_hypo_episodes')
-      .find({}, {
+    const from = days ? new Date(Date.now() - days * 86_400_000).toISOString() : null
+    const filter = from ? { peakAt: { $gte: from } } : {}
+    const collection = client.db().collection('reactive_hypo_episodes')
+    const [episodes, total] = await Promise.all([
+      collection.find(filter, {
         projection: {
           _id: 0,
           peakAt: 1,
@@ -2021,7 +2119,16 @@ async function getAiEpisodes(limit) {
       })
       .sort({ peakAt: -1 })
       .limit(limit)
-      .toArray()
+      .toArray(),
+      collection.countDocuments(filter),
+    ])
+    return {
+      window: days ? { days, from, to: new Date().toISOString() } : null,
+      total,
+      returned: episodes.length,
+      truncated: total > episodes.length,
+      episodes,
+    }
   } finally {
     if (client) await client.close().catch(() => undefined)
   }

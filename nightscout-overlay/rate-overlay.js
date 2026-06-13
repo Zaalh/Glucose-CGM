@@ -1715,7 +1715,8 @@
     var h = [];
     if (kind === 'low' && d.episode) {
       var e = d.episode;
-      headLine = aiTime(e.nadirAt || e.peakAt) + ' · piek ' + aiNum(e.peakMmol, '') + ' → nadir ' + aiNum(e.nadirMmol, '') + ' mmol';
+      var lowLbl = (Number(e.nadirMmol) < 3.9) ? 'Low' : 'Dip';
+      headLine = lowLbl + ' · ' + aiTime(e.nadirAt || e.peakAt) + ' · piek ' + aiNum(e.peakMmol, '') + ' → dal ' + aiNum(e.nadirMmol, '') + ' mmol';
       h.push('<div class="ai-rev-head">' + escapeHtml(headLine) + '</div>');
       var lm = [];
       if (e.timeBelow3_9Minutes != null) lm.push('onder 3.9: ' + aiNum(e.timeBelow3_9Minutes, 'm'));
@@ -2051,11 +2052,11 @@
     var days = aiGetSettings().statsDays;
     Promise.all([
       fetchWithTimeout('/_ai-review/stats?days=' + days, { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; }),
-      fetchWithTimeout('/_ai-review/episodes?limit=20', { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; }),
+      fetchWithTimeout('/_ai-review/episodes?days=' + days + '&limit=200', { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; }),
       fetchWithTimeout('/_ai-review/day', { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; }),
       fetchWithTimeout('/_ai-review/evaluation?days=' + days, { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; })
     ]).then(function (res) {
-      renderAiStats(res[0], res[1] && res[1].episodes ? res[1].episodes : [], res[2], res[3]);
+      renderAiStats(res[0], res[1] && res[1].episodes ? res[1].episodes : [], res[2], res[3], res[1]);
     }).catch(function () {
       aiStatsLoaded = false;
       if (box) box.innerHTML = '<div class="ai-empty">Kon statistiek niet laden.</div>';
@@ -2064,7 +2065,7 @@
 
   function aiNum(v, unit) { return (v === null || v === undefined) ? '–' : (v + (unit || '')); }
 
-  function renderAiStats(stats, episodes, day, evaluation) {
+  function renderAiStats(stats, episodes, day, evaluation, episodeMeta) {
     var box = document.getElementById('cgm-ai-stats');
     if (!box) return;
     if (!stats || !stats.ok) { box.innerHTML = '<div class="ai-empty">Geen statistiek beschikbaar.</div>'; return; }
@@ -2080,6 +2081,8 @@
     h.push(aiCard('Lows', aiNum(stats.lows ? stats.lows.count : null, '') + (stats.lows && stats.lows.longestMin ? ' · ' + stats.lows.longestMin + 'm' : ''), 'low'));
     h.push('</div>');
     h.push('<div class="ai-fine">GMI ' + aiNum(stats.gmi, '%') + ' · mediaan ' + aiNum(stats.median, '') + ' (IQR ' + aiNum(stats.p25, '') + '–' + aiNum(stats.p75, '') + ') · very-low &lt;3.0: ' + aiNum(stats.veryLow, '%') + ' · very-high &gt;13.9: ' + aiNum(stats.veryHigh, '%') + ' · min ' + aiNum(stats.min, '') + ' · max ' + aiNum(stats.max, '') + '</div>');
+    if (stats.reactive) h.push(renderReactiveHypoSummary(stats.reactive));
+    h.push(renderReactiveHypoInfo());
     if (day && day.ok) {
       h.push(renderAiDayReview(day));
     }
@@ -2126,6 +2129,12 @@
     if (stats.heatmap && stats.heatmap.length) {
       h.push(renderAiHeatmap(stats.heatmap));
     }
+    var totalEpisodes = episodeMeta && episodeMeta.total != null ? episodeMeta.total : episodes.length;
+    var returnedEpisodes = episodeMeta && episodeMeta.returned != null ? episodeMeta.returned : episodes.length;
+    h.push('<div class="ai-sec">Reactieve episodes in dit venster: ' + totalEpisodes + '</div>');
+    if (episodeMeta && episodeMeta.truncated) {
+      h.push('<div class="ai-fine">Toont ' + returnedEpisodes + ' van ' + totalEpisodes + ' episodes. Kies een kleiner statistiekvenster als je alles tegelijk wilt zien.</div>');
+    }
     // Episode-samenvatting (uit de B-lijst, client-side).
     if (episodes.length) {
       var sumDrop = 0, dropN = 0, sumMin = 0, minN = 0, byOutcome = {}, bySeverity = {};
@@ -2145,33 +2154,74 @@
       h.push('<div class="ai-fine">Hypo-burden &lt;3.9: ' + (Math.round(burden39 * 10) / 10) + ' mmol·min · ernst ' +
         escapeHtml(sc || '–') + (poorQuality ? ' · ' + poorQuality + ' met matige/slechte datakwaliteit' : '') + '</div>');
     }
-    // Reactieve-hypo episodes (B).
-    h.push('<div class="ai-sec">Reactieve-hypo episodes (' + episodes.length + ')</div>');
-    if (!episodes.length) h.push('<div class="ai-empty">Geen episodes.</div>');
-    episodes.forEach(function (e) {
-      var when = e.peakAt ? new Date(e.peakAt).toLocaleString() : '?';
-      var tags = [];
-      if (e.outcome) tags.push(e.outcome);
-      if (e.severity) tags.push(e.severity);
-      if (e.shape) tags.push(e.shape);
-      var head = (e.peakMmol != null ? e.peakMmol : '?') + '→' + (e.nadirMmol != null ? e.nadirMmol : '?') + ' mmol · ' +
-        (e.minutesPeakToNadir != null ? e.minutesPeakToNadir + 'm' : '?') + (tags.length ? ' · ' + tags.join(' · ') : '');
-      var meta = [];
-      if (e.dropFromPeakMmol != null) meta.push('daling ' + e.dropFromPeakMmol + ' mmol');
-      if (e.dropFromPeakPercent != null) meta.push(e.dropFromPeakPercent + '%');
-      if (e.fallRateMmolPerMin != null) meta.push('gem. val ' + e.fallRateMmolPerMin + '/min');
-      if (e.maxFallRate30m != null) meta.push('max ' + e.maxFallRate30m + '/min');
-      if (e.timeBelow3_9Minutes != null) meta.push('<3.9 ' + e.timeBelow3_9Minutes + 'm');
-      if (e.areaBelow3_9 != null) meta.push('burden ' + e.areaBelow3_9);
-      if (e.recoveryMinutes != null) meta.push('herstel ' + e.recoveryMinutes + 'm');
-      if (e.reboundHigh) meta.push('rebound ' + aiNum(e.reboundPeakMmol, ''));
-      if (e.qualityScore != null) meta.push('datakwaliteit ' + e.qualityScore + '%');
-      if (e.qualityFlags && e.qualityFlags.length) meta.push(e.qualityFlags.map(aiLabel).join(', '));
-      meta.push(when);
-      h.push('<div class="ai-ep ai-item" data-ep-kind="low" data-ep-peak="' + escapeHtml(e.peakAt || '') + '"><div class="ai-ep-head ai-item-head"><span class="ai-chev">▸</span>' + escapeHtml(head) + '</div><div class="ai-meta">' + escapeHtml(meta.join(' · ')) + '</div>' + aiEpisodeDetailHtml(e) + '</div>');
-    });
+    // Splitsen: echte lows (nadir <3.9) vs dips (daling vanaf piek, niet onder 3.9).
+    var lowsList = episodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol < 3.9; });
+    var dipsList = episodes.filter(function (e) { return !(e.nadirMmol != null && e.nadirMmol < 3.9); });
+    h.push('<div class="ai-sec">Lows (' + lowsList.length + ' getoond) · nadir onder 3.9</div>');
+    if (!lowsList.length) h.push('<div class="ai-empty">Geen echte lows in dit venster.</div>');
+    lowsList.forEach(function (e) { h.push(aiEpisodeListItem(e)); });
+    if (dipsList.length) {
+      h.push('<div class="ai-sec">Dips (' + dipsList.length + ' getoond) · daling vanaf piek — vroeg signaal, niet onder 3.9</div>');
+      dipsList.forEach(function (e) { h.push(aiEpisodeListItem(e)); });
+    }
     if (evaluation && evaluation.ok) h.push(renderAiEvaluation(evaluation));
     box.innerHTML = h.join('');
+  }
+
+  function renderReactiveHypoSummary(r) {
+    var h = ['<div class="ai-sec">Reactieve-hypo profiel</div>', '<div class="ai-cards">'];
+    h.push(aiCard('Reactieve episodes', aiNum(r.total, ''), 'low'));
+    h.push(aiCard('Hypo / near-hypo', aiNum(r.hypo, '') + ' / ' + aiNum(r.nearHypo, ''), 'low'));
+    h.push(aiCard('Mediane nadir', aiNum(r.medianNadirMmol, '') + ' mmol', 'low'));
+    h.push(aiCard('Mediane daling', aiNum(r.medianDropMmol, '') + ' mmol', ''));
+    h.push(aiCard('Piek→nadir', aiNum(r.medianPeakToNadirMin, 'm'), ''));
+    h.push(aiCard('Herstel', aiNum(r.medianRecoveryMin, 'm'), ''));
+    h.push('</div>');
+    h.push('<div class="ai-fine">Burden &lt;3.9: ' + aiNum(r.totalAreaBelow3_9, '') + ' mmol·min · tijd &lt;3.9: ' + aiNum(r.totalTimeBelow3_9Min, 'm') +
+      ' · rebound-high: ' + aiNum(r.reboundHigh, '') + ' · mogelijk postprandiaal: ' + aiNum(r.pctPostprandialCandidate, '%') + ' · matige datakwaliteit: ' + aiNum(r.pctPoorQuality, '%') + '</div>');
+    h.push('<div class="ai-fine">Uitkomsten — ' + escapeHtml(aiCounts(r.byOutcome)) + '</div>');
+    h.push('<div class="ai-fine">Ernst — ' + escapeHtml(aiCounts(r.bySeverity)) + ' · curvevorm — ' + escapeHtml(aiCounts(r.byShape)) + '</div>');
+    if (r.artefactFlags && (r.artefactFlags.singlePoint || r.artefactFlags.possibleCompression)) {
+      h.push('<div class="ai-fine">Artefact-check: single-point lows ' + r.artefactFlags.singlePoint + ' · mogelijke compressie-lows ' + r.artefactFlags.possibleCompression + '</div>');
+    }
+    return h.join('');
+  }
+
+  function renderReactiveHypoInfo() {
+    return '<div class="ai-sec">Wat telt hier als reactief patroon</div>' +
+      '<div class="ai-fine">Reactieve/postprandiale hypoglykemie betekent meestal: klachten of lage glucose na eten, vaak binnen enkele uren. De app telt daarom vooral piek→nadir episodes, near-hypo (&lt;4.5), hypo (&lt;4.0), duur onder 3.9, rebound, herstel en datakwaliteit. Medisch blijft Whipple belangrijk: passende klachten, lage glucose op dat moment en verbetering na koolhydraten.</div>' +
+      '<div class="ai-fine">Let op interpretatie: CGM loopt bij snelle dalingen achter op bloedglucose en losse nachtelijke lage punten kunnen compressie/meetartefact zijn. Vingerprik en context-notities maken deze statistiek veel betrouwbaarder.</div>';
+  }
+
+  function aiCounts(obj) {
+    var keys = Object.keys(obj || {});
+    if (!keys.length) return '–';
+    return keys.map(function (k) { return k + ': ' + obj[k]; }).join(' · ');
+  }
+
+  // Eén episode-rij (low of dip). data-ep-kind blijft 'low' want beide staan in
+  // reactive_hypo_episodes en worden via episode-detail?type=low opgehaald.
+  function aiEpisodeListItem(e) {
+    var when = e.peakAt ? new Date(e.peakAt).toLocaleString() : '?';
+    var tags = [];
+    if (e.outcome) tags.push(e.outcome);
+    if (e.severity) tags.push(e.severity);
+    if (e.shape) tags.push(e.shape);
+    var head = (e.peakMmol != null ? e.peakMmol : '?') + '→' + (e.nadirMmol != null ? e.nadirMmol : '?') + ' mmol · ' +
+      (e.minutesPeakToNadir != null ? e.minutesPeakToNadir + 'm' : '?') + (tags.length ? ' · ' + tags.join(' · ') : '');
+    var meta = [];
+    if (e.dropFromPeakMmol != null) meta.push('daling ' + e.dropFromPeakMmol + ' mmol');
+    if (e.dropFromPeakPercent != null) meta.push(e.dropFromPeakPercent + '%');
+    if (e.fallRateMmolPerMin != null) meta.push('gem. val ' + e.fallRateMmolPerMin + '/min');
+    if (e.maxFallRate30m != null) meta.push('max ' + e.maxFallRate30m + '/min');
+    if (e.timeBelow3_9Minutes != null) meta.push('<3.9 ' + e.timeBelow3_9Minutes + 'm');
+    if (e.areaBelow3_9 != null) meta.push('burden ' + e.areaBelow3_9);
+    if (e.recoveryMinutes != null) meta.push('herstel ' + e.recoveryMinutes + 'm');
+    if (e.reboundHigh) meta.push('rebound ' + aiNum(e.reboundPeakMmol, ''));
+    if (e.qualityScore != null) meta.push('datakwaliteit ' + e.qualityScore + '%');
+    if (e.qualityFlags && e.qualityFlags.length) meta.push(e.qualityFlags.map(aiLabel).join(', '));
+    meta.push(when);
+    return '<div class="ai-ep ai-item" data-ep-kind="low" data-ep-peak="' + escapeHtml(e.peakAt || '') + '"><div class="ai-ep-head ai-item-head"><span class="ai-chev">▸</span>' + escapeHtml(head) + '</div><div class="ai-meta">' + escapeHtml(meta.join(' · ')) + '</div>' + aiEpisodeDetailHtml(e) + '</div>';
   }
 
   function renderAiEvaluation(ev) {
