@@ -1330,8 +1330,8 @@
       '</div>',
       '<div class="ai-pane" data-pane="stats" hidden><div id="cgm-ai-stats"><div class="ai-empty">Laden…</div></div></div>',
       '<div class="ai-pane" data-pane="history" hidden>',
-      '  <div id="cgm-ai-history"><div class="ai-empty">Laden…</div></div>',
       '  <div id="cgm-ai-daydetail"></div>',
+      '  <div id="cgm-ai-history"><div class="ai-empty">Laden…</div></div>',
       '</div>',
       '<div class="ai-pane" data-pane="rapporten" hidden>',
       '  <div class="ai-row"><button type="button" class="ai-run" id="cgm-ai-genreport">Genereer dagrapport</button></div>',
@@ -1998,6 +1998,7 @@
   function onAiHistoryClick(event) {
     var row = event.target && event.target.closest ? event.target.closest('[data-hist-date]') : null;
     if (!row) return;
+    event.preventDefault();
     var date = row.getAttribute('data-hist-date');
     Array.prototype.forEach.call(document.querySelectorAll('#cgm-ai-history .ai-hday'), function (r) { r.classList.toggle('sel', r === row); });
     loadAiDayDetail(date);
@@ -2007,6 +2008,7 @@
     var box = document.getElementById('cgm-ai-daydetail');
     if (!box) return;
     box.innerHTML = '<div class="ai-empty">Dag laden…</div>';
+    if (box.scrollIntoView) box.scrollIntoView({ block: 'nearest' });
     fetchWithTimeout('/_ai-review/day?date=' + encodeURIComponent(date), { cache: 'no-store' }, 15000)
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (day) {
