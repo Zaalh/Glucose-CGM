@@ -2088,8 +2088,37 @@ async function getAiEpisodeDetail({ type, peakAt } = {}) {
     }
     const feedback = feedbackRaw.filter((f) => inWindow(f.createdAt))
 
+    // Context "wat gebeurde eromheen" (SmartXdrip): events/notities in het venster.
+    const eventsRaw = await db.collection('cgm_events')
+      .find({}, { projection: { _id: 0, eventAt: 1, type: 1, note: 1, fingerstickMmol: 1, relatedEntryMmol: 1 } })
+      .sort({ eventAt: -1 }).limit(200).toArray()
+    const events = eventsRaw
+      .filter((e) => inWindow(e.eventAt))
+      .map((e) => ({ ...e, minutesFromPeak: round((Date.parse(e.eventAt) - peakMs) / 60000, 0) }))
+
     if (kind === 'low') {
       const nearbyHighs = buildHighEpisodes(rows).filter((h) => Date.parse(h.peakAt) < peakMs)
+      // Triggerende maaltijd: dichtstbijzijnde meal/snack tot 4u vóór de piek (reactieve-hypo kern).
+      const mealTypes = new Set(['meal', 'snack'])
+      const priorMeal = eventsRaw
+        .filter((e) => mealTypes.has(e.type))
+        .map((e) => ({ type: e.type, eventAt: e.eventAt, note: e.note, t: Date.parse(e.eventAt) }))
+        .filter((e) => Number.isFinite(e.t) && e.t <= peakMs && e.t >= peakMs - 4 * 3_600_000)
+        .sort((a, b) => b.t - a.t)[0] || null
+      const trigger = priorMeal
+        ? { type: priorMeal.type, eventAt: priorMeal.eventAt, note: priorMeal.note, minutesBefore: round((peakMs - priorMeal.t) / 60000, 0) }
+        : null
+      // Vergelijking met je normaal: medianen over recente episodes.
+      const cohortEps = await db.collection('reactive_hypo_episodes')
+        .find({}, { projection: { _id: 0, nadirMmol: 1, dropFromPeakMmol: 1, recoveryMinutes: 1 } })
+        .sort({ peakAt: -1 }).limit(60).toArray()
+      const median = (arr) => { const a = arr.map(Number).filter(Number.isFinite).sort((x, y) => x - y); return a.length ? a[Math.floor(a.length / 2)] : null }
+      const cohort = {
+        count: cohortEps.length,
+        medianNadirMmol: round(median(cohortEps.map((e) => e.nadirMmol)) ?? 0, 1) || null,
+        medianDropMmol: round(median(cohortEps.map((e) => e.dropFromPeakMmol)) ?? 0, 1) || null,
+        medianRecoveryMin: median(cohortEps.map((e) => e.recoveryMinutes)),
+      }
       const reasons = []
       if (Number(episode.nadirMmol) < 3.0) reasons.push('Diepe low: laagste punt onder 3.0 mmol/L.')
       if (Number(episode.timeBelow3_9Minutes) > 20) reasons.push('Lang onder 3.9: meer dan 20 minuten.')
@@ -2103,6 +2132,8 @@ async function getAiEpisodeDetail({ type, peakAt } = {}) {
       }
       if (Number(episode.recoveryMinutes) > 30) reasons.push('Herstel traag: meer dan 30 minuten.')
       if (episode.reboundHigh) reasons.push('Rebound-high na herstel.')
+      if (trigger) reasons.push(`Mogelijk na ${trigger.type === 'snack' ? 'snack' : 'maaltijd'}: ~${trigger.minutesBefore} min eerder gelogd.`)
+      if (cohort.medianNadirMmol != null && Number(episode.nadirMmol) < cohort.medianNadirMmol - 0.3) reasons.push(`Dieper dan je normaal (mediaan nadir ${cohort.medianNadirMmol} mmol).`)
       if (!reasons.length) reasons.push('Geen bijzondere risicokenmerken; korte, ondiepe dip.')
       return {
         type: 'low',
@@ -2110,6 +2141,9 @@ async function getAiEpisodeDetail({ type, peakAt } = {}) {
         window: { from: new Date(windowFrom).toISOString(), to: new Date(windowTo).toISOString() },
         readings,
         nearbyHighs,
+        events,
+        trigger,
+        cohort,
         feedback,
         notableReasons: reasons,
       }
@@ -2162,6 +2196,7 @@ async function getAiEpisodeDetail({ type, peakAt } = {}) {
       metrics,
       window: { from: new Date(windowFrom).toISOString(), to: new Date(windowTo).toISOString() },
       readings,
+      events,
       feedback,
       notableReasons: reasons,
     }
