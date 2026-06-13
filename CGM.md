@@ -336,10 +336,18 @@ hypotheses en vragen. Staat uit tot `.env.ai` (een AI-provider) is gezet.
   (`false_alarm`).
 - **Server-endpoints (poort 8787):** `POST /ai-review/run` (body `{ model }`, met
   in-memory lock + `AI_REVIEW_MIN_INTERVAL_MS`), `GET /ai-review/latest`,
-  `GET /ai-review/models`. nginx proxyt deze als `/_ai-review/*`.
+  `GET /ai-review/models`. Daarnaast de **deterministische, gratis** lees-endpoints (puur
+  Mongo, geen LLM): `GET /ai-review/stats|episodes|reports|day|history|patterns|evaluation|
+  source-health|episode-detail` en de notes/reminders (`GET/POST /ai-review/events`,
+  `GET/POST /ai-review/reminders`). nginx proxyt alles als `/_ai-review/*`.
+- **Write-hardening:** de schrijf-endpoints `/_ai-review/events` en `/_ai-review/reminders`
+  accepteren `POST` alleen vanaf private ranges + Tailscale + localhost (`limit_except GET`);
+  lezen blijft open op het LAN.
 - **Overlay:** een AI-knop rechtsonder opent een paneel met een model-dropdown
   (⭐ aanbevolen-groep + volledige lijst uit `/api/tags`), een "Review draaien"-knop en
-  de recente observaties/vragen.
+  de recente observaties/vragen, plus Statistiek/Rapporten/History-tabs. Episode-detail is
+  een gefocuste review (metrics, pattern, vergelijkbare episodes) **zonder eigen curve** —
+  Nightscout toont de glucosegrafiek al.
 - **Periodiek (optioneel):** `AI_REVIEW_INTERVAL_MINUTES>0` laat de server elk interval
   automatisch een review draaien.
 - Volledige ontwerp + roadmap voor rijkere AI-rollen staat in `llm.md`.

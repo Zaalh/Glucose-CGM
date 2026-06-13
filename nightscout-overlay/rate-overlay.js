@@ -863,6 +863,8 @@
       '#cgm-ai-panel .ai-sevband{font-size:11px;padding:3px 7px;margin:3px 0;border-left:3px solid rgba(148,163,184,.4);border-radius:0 4px 4px 0}',
       '#cgm-ai-panel .ai-sevband.on{background:rgba(248,113,133,.12);border-left-color:#f43f5e}',
       '#cgm-ai-panel .ai-sev-tag{font-size:9px;font-weight:700;color:#fbbf24;border:1px solid #fbbf24;border-radius:5px;padding:0 5px}',
+      '#cgm-ai-panel .ai-sim{display:flex;justify-content:space-between;gap:8px;font-size:11px;padding:4px 6px;margin:3px 0;border-radius:5px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);cursor:pointer}',
+      '#cgm-ai-panel .ai-sim:hover{background:rgba(255,255,255,.07)}',
       '#cgm-ai-panel .ai-rev-actions{display:flex;gap:5px;margin-top:8px}',
       '#cgm-ai-panel .ai-rev-btn{flex:1;font-size:10px;padding:4px 6px;border:1px solid rgba(255,255,255,.2);border-radius:5px;background:#1e293b;color:#cbd5e1;cursor:pointer}',
       '#cgm-ai-panel .ai-rev-btn:hover{background:#334155}',
@@ -1632,6 +1634,18 @@
     if (navBtn) { event.stopPropagation(); aiEpisodeNav(navBtn.closest('.ai-item'), navBtn.getAttribute('data-ep-nav')); return; }
     var noteBtn = t && t.closest ? t.closest('[data-ep-note]') : null;
     if (noteBtn) { event.stopPropagation(); aiEpisodeNote(noteBtn.closest('.ai-item')); return; }
+    var simBtn = t && t.closest ? t.closest('[data-sim-peak]') : null;
+    if (simBtn) {
+      event.stopPropagation();
+      var host = simBtn.closest('.ai-item');
+      if (host) {
+        host.setAttribute('data-ep-kind', simBtn.getAttribute('data-sim-kind') || 'low');
+        host.setAttribute('data-ep-peak', simBtn.getAttribute('data-sim-peak'));
+        host.removeAttribute('data-curve-loaded');
+        aiLoadEpisodeCurve(host);
+      }
+      return;
+    }
     var item = t && t.closest ? t.closest('.ai-item') : null;
     if (!item) return;
     item.classList.toggle('open');
@@ -1761,6 +1775,29 @@
       if (c.medianDropMmol != null && d.episode.dropFromPeakMmol != null) cmp.push('daling ' + aiNum(d.episode.dropFromPeakMmol, '') + ' vs ' + c.medianDropMmol);
       if (c.medianRecoveryMin != null && d.episode.recoveryMinutes != null) cmp.push('herstel ' + aiNum(d.episode.recoveryMinutes, 'm') + ' vs ' + c.medianRecoveryMin + 'm');
       if (cmp.length) h.push('<div class="ai-d-row"><b>Vergeleken met je ' + c.count + ' recente dips:</b> ' + escapeHtml(cmp.join(' · ')) + '</div>');
+    }
+
+    // Pattern-analyse (zelfde tijdvenster, over 30d low / 14d high).
+    if (d.pattern && d.pattern.total) {
+      var p = d.pattern, plabel = kind === 'low' ? 'lows' : 'highs';
+      var pr = ['<div class="ai-rev-ctx"><div class="ai-rev-ctx-t">Patroon</div>'];
+      pr.push('<div class="ai-d-row"><b>' + p.count + '/' + p.total + '</b> ' + escapeHtml(p.bucketLabel) + '-' + plabel + ' in ' + escapeHtml(p.window) + (p.fromHM ? ' · tussen ' + escapeHtml(p.fromHM + '–' + p.toHM) : '') + '</div>');
+      var dist = (p.distribution || []).filter(function (x) { return x.count; }).map(function (x) { return x.label + ' ' + x.pct + '%'; }).join(' · ');
+      if (dist) pr.push('<div class="ai-fine">verdeling: ' + escapeHtml(dist) + '</div>');
+      pr.push('</div>');
+      h.push(pr.join(''));
+    }
+
+    // Vergelijkbare episodes (klikbaar → laadt die episode in dezelfde kaart).
+    if (d.similar && d.similar.length) {
+      var sr = ['<div class="ai-rev-ctx"><div class="ai-rev-ctx-t">Vergelijkbare episodes</div>'];
+      d.similar.forEach(function (s) {
+        var val = kind === 'low' ? aiNum(s.nadirMmol, '') + ' mmol' : aiNum(s.peakMmol, '') + ' mmol';
+        var dur = kind === 'low' ? aiNum(s.minutesPeakToNadir, 'm') : aiNum(s.durationMinutes, 'm');
+        sr.push('<div class="ai-sim" data-sim-kind="' + kind + '" data-sim-peak="' + escapeHtml(s.peakAt) + '"><span>' + escapeHtml(aiTime(s.peakAt)) + '</span><span><b>' + escapeHtml(val) + '</b> · ' + escapeHtml(dur) + '</span></div>');
+      });
+      sr.push('</div>');
+      h.push(sr.join(''));
     }
 
     if (d.notableReasons && d.notableReasons.length) {

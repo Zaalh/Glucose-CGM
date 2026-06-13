@@ -189,6 +189,15 @@ De server-routes: `POST /ai-review/run` (body `{ model }`), `GET /ai-review/late
 (default 30s) voorkomt spammen. Zet hiervoor `.env.ai` (zelfde vars als hierboven)
 op de host; die wordt via `env_file` in de `libreview-sync` service geladen.
 
+Daarnaast zijn er **deterministische, gratis** lees-endpoints (puur Mongo, geen LLM):
+`/ai-review/stats`, `/episodes`, `/reports`, `/day`, `/history`, `/patterns`,
+`/evaluation`, `/source-health` en `/episode-detail`, plus notities/reminders
+(`/events`, `/reminders`). Het paneel heeft naast Inzichten ook Statistiek-, Rapporten- en
+History-tabs. Episode-detail is een gefocuste review (metrics, dagdeel-pattern, klikbare
+vergelijkbare episodes) **zonder eigen curve** — Nightscout toont de grafiek al. De
+schrijf-endpoints (`POST /events`, `/reminders`) zijn in nginx beperkt tot
+LAN/Tailscale/localhost (`limit_except GET`).
+
 Optioneel periodiek automatisch draaien (default uit): zet
 `AI_REVIEW_INTERVAL_MINUTES=60` in `.env.ai` → de server draait dan elk uur een
 review op de achtergrond.

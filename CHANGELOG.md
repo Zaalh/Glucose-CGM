@@ -12,6 +12,24 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Toegevoegd
 
+- **Episode-review in de overlay zonder eigen curve** — de low/high-detailweergave
+  tekent géén SVG mini-curve meer: Nightscout toont de glucosegrafiek al, dus
+  `getAiEpisodeDetail` levert geen `readings` meer terug. In plaats daarvan is de
+  episode-kaart een **gefocuste review**: context, trigger, cohort-vergelijking,
+  navigatie tussen episodes en notitie. Nieuw daarin, deterministisch:
+  - **Pattern-analyse** (`buildPattern`): hoeveel episodes van hetzelfde type in
+    hetzelfde dagdeel-venster (nacht/ochtend/middag/avond) over 30d (low) / 14d (high),
+    met tijdsbereik (`fromHM`–`toHM`) en verdeling per dagdeel. Tijdzone via `LIBREVIEW_TZ`.
+  - **Vergelijkbare episodes** (`similar`): top-5 dichtstbijzijnde dips/highs op
+    nadir/piek; in de overlay **klikbaar** → laadt die episode in dezelfde kaart.
+  - **nginx write-hardening:** `POST` op `/_ai-review/events` en `/_ai-review/reminders`
+    mag alleen vanaf private ranges + Tailscale (`100.64.0.0/10`) + localhost
+    (`limit_except GET`); `GET` (lezen) blijft open op het LAN. Defense-in-depth.
+  - **Indexen + retentie:** `ensureAuxIndexes` legt idempotent indexen aan op
+    `cgm_events` (`eventAt`) en `helper_reminders` (`key`, `createdAt`); transiente
+    reminder-ack/snooze-state ouder dan 30d wordt opgeruimd (gebruikersnotities in
+    `cgm_events` blijven staan).
+
 - **SmartXdrip-productlagen compleet (deterministisch, gratis)** — alle resterende
   review-/productlagen uit `llm.md` §14–20 zijn gebouwd, puur Mongo-reads (geen LLM/quota):
   - **Source-health** (`/ai-review/source-health`) + altijd-zichtbare banner met status
@@ -22,7 +40,7 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
     (maaltijd/snack/voelde-hypo/vingerprik/beweging/actie); events koppelen aan de
     dichtstbijzijnde meting (±15 min). Grootste hefboom voor reactieve-hypo trigger-duiding.
   - **History-tab** (`/ai-review/history`) met dag-voor-dag dagcards; klik → dagdetail met
-    dagreview + klikbare low-episodes (SVG-curve).
+    dagreview + klikbare low-episodes.
   - **Pattern cards** in Inzichten (`/ai-review/patterns`): week-vs-week, kwetsbaar venster,
     high→low, datakwaliteit, artefact-check + recente notities.
   - **Evaluatie-metrics** (`/ai-review/evaluation`): episodes per severity, hypo-burden,
@@ -34,15 +52,14 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   - **Safety-hardening**: chat-/rapport-prompts formuleren voorzichtiger bij lage datadekking
     en verwijzen door bij ernstige symptomen (`ai-review-core.mjs`).
 
-- **Low/High Episode-detail met SVG-curve (SmartXdrip-stijl, gratis)** — nieuw endpoint
+- **Low/High Episode-detail (SmartXdrip-stijl, gratis)** — nieuw endpoint
   `GET /ai-review/episode-detail?type=low|high&peakAt=<iso>` (`getAiEpisodeDetail`) geeft
-  de omliggende readings (low: piek−2u…herstel/nadir+2u; high: piek−2u…+4u), deterministische
-  metrics, datakwaliteit-flags, nabije feedback en `notableReasons[]`. High-metrics worden
-  live uit `entries` berekend (trapezoïdale `integrateBeyond`: duur/area boven 10 en 13.9,
-  herstel, `followedByLow`). De overlay maakt low- (Statistiek-tab) en high-episodes
-  (dagreview) klikbaar en laadt **lui** een compacte **SVG mini-curve** (zone-shading +
-  peak/nadir/herstel-markers) — puur Mongo-reads, **geen LLM/quota**. Geproxyd via nginx als
-  `/_ai-review/episode-detail`. Zie llm.md §19.3/19.4 en §20.5.
+  deterministische metrics, datakwaliteit-flags, nabije feedback en `notableReasons[]`.
+  High-metrics worden live uit `entries` berekend (trapezoïdale `integrateBeyond`: duur/area
+  boven 10 en 13.9, herstel, `followedByLow`). De overlay maakt low- (Statistiek-tab) en
+  high-episodes (dagreview) klikbaar — puur Mongo-reads, **geen LLM/quota**. Geproxyd via
+  nginx als `/_ai-review/episode-detail`. Zie llm.md §19.3/19.4 en §20.5. _(De aanvankelijke
+  SVG mini-curve is later verwijderd; zie de bovenste entry — Nightscout toont de curve al.)_
 
 - **AI-review met overlay-knop (Ollama Cloud)** — de optionele AI-laag is nu bedienbaar
   vanuit de overlay. Nieuwe gedeelde kern `scripts/lib/ai-review-core.mjs` (`runAiReview`,

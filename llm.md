@@ -1,4 +1,27 @@
-# AI-review in de overlay — uitgebreid plan (llm.md)
+About
+CGM
+
+Resources
+ Readme
+ Activity
+Stars
+ 0 stars
+Watchers
+ 0 watching
+Forks
+ 0 forks
+Releases
+No releases published
+Create a new release
+Packages
+No packages published
+Publish your first package
+Contributors
+2
+@Zaalh
+Zaalh
+@claude
+claude Claude# AI-review in de overlay — uitgebreid plan (llm.md)
 
 Status: **Fase 1–4 geïmplementeerd & getest** (deploy naar de iMac is de laatste
 stap). Dit document beschrijft het ontwerp om de AI-review als knop + paneel in de
@@ -23,7 +46,7 @@ betekenisvoller te maken dan alleen "samenvatten achteraf".
 | Verdiepte hypo-analyse | Eerste slice gebouwd | Deterministische episode-metrics, severity, burden, recovery, rebound |
 | CGM-datakwaliteit/artefacten | Eerste slice gebouwd | Quality flags/score voor datagaten, single-point lows, lag, mogelijke compression lows |
 | SmartXdrip-achtige review-workflow | Grotendeels gebouwd | Dagreview, episode-detail+SVG, **History-tab**, **pattern cards** en **source-health-banner** live |
-| SmartXdrip productlagen | Grotendeels gebouwd | Episode chart, **notes/event-logging (`cgm_events`)**, **source-health endpoint**, **settings (vensters)**, **niet-klinische labels**, **helper-reminders** live |
+| SmartXdrip productlagen | Grotendeels gebouwd | Episode-review (zonder eigen curve; **pattern + similar**), **notes/event-logging (`cgm_events`)**, **source-health endpoint**, **settings (vensters)**, **niet-klinische labels**, **helper-reminders** live |
 | Safety guardrails + evaluatie | Gebouwd | Chat/rapport-prompts gehard (data-kwaliteit/refer); deterministisch `GET /ai-review/evaluation` + Evaluatie-blok in Statistiek |
 
 **Status na volledige SmartXdrip-uitrol (13 juni 2026):** secties 14–20 zijn deterministisch
@@ -49,6 +72,9 @@ browser overlay  ──HTTP /_*──►  nginx (1337/443)  ──proxy──►
   - Knoppenstack (calc / view / nav) wordt gepositioneerd in de layout-functie.
 - **nginx** = `nightscout-overlay/app-locations.conf`: mapt `/_xxx` →
   `http://libreview-sync:8787/xxx`. Gemount read-only in de `nightscout-ui` service.
+  - **Write-hardening:** schrijf-endpoints `/_ai-review/events` en `/_ai-review/reminders`
+    laten `POST` alleen toe vanaf private ranges + Tailscale (`100.64.0.0/10`) + localhost
+    (`limit_except GET`); `GET` (lezen) blijft open op het LAN. Defense-in-depth.
 - **Server** = `scripts/libreview-nightscout-sync.mjs`, Docker-service `libreview-sync`,
   draait met `--server --loop` op poort 8787. Heeft al Mongo-toegang en routes
   (`/prediction/latest`, `/overlay/entries`, `/feedback`, `/sync`, `/health`).
@@ -721,11 +747,13 @@ De volgende stap is pas geslaagd als:
 companion review naast Nightscout/xDrip, met Home/Insights/History/High Episode/Low
 Episode/Stats. In deze repo is al live: `GET /ai-review/day`, dagcards in de
 Statistiek-tab, high episodes, high->low context, source health en weekdag×uur heatmap.
-**Nieuw live: `GET /ai-review/episode-detail?type=low|high&peakAt=<iso>`** met omliggende
-readings, deterministische metrics, datakwaliteit, `notableReasons[]` en een **SVG
-mini-curve** (zone-shading + markers) die lui inklapt onder elke low/high episode-rij —
-puur Mongo-reads, geen LLM. Nog open: echte **History-tab** met datumselectie en pattern
-cards in de Inzichten-tab.
+**Nieuw live: `GET /ai-review/episode-detail?type=low|high&peakAt=<iso>`** met
+deterministische metrics, datakwaliteit, `notableReasons[]`, **pattern-analyse**
+(dagdeel-verdeling over 30d low / 14d high) en **klikbare vergelijkbare episodes** —
+puur Mongo-reads, geen LLM. **Bewust géén eigen curve in de overlay:** Nightscout toont
+de glucosegrafiek al, dus de kaart is een gefocuste *review* (context/trigger/cohort/
+navigatie/notitie), geen tweede grafiek. Nog open: echte **History-tab** met
+datumselectie en pattern cards in de Inzichten-tab.
 
 ### 19.1 Wat SmartXdrip toevoegt boven "stats"
 De sterke productkeuze is niet alleen meer metrics, maar een review-flow:
@@ -743,7 +771,7 @@ LLM alleen voor narratieve samenvatting nadat cijfers/episodes al vaststaan.
 ### 19.2 History-tab — **GEDAAN (live)**
 Nieuwe tab in het AI-paneel: **History** (`getAiHistory(days)` + `/ai-review/history`,
 overlay `loadAiHistory`/`renderAiHistory`). Dagcards met TIR/laag/low+high-counts, klik →
-`loadAiDayDetail` toont de dagreview + klikbare low-episodes (met SVG-curve). Venster
+`loadAiDayDetail` toont de dagreview + klikbare low-episodes. Venster
 instelbaar via Settings (7/14/30d).
 
 Server:
@@ -765,19 +793,21 @@ Waarde:
 ### 19.3 Low Episode detail — **GEDAAN (live)**
 Doel: niet alleen een rij in Statistiek, maar een echte detailkaart voor één low.
 Geïmplementeerd in `getAiEpisodeDetail({type:'low', peakAt})` + route
-`/ai-review/episode-detail`; overlay laadt de curve lui bij het uitklappen van een
-episode-rij (`aiLoadEpisodeCurve` → `aiRenderEpisodeCurve` → `aiEpisodeSvg`).
+`/ai-review/episode-detail`; de overlay klapt de detailkaart uit onder de episode-rij.
+**Geen eigen curve meer** — Nightscout toont de glucosegrafiek al, dus `readings` worden
+niet meer teruggegeven; de kaart focust op review-context i.p.v. een tweede grafiek.
 
 Server:
 - `GET /ai-review/episode-detail?type=low&peakAt=<iso>`
 - Zoek episode in `reactive_hypo_episodes`.
-- Haal omliggende readings uit `entries`: standaard `peakAt - 2h` t/m `recoveredAt + 2h`
-  of `nadirAt + 2h` als recovery ontbreekt.
 - Retourneer:
   - episode metrics: piek, nadir, duur, burden, recovery, rebound, severity, shape;
   - quality flags/score;
-  - surrounding readings `{t, mmol}`;
-  - nearby high episodes en user feedback in hetzelfde venster;
+  - **pattern**: dagdeel-bucket (nacht/ochtend/middag/avond), aantal in dat venster over
+    30d echte lows, tijdsbereik (`fromHM`–`toHM`) en verdeling per dagdeel (`buildPattern`);
+  - **similar**: top-5 dichtstbijzijnde lows op nadir (klikbaar in de overlay → laadt die
+    episode in dezelfde kaart);
+  - nearby high episodes, trigger/cohort en user feedback in hetzelfde venster;
   - `notableReasons[]`, deterministisch opgebouwd.
 
 Notable reasons voorbeelden:
@@ -789,15 +819,17 @@ Notable reasons voorbeelden:
 - "Rebound high na herstel."
 
 Overlay:
-- Episode-rij klik -> detail uitklappen of modal binnen paneel.
-- Mini-curve als simpele SVG/polyline of compacte tabel/sparkline.
+- Episode-rij klik -> detail uitklappen binnen paneel.
+- Géén eigen curve: Nightscout toont de grafiek al; de kaart toont metrics, pattern en
+  vergelijkbare episodes.
 - Toon "review, geen behandeladvies" subtiel onderaan.
 
 ### 19.4 High Episode detail — **GEDAAN (live, optie A)**
 Highs zijn relevant omdat reactieve dips vaak beginnen na een hoge postprandiale piek.
 Geïmplementeerd via `getAiEpisodeDetail({type:'high', peakAt})`: metrics worden **live uit
 `entries` rond de piek** berekend (optie A; geen persistente builder). De high-episodes in
-de dagreview zijn nu klikbaar en tonen dezelfde SVG-curve + metrics + `followedByLow`.
+de dagreview zijn nu klikbaar en tonen dezelfde reviewkaart (metrics, pattern, similar) +
+`followedByLow` — zonder eigen curve (Nightscout toont de grafiek).
 
 Server (live):
 - High-episodes blijven **optie A** (live uit `entries` per window); persistente
@@ -973,29 +1005,31 @@ Server/datamodel:
   - symptoom -> nearby low;
   - vingerprik -> quality/Whipple-classificatie.
 
-### 20.5 Episode chart UX — **GEDAAN (eerste slice live)**
-SmartXdrip episode pages tonen een event met omliggende curve. Onze overlay toont dit nu
-als compacte reviewkaart (`aiEpisodeSvg` in `rate-overlay.js`), niet als ruwe tabel.
+### 20.5 Episode chart UX — **HERZIEN: review-kaart zonder eigen curve**
+SmartXdrip episode pages tonen een event met omliggende curve. Een eerste slice tekende
+dat na als inline **SVG mini-curve** (`aiEpisodeSvg`), maar die is **bewust verwijderd**:
+Nightscout toont de glucosegrafiek al pal naast de overlay, dus een tweede grafiek was
+dubbelop. De episode-kaart (`aiEpisodeDetailHtml`) is nu een **gefocuste review** zonder
+eigen curve.
 
-Low Episode chart (live):
-- piek-2u t/m (herstel|nadir)+2u venster (server `getAiEpisodeDetail`);
-- low-zone shading (<3.9 en <3.0) + stippellijn op 3.9;
-- markers: peak, nadir, recovered;
-- labels/metrics: severity, burden, quality (uit `aiEpisodeDetailHtml`);
+Low Episode review (live):
+- venster server-side: piek−2u t/m (herstel|nadir)+2u (`getAiEpisodeDetail`);
+- metrics: severity, burden, quality, recovery, rebound;
+- **pattern**: dagdeel-bucket + verdeling over 30d lows + tijdsbereik;
+- **similar**: top-5 vergelijkbare lows (klikbaar → laadt die episode in dezelfde kaart);
 - `notableReasons[]` benoemt "mogelijk artefact" als de quality-flags dat aangeven.
 
-High Episode chart (live):
-- piek-2u t/m piek+4u venster;
-- high-zone shading (>10 en >13.9) + stippellijn op 10;
-- markers: start, peak, einde;
+High Episode review (live):
+- venster: piek−2u t/m piek+4u; metrics: piek, duur/area boven 10 & 13.9, herstel;
+- **pattern** over 14d highs + **similar** highs op piek;
 - `followedByLow` als label/metric als er een low volgt binnen 4h.
 
 Implementatie (gedaan):
-- Simpele SVG/polyline in `rate-overlay.js` (vaste viewBox, `width:100%;height:auto`).
-- Geen chart-library; alles via `escapeHtml`, geen raw HTML uit data.
+- Pure HTML-kaart in `rate-overlay.js`; alles via `escapeHtml`, geen raw HTML uit data.
+- Geen chart-library en geen eigen SVG-curve meer (Nightscout is de grafiekbron).
 
-Nog open (volgende slice): zwaardere zoom/scrub-interactie en een aparte modal i.p.v. de
-inline accordion, indien gewenst.
+Nog open (volgende slice): event-/notitiekoppeling vanuit de kaart zelf en, indien gewenst,
+een aparte modal i.p.v. de inline accordion.
 
 ### 20.6 Niet-klinische UI-taal — **GEDAAN (eerste slice)**
 Geïmplementeerd: `AI_LABELS`-map + `aiLabel(key)` in de overlay vertaalt interne velden

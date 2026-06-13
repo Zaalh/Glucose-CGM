@@ -44,6 +44,8 @@ const FEEDBACK_TYPES = new Set([
 // Toegestane cgm_events-types (notes/event-logging). MOET hierboven de top-level
 // await staan (TDZ), want writeCgmEvent leest dit vanuit een request-handler.
 const CGM_EVENT_TYPES = new Set(['meal', 'snack', 'symptom', 'exercise', 'stress', 'sleep', 'illness', 'alcohol', 'fingerstick', 'action', 'note'])
+// Idem (TDZ): buildPattern (request-handler) leest TOD_LABEL.
+const TOD_LABEL = { night: 'nacht', morning: 'ochtend', afternoon: 'middag', evening: 'avond' }
 
 // NB: deze module heeft een top-level `await runForever()` die nooit terugkeert.
 // Alle module-scope const/let MOET hierboven staan, anders blijven ze in de
@@ -73,6 +75,8 @@ let aiModelsCache = { at: 0, models: null }
 // Korte cache: source-health wordt bij het openen van het paneel meermaals opgevraagd
 // (banner + reminders + patterns). 15s is ruim binnen de meet-resolutie (minuten).
 let sourceHealthCache = { at: 0, data: null }
+// Indexen op de notes/reminder-collecties één keer per proces (idempotent).
+let auxIndexesEnsured = false
 
 if (server) startServer()
 
@@ -1683,6 +1687,7 @@ async function writeCgmEvent(body) {
     client = new MongoClient(config.mongoUri)
     await client.connect()
     const db = client.db()
+    await ensureAuxIndexes(db)
     const eventAt = body && body.eventAt && Number.isFinite(Date.parse(body.eventAt))
       ? new Date(body.eventAt).toISOString()
       : new Date().toISOString()
@@ -1717,6 +1722,7 @@ async function getCgmEvents(limit) {
   try {
     client = new MongoClient(config.mongoUri)
     await client.connect()
+    await ensureAuxIndexes(client.db())
     return await client.db().collection('cgm_events')
       .find({}, { projection: { relatedEntryId: 0 } })
       .sort({ eventAt: -1 }).limit(limit).toArray()
@@ -1772,7 +1778,11 @@ async function getHelperReminders() {
     client = new MongoClient(config.mongoUri)
     await client.connect()
     const db = client.db()
+    await ensureAuxIndexes(db)
     const now = Date.now()
+    // Retentie: transient ack/snooze-state ouder dan 30d opruimen (de conditie keert
+    // anders terug en genereert verse state). cgm_events (gebruikersnotities) NIET wissen.
+    await db.collection('helper_reminders').deleteMany({ createdAt: { $lt: new Date(now - 30 * 86_400_000).toISOString() } }).catch(() => undefined)
     const states = await db.collection('helper_reminders').find({}).toArray()
     const stateByKey = new Map(states.map((s) => [s.key, s]))
     const candidates = []
@@ -1826,6 +1836,7 @@ async function setReminderState(body) {
   try {
     client = new MongoClient(config.mongoUri)
     await client.connect()
+    await ensureAuxIndexes(client.db())
     await client.db().collection('helper_reminders').updateOne(
       { key },
       { $set: { ...patch, key }, $setOnInsert: { createdAt: new Date().toISOString() } },
@@ -2035,8 +2046,53 @@ function integrateBeyond(pts, threshold, direction) {
   return { minutes: round(minutes, 0), area: round(area, 1) }
 }
 
-// B-detail — één low- of high-episode met omliggende curve, metrics, datakwaliteit en
-// deterministische "waarom opvallend"-redenen. Géén LLM, alleen Mongo-reads (free-tier safe).
+function hourInTz(ms, tz) {
+  return Number(new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', hour12: false }).format(new Date(ms))) % 24
+}
+function todBucket(ms, tz) { const h = hourInTz(ms, tz); return h < 6 ? 'night' : h < 12 ? 'morning' : h < 18 ? 'afternoon' : 'evening' }
+function clockMinutes(ms, tz) {
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date(ms))
+  let hh = 0, mm = 0
+  for (const p of parts) { if (p.type === 'hour') hh = Number(p.value); if (p.type === 'minute') mm = Number(p.value) }
+  return (hh % 24) * 60 + mm
+}
+function hmFromMin(m) { return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0') }
+
+// Pattern-analyse: hoeveel episodes van hetzelfde type in hetzelfde tijdvenster (bucket),
+// over een venster, met tijdsbereik + verdeling. Deterministisch.
+function buildPattern(items, thisMs, tz, windowLabel) {
+  const dist = { night: 0, morning: 0, afternoon: 0, evening: 0 }
+  for (const t of items) { const b = todBucket(t, tz); if (dist[b] != null) dist[b]++ }
+  const thisBucket = todBucket(thisMs, tz)
+  const inBucket = items.filter((t) => todBucket(t, tz) === thisBucket)
+  const mins = inBucket.map((t) => clockMinutes(t, tz))
+  const total = items.length || 1
+  const distribution = Object.keys(dist).map((k) => ({ bucket: k, label: TOD_LABEL[k], count: dist[k], pct: round((dist[k] / total) * 100, 0) }))
+  return {
+    window: windowLabel,
+    bucket: thisBucket,
+    bucketLabel: TOD_LABEL[thisBucket],
+    count: inBucket.length,
+    total: items.length,
+    fromHM: mins.length ? hmFromMin(Math.min.apply(null, mins)) : null,
+    toHM: mins.length ? hmFromMin(Math.max.apply(null, mins)) : null,
+    distribution,
+  }
+}
+
+async function ensureAuxIndexes(db) {
+  if (auxIndexesEnsured) return
+  try {
+    await db.collection('cgm_events').createIndex({ eventAt: -1 })
+    await db.collection('helper_reminders').createIndex({ key: 1 })
+    await db.collection('helper_reminders').createIndex({ createdAt: 1 })
+    auxIndexesEnsured = true
+  } catch { /* index-creatie mag deploy nooit breken */ }
+}
+
+// B-detail — één low- of high-episode met metrics, context, severity, pattern-analyse en
+// similar-episodes. Géén LLM, alleen Mongo-reads (free-tier safe). Geen curve: Nightscout
+// toont de glucosegrafiek al.
 async function getAiEpisodeDetail({ type, peakAt } = {}) {
   const kind = type === 'high' ? 'high' : 'low'
   const peakMs = Date.parse(peakAt || '')
@@ -2045,6 +2101,8 @@ async function getAiEpisodeDetail({ type, peakAt } = {}) {
     err.statusCode = 400
     throw err
   }
+  const tz = process.env.LIBREVIEW_TZ || 'Europe/Amsterdam'
+  const now = Date.now()
   let client = null
   try {
     client = new MongoClient(config.mongoUri)
@@ -2081,7 +2139,6 @@ async function getAiEpisodeDetail({ type, peakAt } = {}) {
       .sort({ date: 1 })
       .toArray()
     const pts = rows.map((r) => ({ t: r.date, mmol: Number(r.sgv) / MGDL_PER_MMOL }))
-    const readings = pts.map((p) => ({ t: new Date(p.t).toISOString(), mmol: round(p.mmol, 1) }))
 
     const feedbackRaw = await db.collection('user_feedback')
       .find({}, { projection: { _id: 0, createdAt: 1, type: 1, note: 1, relatedEntryIdentifier: 1, relatedEntryMmol: 1 } })
@@ -2123,6 +2180,18 @@ async function getAiEpisodeDetail({ type, peakAt } = {}) {
         medianDropMmol: round(median(cohortEps.map((e) => e.dropFromPeakMmol)) ?? 0, 1) || null,
         medianRecoveryMin: median(cohortEps.map((e) => e.recoveryMinutes)),
       }
+      // Pattern-analyse + similar over 30d echte lows (nadir <3.9).
+      const since30 = new Date(now - 30 * 86_400_000).toISOString()
+      const lows30 = await db.collection('reactive_hypo_episodes')
+        .find({ peakAt: { $gte: since30 }, nadirMmol: { $lt: 3.9 } }, { projection: { _id: 0, peakAt: 1, nadirMmol: 1, minutesPeakToNadir: 1, fallRateMmolPerMin: 1, severity: 1 } })
+        .toArray()
+      const pattern = buildPattern(lows30.map((l) => Date.parse(l.peakAt)).filter(Number.isFinite), peakMs, tz, '30d')
+      const thisNadir = Number(episode.nadirMmol)
+      const similar = lows30
+        .filter((l) => l.peakAt !== episode.peakAt)
+        .sort((a, b) => Math.abs(Number(a.nadirMmol) - thisNadir) - Math.abs(Number(b.nadirMmol) - thisNadir))
+        .slice(0, 5)
+        .map((l) => ({ peakAt: l.peakAt, nadirMmol: l.nadirMmol, minutesPeakToNadir: l.minutesPeakToNadir, fallRateMmolPerMin: l.fallRateMmolPerMin, severity: l.severity }))
       const reasons = []
       if (Number(episode.nadirMmol) < 3.0) reasons.push('Diepe low: laagste punt onder 3.0 mmol/L.')
       if (Number(episode.timeBelow3_9Minutes) > 20) reasons.push('Lang onder 3.9: meer dan 20 minuten.')
@@ -2143,11 +2212,12 @@ async function getAiEpisodeDetail({ type, peakAt } = {}) {
         type: 'low',
         episode,
         window: { from: new Date(windowFrom).toISOString(), to: new Date(windowTo).toISOString() },
-        readings,
         nearbyHighs,
         events,
         trigger,
         cohort,
+        pattern,
+        similar,
         feedback,
         notableReasons: reasons,
       }
@@ -2190,6 +2260,18 @@ async function getAiEpisodeDetail({ type, peakAt } = {}) {
         ? { peakAt: followLow.peakAt, nadirMmol: followLow.nadirMmol, severity: followLow.severity, minutesToLowPeak: round((Date.parse(followLow.peakAt) - (endAt || realPeakAt)) / 60000, 0) }
         : null,
     }
+    // Pattern-analyse + similar over 14d high-episodes (live uit entries).
+    const rows14 = await db.collection('entries')
+      .find({ type: 'sgv', sgv: { $exists: true }, date: { $gte: now - 14 * 86_400_000 } }, { projection: { _id: 0, sgv: 1, date: 1 } })
+      .sort({ date: 1 }).toArray()
+    const highs14 = buildHighEpisodes(rows14)
+    const pattern = buildPattern(highs14.map((hh) => Date.parse(hh.peakAt)).filter(Number.isFinite), realPeakAt, tz, '14d')
+    const thisPeak = Number(metrics.peakMmol)
+    const similar = highs14
+      .filter((hh) => Math.abs(Date.parse(hh.peakAt) - realPeakAt) > 60_000)
+      .sort((a, b) => Math.abs(Number(a.peakMmol) - thisPeak) - Math.abs(Number(b.peakMmol) - thisPeak))
+      .slice(0, 5)
+      .map((hh) => ({ peakAt: hh.peakAt, peakMmol: hh.peakMmol, durationMinutes: hh.durationMinutes }))
     const reasons = []
     if (Number(metrics.peakMmol) > 13.9) reasons.push('Hoge piek: boven 13.9 mmol/L.')
     if (Number(metrics.durationAbove10Minutes) > 120) reasons.push('Lang boven 10: meer dan 2 uur.')
@@ -2199,8 +2281,9 @@ async function getAiEpisodeDetail({ type, peakAt } = {}) {
       type: 'high',
       metrics,
       window: { from: new Date(windowFrom).toISOString(), to: new Date(windowTo).toISOString() },
-      readings,
       events,
+      pattern,
+      similar,
       feedback,
       notableReasons: reasons,
     }
