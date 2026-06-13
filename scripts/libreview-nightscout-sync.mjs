@@ -66,6 +66,9 @@ const AI_REVIEW_MIN_INTERVAL_MS = Math.max(0, Number(process.env.AI_REVIEW_MIN_I
 let aiReviewRunning = false
 let aiReviewLastAt = 0
 let aiModelsCache = { at: 0, models: null }
+// Korte cache: source-health wordt bij het openen van het paneel meermaals opgevraagd
+// (banner + reminders + patterns). 15s is ruim binnen de meet-resolutie (minuten).
+let sourceHealthCache = { at: 0, data: null }
 
 if (server) startServer()
 
@@ -1560,6 +1563,9 @@ function medianIntervalMinutes(rows) {
 // Source-health als first-class inzicht (SmartXdrip §20.2). Deterministisch, geen LLM.
 // status good/watch/bad + reasons[] sturen hoe stellig rapporten/chat mogen zijn.
 async function getSourceHealth() {
+  if (sourceHealthCache.data && Date.now() - sourceHealthCache.at < 15_000) {
+    return sourceHealthCache.data
+  }
   let client = null
   try {
     client = new MongoClient(config.mongoUri)
@@ -1590,7 +1596,7 @@ async function getSourceHealth() {
     let status = 'good'
     if (ageMinutes == null || ageMinutes > 30 || coverage14d < 50) status = 'bad'
     else if (ageMinutes > 15 || coverage14d < 70 || longestGap24h > 60) status = 'watch'
-    return {
+    const data = {
       lastEntryAt: last != null ? new Date(last).toISOString() : null,
       ageMinutes,
       expectedIntervalMin: medianInterval,
@@ -1601,6 +1607,8 @@ async function getSourceHealth() {
       status,
       reasons,
     }
+    sourceHealthCache = { at: Date.now(), data }
+    return data
   } finally {
     if (client) await client.close().catch(() => undefined)
   }
@@ -1788,7 +1796,9 @@ async function getHelperReminders() {
     const reminders = candidates.filter((c) => {
       const st = stateByKey.get(c.key)
       if (!st) return true
-      if (st.acknowledgedAt) return false
+      // Ack onderdrukt tijdelijk (12u), niet permanent: deze condities zijn terugkerend
+      // (bron stale, datagat). Anders zou één keer "gezien" de reminder voorgoed dempen.
+      if (st.acknowledgedAt && (now - Date.parse(st.acknowledgedAt)) < 12 * 3_600_000) return false
       if (st.snoozedUntil && Date.parse(st.snoozedUntil) > now) return false
       return true
     })
