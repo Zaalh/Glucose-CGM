@@ -41,6 +41,10 @@ const FEEDBACK_TYPES = new Set([
   'fingerstick_confirmed',
 ])
 
+// Toegestane cgm_events-types (notes/event-logging). MOET hierboven de top-level
+// await staan (TDZ), want writeCgmEvent leest dit vanuit een request-handler.
+const CGM_EVENT_TYPES = new Set(['meal', 'snack', 'symptom', 'exercise', 'stress', 'sleep', 'illness', 'alcohol', 'fingerstick', 'action', 'note'])
+
 // NB: deze module heeft een top-level `await runForever()` die nooit terugkeert.
 // Alle module-scope const/let MOET hierboven staan, anders blijven ze in de
 // temporal dead zone (TDZ) en falen runtime-toegangen.
@@ -1670,7 +1674,7 @@ async function getAiHistory(days) {
 
 // Notes/event-logging (SmartXdrip §20.4 / §14): grootste hefboom voor reactieve hypo —
 // koppelt maaltijden/symptomen aan dips. Beschrijvend, nooit voorschrift.
-const CGM_EVENT_TYPES = new Set(['meal', 'snack', 'symptom', 'exercise', 'stress', 'sleep', 'illness', 'alcohol', 'fingerstick', 'action', 'note'])
+// (CGM_EVENT_TYPES staat bovenaan i.v.m. de top-level-await TDZ.)
 async function writeCgmEvent(body) {
   const rawType = String((body && body.type) || '').trim().toLowerCase()
   const type = CGM_EVENT_TYPES.has(rawType) ? rawType : 'note'
