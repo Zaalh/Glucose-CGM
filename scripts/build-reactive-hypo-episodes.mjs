@@ -20,8 +20,11 @@ function episodeKey(ep) {
   return `${ep.peakAt}|${ep.nadirAt}`
 }
 
-async function main() {
-  const client = new MongoClient(MONGO_URI)
+// Pure build + upsert; geeft het samenvattingsobject terug i.p.v. te loggen,
+// zodat zowel de CLI als de sync-loop (scripts/libreview-nightscout-sync.mjs)
+// dezelfde logica hergebruiken.
+export async function buildReactiveHypoEpisodes({ mongoUri = MONGO_URI } = {}) {
+  const client = new MongoClient(mongoUri)
   await client.connect()
   try {
     const db = client.db()
@@ -34,8 +37,7 @@ async function main() {
       .toArray()
 
     if (entries.length < 4) {
-      console.log(JSON.stringify({ ok: false, reason: 'te weinig entries', entries: entries.length }))
-      return
+      return { ok: false, reason: 'te weinig entries', entries: entries.length }
     }
 
     const episodes = buildEpisodes(entries)
@@ -75,27 +77,29 @@ async function main() {
         peakAt: e.peakAt,
       }))
 
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
-          scannedEntries: entries.length,
-          episodes: episodes.length,
-          upserted,
-          outcomes: hist,
-          examples,
-          collection: 'reactive_hypo_episodes',
-        },
-        null,
-        2,
-      ),
-    )
+    return {
+      ok: true,
+      scannedEntries: entries.length,
+      episodes: episodes.length,
+      upserted,
+      outcomes: hist,
+      examples,
+      collection: 'reactive_hypo_episodes',
+    }
   } finally {
     await client.close().catch(() => undefined)
   }
 }
 
-main().catch((err) => {
-  console.error(`[episodes] mislukt: ${err && err.message ? err.message : err}`)
-  process.exit(1)
-})
+async function main() {
+  const result = await buildReactiveHypoEpisodes()
+  console.log(JSON.stringify(result, null, 2))
+}
+
+// Alleen als CLI uitgevoerd (niet bij import vanuit de sync-loop).
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    console.error(`[episodes] mislukt: ${err && err.message ? err.message : err}`)
+    process.exit(1)
+  })
+}

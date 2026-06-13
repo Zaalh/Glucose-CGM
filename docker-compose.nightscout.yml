@@ -111,6 +111,9 @@ services:
       # Staat hier (niet in .env.libreview) zodat het via git deployt; environment
       # overschrijft env_file, dus dit wint van een eventuele oude waarde daar.
       LIBREVIEW_INTERVAL_SECONDS: 60
+      # Periodieke episode-build in de sync-loop: houdt reactive_hypo_episodes
+      # vanzelf bij (anders loopt het achter tot handmatige episodes:build). 0 = uit.
+      EPISODES_BUILD_INTERVAL_MINUTES: 15
       # DST-bewuste timestamps via IANA-zone. Lege offset overschrijft een eventuele
       # vaste LIBREVIEW_TZ_OFFSET in .env.libreview, zodat zomer/winter vanzelf klopt.
       LIBREVIEW_TZ: Europe/Amsterdam

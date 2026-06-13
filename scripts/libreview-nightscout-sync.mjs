@@ -6,6 +6,7 @@ import { buildHypoFeatures, cleanGlucoseTimeline } from './lib/hypo-features.mjs
 import { evaluateReactiveHypoRiskV2 } from './lib/reactive-hypo-detector.mjs'
 import { findSimilarEpisodes, patternFromFeatures } from './lib/episode-similarity.mjs'
 import { aiRouterConfigured, resolveAiRouterConfig, runAiReview, runAiReport, runAiChat } from './lib/ai-review-core.mjs'
+import { buildReactiveHypoEpisodes } from './build-reactive-hypo-episodes.mjs'
 
 const LIBRE_API = 'https://api-eu.libreview.io'
 const DEFAULT_INTERVAL_SECONDS = 60
@@ -78,6 +79,13 @@ let sourceHealthCache = { at: 0, data: null }
 // Indexen op de notes/reminder-collecties één keer per proces (idempotent).
 let auxIndexesEnsured = false
 
+// Periodieke episode-build in de --loop-modus zodat reactive_hypo_episodes
+// vanzelf bijblijft (anders loopt het achter tot iemand handmatig episodes:build
+// draait). 0 = uit. MOET boven de top-level await staan (TDZ).
+const EPISODES_BUILD_INTERVAL_MS = Math.max(0, Number(process.env.EPISODES_BUILD_INTERVAL_MINUTES ?? 15)) * 60_000
+let episodesBuildLastAt = 0
+let episodesBuildRunning = false
+
 if (server) startServer()
 
 if (loop) {
@@ -91,7 +99,29 @@ async function runForever() {
     await syncOnce().catch((err) => {
       console.error(`[libreview-sync] ${formatError(err)}`)
     })
+    await maybeBuildEpisodes().catch((err) => {
+      console.error(`[libreview-sync] episode-build: ${formatError(err)}`)
+    })
     await sleep(readConfig(false).intervalSeconds * 1000)
+  }
+}
+
+// Bouwt reactive_hypo_episodes opnieuw op zodra het interval verstreken is.
+// Deelt de builder met scripts/build-reactive-hypo-episodes.mjs (CLI) zodat
+// live en handmatig identieke episodes opleveren. Niet-blokkerend bij falen.
+async function maybeBuildEpisodes() {
+  if (!EPISODES_BUILD_INTERVAL_MS || episodesBuildRunning) return
+  const now = Date.now()
+  if (episodesBuildLastAt && now - episodesBuildLastAt < EPISODES_BUILD_INTERVAL_MS) return
+  episodesBuildRunning = true
+  try {
+    const result = await buildReactiveHypoEpisodes({ mongoUri: config.mongoUri })
+    episodesBuildLastAt = Date.now()
+    if (result && result.ok) {
+      console.log(`[libreview-sync] episodes herbouwd: ${result.episodes} episode(s) uit ${result.scannedEntries} entries`)
+    }
+  } finally {
+    episodesBuildRunning = false
   }
 }
 
