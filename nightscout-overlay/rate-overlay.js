@@ -972,6 +972,8 @@
       '#cgm-ai-panel .ai-ev{display:flex;gap:7px;align-items:flex-start;padding:6px 0;border-top:1px solid rgba(255,255,255,.08)}',
       '#cgm-ai-panel .ai-ev-t{flex:0 0 38px;font-size:10px;opacity:.6;padding-top:2px}',
       '#cgm-ai-panel .ai-ev-ic{flex:0 0 18px;text-align:center;font-size:13px;opacity:.85}',
+      '#cgm-ai-panel .ai-ev.rise_local_peak .ai-ev-ic{color:#a78bfa}',
+      '#cgm-ai-panel .ai-ev.fall_local_trough .ai-ev-ic{color:#38bdf8}',
       '#cgm-ai-panel .ai-ev.high_episode .ai-ev-ic{color:#fb7185}',
       '#cgm-ai-panel .ai-ev.recovery_to_range .ai-ev-ic{color:#4ade80}',
       '#cgm-ai-panel .ai-ev.first_reading .ai-ev-ic{color:#fbbf24}',
