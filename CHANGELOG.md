@@ -12,6 +12,23 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Toegevoegd
 
+- **Stats & AI-overlay uitgebreid met app-stijl analyses** — de bestaande tabs zijn verrijkt
+  zodat de overlay dezelfde informatie toont als een gepolijste CGM-app, zonder nieuwe
+  native shell:
+  - *Inzichten*: Home-samenvatting bovenaan — TIR-donut (24u, conic-ring laag/bereik/hoog),
+    kaarten Gem. 24u / TIR 24u / CV 7d, en een "Inzicht van vandaag"-tekstblok.
+  - *Statistiek*: 7/14/30/90-periodeknoppen, Δ-badges t.o.v. de **vorige gelijke periode**
+    (TIR/TBR/gemiddelde/CV; backend `trend` vergelijkt nu `[from-days, from)`),
+    een echte **AGP** met percentielbanden p10–p90 / p25–p75 + medianlijn p50 (nieuwe
+    per-uur percentielen in de stats-endpoint), en een **24-uurs TIR-heatmap-balk**.
+  - *History*: **Glucose Events**-feed per dag — dag-tegels (TIR/AVG/PIEK/CV), high-episodes
+    als uitklapbare diepteanalyse, en een intraday tijdlijn (eerste meting, lokale piek,
+    high-episode + herstel, stabiel venster). Nieuwe pure builder
+    `scripts/lib/glucose-events.mjs` (gedeeld door endpoint + test `glucose-events:check`)
+    en endpoint `GET /ai-review/glucose-events?date=`.
+  - *Explore* (nieuwe tab): blader door recente high/low-episodes → tik voor de
+    diepteanalyse (metrics incl. stijg-/daal-/herstelsnelheid in mmol/L/min, pattern-dots
+    per dag, severity-banden, vergelijkbare episodes) via `GET /ai-review/explore-episodes`.
 - **Aanloop-features in de episode-similarity** — `findSimilarEpisodes` matcht nu naast
   piek + daling + timing ook op de *aanloop* naar de piek: `riseRate15m` (gladde gem.
   stijgsnelheid over 15 min vóór de piek) en `riseFromBaseline` (spike t.o.v. baseline

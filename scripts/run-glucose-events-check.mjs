@@ -46,6 +46,14 @@ try {
   assert.ok(high.peakAt, 'high heeft peakAt voor detail-link')
   assert.ok(types.includes('recovery_to_range'), 'herstel naar bereik gedetecteerd')
   assert.ok(types.includes('stable_window'), 'stabiel venster gedetecteerd')
+  const gapTimeline = timelineFromReadings([
+    { minutesAgo: 300, mmol: 10.6 },
+    { minutesAgo: 260, mmol: 10.7 },
+    { minutesAgo: 255, mmol: 10.9 },
+    { minutesAgo: 250, mmol: 10.8 },
+  ], NOW)
+  const gapHighs = buildGlucoseEvents(gapTimeline, { highMinCount: 3 }).filter((e) => e.type === 'high_episode')
+  assert.equal(gapHighs.length, 1, 'high-run na datagat start opnieuw')
   // chronologisch gesorteerd
   for (let i = 1; i < events.length; i += 1) {
     assert.ok(Date.parse(events[i].at) >= Date.parse(events[i - 1].at), 'events chronologisch')

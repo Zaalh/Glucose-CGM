@@ -340,14 +340,17 @@ hypotheses en vragen. Staat uit tot `.env.ai` (een AI-provider) is gezet.
   in-memory lock + `AI_REVIEW_MIN_INTERVAL_MS`), `GET /ai-review/latest`,
   `GET /ai-review/models`. Daarnaast de **deterministische, gratis** lees-endpoints (puur
   Mongo, geen LLM): `GET /ai-review/stats|episodes|reports|day|history|patterns|evaluation|
-  source-health|episode-detail` en de notes/reminders (`GET/POST /ai-review/events`,
-  `GET/POST /ai-review/reminders`). nginx proxyt alles als `/_ai-review/*`.
+  source-health|episode-detail|glucose-events|explore-episodes` en de notes/reminders
+  (`GET/POST /ai-review/events`, `GET/POST /ai-review/reminders`). nginx proxyt alles
+  als `/_ai-review/*`.
 - **Write-hardening:** de schrijf-endpoints `/_ai-review/events` en `/_ai-review/reminders`
   accepteren `POST` alleen vanaf private ranges + Tailscale + localhost (`limit_except GET`);
   lezen blijft open op het LAN.
-- **Overlay:** een **"Stats & AI"-knop** rechtsonder opent een paneel met vijf tabs:
+- **Overlay:** een **"Stats & AI"-knop** rechtsonder opent een paneel met zes tabs:
   **Inzichten** (patroon-kaarten + "Review draaien"), **Statistiek**, **History**,
-  **Rapporten** en **Chat**. Het meeste is deterministische statistiek (alleen
+  **Explore**, **Rapporten** en **Chat**. History toont naast dagdetail ook de
+  `glucose-events` feed; Explore bladert door high/low-episodes en opent dezelfde
+  episode-diepteanalyse. Het meeste is deterministische statistiek (alleen
   Mongo-reads, geen LLM/quota); alleen Rapporten/Chat/Review gebruiken het model —
   vandaar "Stats & AI" i.p.v. enkel "AI". De Statistiek-tab toont o.a. TIR/episodes/
   heatmap, een **reactieve-hypo profiel** en **High→low context** (high→low-koppelingen

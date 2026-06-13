@@ -115,7 +115,7 @@ export function buildGlucoseEvents(timeline, options = {}) {
           }
         }
       }
-      runStart = (isHigh && gap <= opt.gapMinutes) ? i : null
+      runStart = isHigh ? i : null
     }
   }
 
