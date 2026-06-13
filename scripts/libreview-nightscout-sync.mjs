@@ -2416,7 +2416,7 @@ async function getGlucoseEventsFeed(dateParam) {
       .sort({ date: 1 }).toArray()
     const expectedMinutes = Math.round((range.to - range.from) / 60_000)
     const summary = summarizeEntries(rows, expectedMinutes)
-    const events = buildGlucoseEvents(rows)
+    const events = buildGlucoseEvents(rows).slice().reverse()
     const highEpisodeCount = events.filter((e) => e.type === 'high_episode').length
     return { date: dateKey, window: { from: new Date(range.from).toISOString(), to: new Date(range.to).toISOString() }, summary, events, highEpisodeCount }
   } finally {
