@@ -1383,7 +1383,7 @@
     Array.prototype.forEach.call(panel.querySelectorAll('.ai-pane'), function (p) {
       p.hidden = p.getAttribute('data-pane') !== tab;
     });
-    if (tab === 'stats') loadAiStats();
+    if (tab === 'stats') loadAiStats(true); // altijd verversen: toon de nieuwste metingen
     if (tab === 'rapporten') loadAiReports();
     if (tab === 'history') loadAiHistory();
     if (tab === 'inzichten') loadAiPatterns();
