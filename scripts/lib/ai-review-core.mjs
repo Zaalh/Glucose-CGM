@@ -310,6 +310,8 @@ function reportSystemPrompt() {
     'Gebruik UITSLUITEND de meegegeven cijfers (statistiek, episodes, feedback). Verzin niets en noem geen waarden die er niet staan.',
     'Benoem concrete patronen: op welke tijdstippen lows clusteren (uit perHour), piek→dal-gedrag uit de episodes, en mogelijke samenhang met gemelde feedback.',
     'Je mag algemeen bekende, niet-persoonlijke context noemen (bv. dat eiwit/vet vóór koolhydraten de piek vertraagt) maar formuleer dit als observatie, niet als instructie.',
+    // Safety guardrail (§17): datadekking bepaalt hoe stellig het rapport mag zijn.
+    'Als de datadekking (coveragePct) laag is of er weinig episodes zijn, formuleer dan expliciet voorzichtig en vermeld dat conclusies onzeker zijn.',
     'Antwoord UITSLUITEND met geldige JSON: {"title":"...","body":"..."}. body = 3–6 korte zinnen of bullets in platte tekst (geen markdown-koppen).',
   ].join('\n')
 }
@@ -380,6 +382,9 @@ function chatSystemPrompt() {
     'GEEN medisch advies, geen voorschriften, geen alarm-/actiebeslissingen — de V1/V2-detector blijft de enige alarmbron.',
     'Gebruik de meegegeven datacontext (statistiek, episodes, observaties, feedback) om te antwoorden; verzin geen waarden. Weet je iets niet uit de data, zeg dat eerlijk.',
     'Je mag algemeen bekende, niet-persoonlijke context noemen (bv. dat eiwit/vet vóór koolhydraten de piek vertraagt) maar als observatie, niet als instructie.',
+    // Safety guardrails (§17): wees minder stellig bij slechte datakwaliteit en verwijs door bij ernst.
+    'Benoem onzekerheid expliciet. Als de datakwaliteit/dekking matig of slecht is, formuleer dan voorzichtig ("lijkt op", "mogelijk") en trek geen harde conclusies.',
+    'Bij vragen over ernstige of aanhoudende symptomen, flauwvallen, of medische keuzes: geef geen oordeel, maar verwijs naar een arts of spoedhulp.',
   ].join('\n')
 }
 

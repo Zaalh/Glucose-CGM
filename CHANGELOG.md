@@ -12,6 +12,28 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Toegevoegd
 
+- **SmartXdrip-productlagen compleet (deterministisch, gratis)** — alle resterende
+  review-/productlagen uit `llm.md` §14–20 zijn gebouwd, puur Mongo-reads (geen LLM/quota):
+  - **Source-health** (`/ai-review/source-health`) + altijd-zichtbare banner met status
+    goed/let op/slecht (leeftijd laatste meting, dekking 24u/14d, langste gat, `reasons[]`).
+  - **Helper-reminders** (`/ai-review/reminders` GET genereert, POST snooze/ack via
+    `helper_reminders`) als niet-medische chips in de banner — géén alarm/sound/vibration.
+  - **Notes/event-logging** (`cgm_events` + `/ai-review/events`) met quick-log presets
+    (maaltijd/snack/voelde-hypo/vingerprik/beweging/actie); events koppelen aan de
+    dichtstbijzijnde meting (±15 min). Grootste hefboom voor reactieve-hypo trigger-duiding.
+  - **History-tab** (`/ai-review/history`) met dag-voor-dag dagcards; klik → dagdetail met
+    dagreview + klikbare low-episodes (SVG-curve).
+  - **Pattern cards** in Inzichten (`/ai-review/patterns`): week-vs-week, kwetsbaar venster,
+    high→low, datakwaliteit, artefact-check + recente notities.
+  - **Evaluatie-metrics** (`/ai-review/evaluation`): episodes per severity, hypo-burden,
+    mediane recovery, % matige kwaliteit/vingerprik/postprandiaal, feedback-telling — getoond
+    onderaan de Statistiek-tab.
+  - **Settings** (localStorage): statistiek- en History-venster (7/14/30/90d); doelbereik als
+    referentie. Raakt de veiligheidskritische detector niet.
+  - **Niet-klinische UI-labels** (`AI_LABELS`/`aiLabel`): interne velden → begrijpelijke taal.
+  - **Safety-hardening**: chat-/rapport-prompts formuleren voorzichtiger bij lage datadekking
+    en verwijzen door bij ernstige symptomen (`ai-review-core.mjs`).
+
 - **Low/High Episode-detail met SVG-curve (SmartXdrip-stijl, gratis)** — nieuw endpoint
   `GET /ai-review/episode-detail?type=low|high&peakAt=<iso>` (`getAiEpisodeDetail`) geeft
   de omliggende readings (low: piek−2u…herstel/nadir+2u; high: piek−2u…+4u), deterministische

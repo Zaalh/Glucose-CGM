@@ -868,6 +868,99 @@ function startServer() {
       return
     }
 
+    if (url.pathname === '/ai-review/source-health' && req.method === 'GET') {
+      try {
+        const health = await getSourceHealth()
+        res.end(JSON.stringify({ ok: true, ...health }))
+      } catch (err) {
+        res.writeHead(500)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
+    if (url.pathname === '/ai-review/history' && req.method === 'GET') {
+      try {
+        const days = parsePositiveInt(url.searchParams.get('days'), 14, 90)
+        const result = await getAiHistory(days)
+        res.end(JSON.stringify({ ok: true, ...result }))
+      } catch (err) {
+        res.writeHead(500)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
+    if (url.pathname === '/ai-review/patterns' && req.method === 'GET') {
+      try {
+        const result = await getAiPatterns()
+        res.end(JSON.stringify({ ok: true, ...result }))
+      } catch (err) {
+        res.writeHead(500)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
+    if (url.pathname === '/ai-review/evaluation' && req.method === 'GET') {
+      try {
+        const days = parsePositiveInt(url.searchParams.get('days'), 14, 90)
+        const result = await getEvaluation(days)
+        res.end(JSON.stringify({ ok: true, ...result }))
+      } catch (err) {
+        res.writeHead(500)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
+    if (url.pathname === '/ai-review/events' && req.method === 'GET') {
+      try {
+        const limit = parsePositiveInt(url.searchParams.get('limit'), 50, 200)
+        const events = await getCgmEvents(limit)
+        res.end(JSON.stringify({ ok: true, events }))
+      } catch (err) {
+        res.writeHead(500)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
+    if (url.pathname === '/ai-review/events' && req.method === 'POST') {
+      try {
+        const body = await readJsonBody(req)
+        const result = await writeCgmEvent(body)
+        res.end(JSON.stringify({ ok: true, ...result }))
+      } catch (err) {
+        res.writeHead(err && err.statusCode ? err.statusCode : 400)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
+    if (url.pathname === '/ai-review/reminders' && req.method === 'GET') {
+      try {
+        const result = await getHelperReminders()
+        res.end(JSON.stringify({ ok: true, ...result }))
+      } catch (err) {
+        res.writeHead(500)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
+    if (url.pathname === '/ai-review/reminders' && req.method === 'POST') {
+      try {
+        const body = await readJsonBody(req)
+        const result = await setReminderState(body)
+        res.end(JSON.stringify(result))
+      } catch (err) {
+        res.writeHead(err && err.statusCode ? err.statusCode : 400)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
     if (url.pathname === '/ai-review/day' && req.method === 'GET') {
       try {
         const day = await getAiDayReview(url.searchParams.get('date'))
@@ -1451,6 +1544,326 @@ function longestGapMinutes(rows) {
     longest = Math.max(longest, Math.round((rows[i].date - rows[i - 1].date) / 60000))
   }
   return longest
+}
+
+function medianIntervalMinutes(rows) {
+  const gaps = []
+  for (let i = 1; i < rows.length; i += 1) {
+    const g = (rows[i].date - rows[i - 1].date) / 60000
+    if (g > 0 && g < 30) gaps.push(g)
+  }
+  if (!gaps.length) return null
+  gaps.sort((a, b) => a - b)
+  return round(gaps[Math.floor(gaps.length / 2)], 1)
+}
+
+// Source-health als first-class inzicht (SmartXdrip §20.2). Deterministisch, geen LLM.
+// status good/watch/bad + reasons[] sturen hoe stellig rapporten/chat mogen zijn.
+async function getSourceHealth() {
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    const db = client.db()
+    const now = Date.now()
+    const from14 = now - 14 * 24 * 3_600_000
+    const from24 = now - 24 * 3_600_000
+    const rows = await db.collection('entries')
+      .find({ type: 'sgv', sgv: { $exists: true }, date: { $gte: from14 } }, { projection: { _id: 0, date: 1 } })
+      .sort({ date: 1 })
+      .toArray()
+    const last = rows.length ? rows[rows.length - 1].date : null
+    const ageMinutes = last != null ? round((now - last) / 60000, 0) : null
+    const rows24 = rows.filter((r) => r.date >= from24)
+    const medianInterval = medianIntervalMinutes(rows) || 5
+    const expected14 = Math.max(1, (14 * 24 * 60) / medianInterval)
+    const expected24 = Math.max(1, (24 * 60) / medianInterval)
+    const coverage14d = round(Math.min(100, (rows.length / expected14) * 100), 0)
+    const coverageToday = round(Math.min(100, (rows24.length / expected24) * 100), 0)
+    const longestGap24h = longestGapMinutes(rows24)
+    const longestGap14d = longestGapMinutes(rows)
+    const reasons = []
+    if (ageMinutes == null || ageMinutes > 30) reasons.push('stale')
+    else if (ageMinutes > 15) reasons.push('stale_soon')
+    if (longestGap24h > 60) reasons.push('large_gap')
+    if (coverage14d < 70) reasons.push('low_coverage')
+    let status = 'good'
+    if (ageMinutes == null || ageMinutes > 30 || coverage14d < 50) status = 'bad'
+    else if (ageMinutes > 15 || coverage14d < 70 || longestGap24h > 60) status = 'watch'
+    return {
+      lastEntryAt: last != null ? new Date(last).toISOString() : null,
+      ageMinutes,
+      expectedIntervalMin: medianInterval,
+      coverageToday,
+      coverage14d,
+      longestGap24hMin: longestGap24h,
+      longestGap14dMin: longestGap14d,
+      status,
+      reasons,
+    }
+  } finally {
+    if (client) await client.close().catch(() => undefined)
+  }
+}
+
+// History (SmartXdrip §19.2): dag-voor-dag overzicht, nieuw->oud. Deterministisch,
+// puur Mongo-reads — geen LLM. Maakt moeilijke dagen vindbaar.
+async function getAiHistory(days) {
+  const tz = process.env.LIBREVIEW_TZ || 'Europe/Amsterdam'
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    const db = client.db()
+    const to = Date.now()
+    const from = to - days * 86_400_000
+    const rows = await db.collection('entries')
+      .find({ type: 'sgv', sgv: { $exists: true }, date: { $gte: from } }, { projection: { _id: 0, sgv: 1, date: 1 } })
+      .sort({ date: 1 }).toArray()
+    const lows = await db.collection('reactive_hypo_episodes')
+      .find({ peakAt: { $gte: new Date(from).toISOString() } }, { projection: { _id: 0, peakAt: 1, nadirMmol: 1, areaBelow3_9: 1, severity: 1 } })
+      .toArray()
+    const byDay = new Map()
+    for (const r of rows) {
+      const key = dayKeyInTz(new Date(r.date), tz)
+      if (!byDay.has(key)) byDay.set(key, [])
+      byDay.get(key).push(r)
+    }
+    const lowsByDay = new Map()
+    for (const l of lows) {
+      const key = dayKeyInTz(new Date(Date.parse(l.peakAt)), tz)
+      if (!lowsByDay.has(key)) lowsByDay.set(key, [])
+      lowsByDay.get(key).push(l)
+    }
+    const history = []
+    for (const [date, dayRows] of byDay) {
+      const stats = summarizeEntries(dayRows, 1440)
+      const dayLows = lowsByDay.get(date) || []
+      const highs = buildHighEpisodes(dayRows)
+      const burden = dayLows.reduce((s, e) => s + (Number(e.areaBelow3_9) || 0), 0)
+      const worstLow = dayLows.slice().sort((a, b) => (Number(a.nadirMmol) || 99) - (Number(b.nadirMmol) || 99))[0] || null
+      history.push({
+        date,
+        tir: stats.tir, tbr: stats.tbr, tar: stats.tar, mean: stats.mean, cv: stats.cv,
+        min: stats.min, max: stats.max, coverage: stats.coveragePct,
+        lowCount: dayLows.length, highCount: highs.length,
+        hypoBurden3_9: round(burden, 1),
+        worstLowMmol: worstLow ? worstLow.nadirMmol : null,
+        worstHighMmol: highs.length ? Math.max(...highs.map((h) => h.peakMmol)) : null,
+        sourceLevel: stats.coveragePct >= 80 ? 'goed' : (stats.coveragePct >= 50 ? 'matig' : 'slecht'),
+      })
+    }
+    history.sort((a, b) => (a.date < b.date ? 1 : -1))
+    return { window: { days, from: new Date(from).toISOString(), to: new Date(to).toISOString() }, history }
+  } finally {
+    if (client) await client.close().catch(() => undefined)
+  }
+}
+
+// Notes/event-logging (SmartXdrip §20.4 / §14): grootste hefboom voor reactieve hypo —
+// koppelt maaltijden/symptomen aan dips. Beschrijvend, nooit voorschrift.
+const CGM_EVENT_TYPES = new Set(['meal', 'snack', 'symptom', 'exercise', 'stress', 'sleep', 'illness', 'alcohol', 'fingerstick', 'action', 'note'])
+async function writeCgmEvent(body) {
+  const rawType = String((body && body.type) || '').trim().toLowerCase()
+  const type = CGM_EVENT_TYPES.has(rawType) ? rawType : 'note'
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    const db = client.db()
+    const eventAt = body && body.eventAt && Number.isFinite(Date.parse(body.eventAt))
+      ? new Date(body.eventAt).toISOString()
+      : new Date().toISOString()
+    const eMs = Date.parse(eventAt)
+    const near = await db.collection('entries')
+      .find({ type: 'sgv', date: { $gte: eMs - 15 * 60000, $lte: eMs + 15 * 60000 } }, { projection: { _id: 1, identifier: 1, date: 1, sgv: 1 } })
+      .toArray()
+    const nearest = near.sort((a, b) => Math.abs(a.date - eMs) - Math.abs(b.date - eMs))[0] || null
+    const doc = {
+      createdAt: new Date().toISOString(),
+      eventAt,
+      type,
+      note: body && body.note ? String(body.note).slice(0, 500) : null,
+      carbLevel: body && body.carbLevel ? String(body.carbLevel).slice(0, 40) : null,
+      proteinFat: body && body.proteinFat ? String(body.proteinFat).slice(0, 40) : null,
+      exerciseIntensity: body && body.exerciseIntensity ? String(body.exerciseIntensity).slice(0, 40) : null,
+      symptoms: Array.isArray(body && body.symptoms) ? body.symptoms.slice(0, 10).map((s) => String(s).slice(0, 40)) : [],
+      fingerstickMmol: body && Number.isFinite(Number(body.fingerstickMmol)) ? round(Number(body.fingerstickMmol), 1) : null,
+      relatedEntryId: nearest ? nearest._id : null,
+      relatedEntryIdentifier: nearest ? nearest.identifier ?? null : null,
+      relatedEntryMmol: nearest && Number.isFinite(nearest.sgv) ? round(Number(nearest.sgv) / MGDL_PER_MMOL, 2) : null,
+    }
+    const r = await db.collection('cgm_events').insertOne(doc)
+    return { id: String(r.insertedId), type }
+  } finally {
+    if (client) await client.close().catch(() => undefined)
+  }
+}
+
+async function getCgmEvents(limit) {
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    return await client.db().collection('cgm_events')
+      .find({}, { projection: { relatedEntryId: 0 } })
+      .sort({ eventAt: -1 }).limit(limit).toArray()
+  } finally {
+    if (client) await client.close().catch(() => undefined)
+  }
+}
+
+// Pattern cards (SmartXdrip §19.5): deterministische Inzichten-kaarten, geen LLM.
+async function getAiPatterns() {
+  const [stats, health] = await Promise.all([getAiStats(14), getSourceHealth()])
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    const db = client.db()
+    const since14 = new Date(Date.now() - 14 * 86_400_000).toISOString()
+    const eps = await db.collection('reactive_hypo_episodes')
+      .find({ peakAt: { $gte: since14 } }, { projection: { _id: 0, qualityFlags: 1 } }).toArray()
+    const rows = await db.collection('entries')
+      .find({ type: 'sgv', sgv: { $exists: true }, date: { $gte: Date.now() - 14 * 86_400_000 } }, { projection: { _id: 0, sgv: 1, date: 1 } })
+      .sort({ date: 1 }).toArray()
+    const lowEps = await db.collection('reactive_hypo_episodes')
+      .find({ peakAt: { $gte: since14 } }, { projection: { _id: 0, peakAt: 1, nadirMmol: 1 } }).toArray()
+    const highs = buildHighEpisodes(rows)
+    let highToLow = 0
+    for (const h of highs) {
+      const hEnd = Date.parse(h.endAt)
+      if (lowEps.some((l) => { const p = Date.parse(l.peakAt); return p >= hEnd && p <= hEnd + 4 * 3_600_000 })) highToLow++
+    }
+    const artefacts = eps.filter((e) => Array.isArray(e.qualityFlags) && (e.qualityFlags.includes('single_point_low') || e.qualityFlags.includes('possible_compression_low'))).length
+    const worstHour = (stats.perHour || []).filter((p) => p.n >= 10).sort((a, b) => b.lowPct - a.lowPct)[0] || null
+    const worstDay = (stats.perWeekday || []).filter((p) => p.n >= 30).sort((a, b) => b.lowPct - a.lowPct)[0] || null
+    const cards = []
+    cards.push({ key: 'week', title: 'Deze week vs vorige', body: `TIR ${stats.trend.recentTir ?? '–'}% (was ${stats.trend.prevTir ?? '–'}%, Δ ${stats.trend.tirDelta ?? '–'}) · laag ${stats.trend.recentLowPct ?? '–'}% (was ${stats.trend.prevLowPct ?? '–'}%)` })
+    if (worstHour) cards.push({ key: 'window', title: 'Kwetsbaar venster', body: `Meeste laag rond ${worstHour.hour}:00 (${worstHour.lowPct}% laag)${worstDay ? ` · zwaarste dag ${worstDay.day} (${worstDay.lowPct}%)` : ''}` })
+    cards.push({ key: 'high_low', title: 'High→low patroon', body: `${highToLow} gekoppelde high→low gebeurtenis(sen) in 14 dagen` })
+    cards.push({ key: 'quality', title: 'Datakwaliteit', body: `14d-dekking ${health.coverage14d}% · langste gat 24u ${health.longestGap24hMin}m · status ${health.status}` })
+    cards.push({ key: 'artefacts', title: 'Artefact-check', body: `${artefacts} episode(s) met single-point/compression-low flag` })
+    return { cards, sourceHealth: health }
+  } finally {
+    if (client) await client.close().catch(() => undefined)
+  }
+}
+
+// Helper-reminders (SmartXdrip §20.1): expliciet NIET-medische helpers. Deterministisch
+// gegenereerd uit de huidige toestand; ack/snooze-state in `helper_reminders`. Geen alarm,
+// geen behandeladvies, nooit een vervanging voor de Nightscout/hypo-alarmen.
+async function getHelperReminders() {
+  const health = await getSourceHealth()
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    const db = client.db()
+    const now = Date.now()
+    const states = await db.collection('helper_reminders').find({}).toArray()
+    const stateByKey = new Map(states.map((s) => [s.key, s]))
+    const candidates = []
+    if (health.status === 'bad' || health.reasons.includes('stale')) {
+      candidates.push({ key: 'source_stale', type: 'source', severity: 'watch', title: 'CGM-data verouderd', message: `Laatste meting ${health.ageMinutes ?? '?'} min geleden. Controleer sensor/sync.` })
+    }
+    if (health.reasons.includes('large_gap')) {
+      candidates.push({ key: 'large_gap', type: 'source', severity: 'info', title: 'Lang datagat', message: `Langste gat (24u): ${health.longestGap24hMin} min.` })
+    }
+    if (health.reasons.includes('low_coverage')) {
+      candidates.push({ key: 'low_coverage', type: 'source', severity: 'info', title: 'Lage datadekking', message: `14d-dekking ${health.coverage14d}%. Conclusies zijn minder stevig.` })
+    }
+    const since48 = new Date(now - 48 * 3_600_000).toISOString()
+    const severe = await db.collection('reactive_hypo_episodes')
+      .find({ peakAt: { $gte: since48 }, severity: { $in: ['relevant', 'severe'] } }, { projection: { _id: 0, peakAt: 1, nadirMmol: 1, severity: 1 } })
+      .sort({ peakAt: -1 }).toArray()
+    if (severe.length) {
+      const anyFeedback = await db.collection('user_feedback').countDocuments({ createdAt: { $gte: since48 } })
+      const anyEvent = await db.collection('cgm_events').countDocuments({ createdAt: { $gte: since48 } })
+      if (!anyFeedback && !anyEvent) {
+        const s = severe[0]
+        candidates.push({ key: 'episode_no_context', type: 'review', severity: 'info', title: 'Ernstige dip zonder context', message: `Low ${s.nadirMmol} mmol (${s.severity}) zonder notitie. Voeg context toe als je wilt.` })
+      }
+    }
+    const reminders = candidates.filter((c) => {
+      const st = stateByKey.get(c.key)
+      if (!st) return true
+      if (st.acknowledgedAt) return false
+      if (st.snoozedUntil && Date.parse(st.snoozedUntil) > now) return false
+      return true
+    })
+    return { reminders }
+  } finally {
+    if (client) await client.close().catch(() => undefined)
+  }
+}
+
+async function setReminderState(body) {
+  const key = String((body && body.key) || '').trim()
+  const action = String((body && body.action) || '').trim()
+  if (!key) { const e = new Error('key ontbreekt.'); e.statusCode = 400; throw e }
+  const patch = action === 'ack'
+    ? { acknowledgedAt: new Date().toISOString() }
+    : action === 'snooze'
+      ? { snoozedUntil: new Date(Date.now() + 30 * 60000).toISOString() }
+      : null
+  if (!patch) { const e = new Error('onbekende actie (ack|snooze).'); e.statusCode = 400; throw e }
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    await client.db().collection('helper_reminders').updateOne(
+      { key },
+      { $set: { ...patch, key }, $setOnInsert: { createdAt: new Date().toISOString() } },
+      { upsert: true },
+    )
+    return { ok: true }
+  } finally {
+    if (client) await client.close().catch(() => undefined)
+  }
+}
+
+// Evaluatie (§18): deterministische metrics — meet of de hypo-laag echt nuttiger wordt.
+async function getEvaluation(days) {
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    const db = client.db()
+    const since = new Date(Date.now() - days * 86_400_000).toISOString()
+    const eps = await db.collection('reactive_hypo_episodes')
+      .find({ peakAt: { $gte: since } }, { projection: { _id: 0, severity: 1, areaBelow3_9: 1, areaBelow3_0: 1, recoveryMinutes: 1, qualityScore: 1, qualityFlags: 1, timeOfDayBucket: 1, postprandialCandidate: 1 } })
+      .toArray()
+    const fb = await db.collection('user_feedback').find({ createdAt: { $gte: since } }, { projection: { _id: 0, type: 1 } }).toArray()
+    const bySeverity = {}
+    const byTimeOfDay = {}
+    eps.forEach((e) => {
+      const s = e.severity || 'onbekend'; bySeverity[s] = (bySeverity[s] || 0) + 1
+      const b = e.timeOfDayBucket || 'onbekend'; byTimeOfDay[b] = (byTimeOfDay[b] || 0) + 1
+    })
+    const recoveries = eps.map((e) => Number(e.recoveryMinutes)).filter(Number.isFinite).sort((a, b) => a - b)
+    const total = eps.length
+    const poorQuality = eps.filter((e) => Number(e.qualityScore) < 70).length
+    const fingerstick = eps.filter((e) => Array.isArray(e.qualityFlags) && e.qualityFlags.includes('fingerstick_confirmed')).length
+    const postprandial = eps.filter((e) => e.postprandialCandidate).length
+    const fbCounts = {}
+    fb.forEach((f) => { fbCounts[f.type] = (fbCounts[f.type] || 0) + 1 })
+    return {
+      window: { days, from: since, to: new Date().toISOString() },
+      episodes: total,
+      bySeverity,
+      areaBelow3_9: round(eps.reduce((s, e) => s + (Number(e.areaBelow3_9) || 0), 0), 1),
+      areaBelow3_0: round(eps.reduce((s, e) => s + (Number(e.areaBelow3_0) || 0), 0), 1),
+      medianRecoveryMin: recoveries.length ? recoveries[Math.floor(recoveries.length / 2)] : null,
+      pctPoorQuality: total ? round((poorQuality / total) * 100, 0) : 0,
+      pctFingerstickConfirmed: total ? round((fingerstick / total) * 100, 0) : 0,
+      pctPostprandial: total ? round((postprandial / total) * 100, 0) : 0,
+      byTimeOfDay,
+      feedback: fbCounts,
+    }
+  } finally {
+    if (client) await client.close().catch(() => undefined)
+  }
 }
 
 // D/C — Genereert één narratief rapport (1 LLM-call) achter dezelfde lock als de

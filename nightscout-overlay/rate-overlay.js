@@ -860,6 +860,35 @@
       '#cgm-ai-panel .ai-reasons ul{margin:3px 0 0;padding-left:16px}',
       '#cgm-ai-panel .ai-reasons li{margin-bottom:2px;line-height:1.3}',
       '#cgm-ai-panel .ai-empty{opacity:.6;font-style:italic}',
+      '#cgm-ai-panel .ai-banner{margin-bottom:6px}',
+      '#cgm-ai-panel .ai-srchealth{font-size:10px;padding:4px 7px;border-radius:5px;margin-bottom:4px;border:1px solid rgba(255,255,255,.12)}',
+      '#cgm-ai-panel .ai-srchealth.ok{background:rgba(52,211,153,.12)}',
+      '#cgm-ai-panel .ai-srchealth.watch{background:rgba(251,191,36,.14)}',
+      '#cgm-ai-panel .ai-srchealth.bad{background:rgba(248,113,113,.16)}',
+      '#cgm-ai-panel .ai-reminder{display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:10px;padding:4px 7px;border-radius:5px;margin-bottom:4px;background:rgba(99,102,241,.14);border:1px solid rgba(129,140,248,.4)}',
+      '#cgm-ai-panel .ai-reminder.watch{background:rgba(251,191,36,.16)}',
+      '#cgm-ai-panel .ai-rem-act{display:flex;gap:3px;flex-shrink:0}',
+      '#cgm-ai-panel .ai-rem-act button{font-size:9px;padding:2px 5px;border:1px solid rgba(255,255,255,.25);border-radius:4px;background:rgba(30,30,30,.6);color:#ddd;cursor:pointer}',
+      '#cgm-ai-panel .ai-quicklog{margin-bottom:7px;padding:5px 7px;border:1px solid rgba(255,255,255,.12);border-radius:5px;background:rgba(255,255,255,.03)}',
+      '#cgm-ai-panel .ai-ql-title{font-size:10px;opacity:.7;margin-bottom:4px}',
+      '#cgm-ai-panel .ai-ql-btns{display:flex;flex-wrap:wrap;gap:4px}',
+      '#cgm-ai-panel .ai-ql-btn{font-size:10px;padding:3px 7px;border:1px solid rgba(255,255,255,.2);border-radius:12px;background:#1e293b;color:#cbd5e1;cursor:pointer}',
+      '#cgm-ai-panel .ai-ql-btn:hover{background:#334155}',
+      '#cgm-ai-panel .ai-ql-status{font-size:10px;opacity:.7;margin-top:3px;min-height:12px}',
+      '#cgm-ai-panel .ai-pcard{padding:5px 8px;margin-bottom:4px;border-left:2px solid rgba(99,102,241,.6);background:rgba(255,255,255,.03);border-radius:0 4px 4px 0}',
+      '#cgm-ai-panel .ai-pcard-t{font-size:10px;font-weight:700;opacity:.85}',
+      '#cgm-ai-panel .ai-pcard-b{font-size:11px;line-height:1.35}',
+      '#cgm-ai-panel .ai-hday{display:flex;flex-direction:column;gap:1px;padding:5px 8px;margin-bottom:3px;border-radius:5px;border:1px solid rgba(255,255,255,.1);border-left-width:3px;cursor:pointer}',
+      '#cgm-ai-panel .ai-hday:hover{background:rgba(255,255,255,.05)}',
+      '#cgm-ai-panel .ai-hday.sel{background:rgba(99,102,241,.16)}',
+      '#cgm-ai-panel .ai-hday.ok{border-left-color:#34d399}',
+      '#cgm-ai-panel .ai-hday.low{border-left-color:#f43f5e}',
+      '#cgm-ai-panel .ai-hday.high{border-left-color:#fbbf24}',
+      '#cgm-ai-panel .ai-hday-d{font-size:11px;font-weight:700}',
+      '#cgm-ai-panel .ai-hday-m{font-size:10px;opacity:.7}',
+      '#cgm-ai-panel .ai-settings{margin-top:10px;border-top:1px solid rgba(255,255,255,.12);padding-top:6px}',
+      '#cgm-ai-panel .ai-set-row{display:flex;justify-content:space-between;align-items:center;font-size:11px;margin-bottom:4px}',
+      '#cgm-ai-panel .ai-set-row select{font-size:11px;background:#1e293b;color:#cbd5e1;border:1px solid rgba(255,255,255,.2);border-radius:4px;padding:2px 4px}',
       '#cgm-ai-panel .ai-tabs{display:flex;gap:4px;margin-bottom:8px}',
       '#cgm-ai-panel .ai-tab{flex:1;font-size:11px;font-weight:700;padding:5px 4px;border:1px solid rgba(255,255,255,.18);border-radius:5px;background:#1e293b;color:#cbd5e1;cursor:pointer}',
       '#cgm-ai-panel .ai-tab.active{background:#6366f1;color:#fff;border-color:#6366f1}',
@@ -1267,13 +1296,17 @@
     var panel = document.createElement('div');
     panel.id = 'cgm-ai-panel';
     panel.innerHTML = [
+      '<div id="cgm-ai-banner" class="ai-banner"></div>',
       '<div class="ai-tabs">',
       '  <button type="button" class="ai-tab active" data-tab="inzichten">Inzichten</button>',
       '  <button type="button" class="ai-tab" data-tab="stats">Statistiek</button>',
+      '  <button type="button" class="ai-tab" data-tab="history">History</button>',
       '  <button type="button" class="ai-tab" data-tab="rapporten">Rapporten</button>',
       '  <button type="button" class="ai-tab" data-tab="chat">Chat</button>',
       '</div>',
       '<div class="ai-pane" data-pane="inzichten">',
+      '  <div id="cgm-ai-quicklog" class="ai-quicklog"></div>',
+      '  <div id="cgm-ai-patterns"></div>',
       '  <div class="ai-row">',
       '    <select id="cgm-ai-model" aria-label="AI model"></select>',
       '    <button type="button" class="ai-run" id="cgm-ai-run">Review draaien</button>',
@@ -1281,8 +1314,13 @@
       '  <div class="ai-status" id="cgm-ai-status"></div>',
       '  <div class="ai-row ai-runrow"><label class="ai-runlabel" for="cgm-ai-run-select">Rapport:</label><select id="cgm-ai-run-select" aria-label="Kies een eerdere review"></select></div>',
       '  <div id="cgm-ai-body"></div>',
+      '  <div id="cgm-ai-settings" class="ai-settings"></div>',
       '</div>',
       '<div class="ai-pane" data-pane="stats" hidden><div id="cgm-ai-stats"><div class="ai-empty">Laden…</div></div></div>',
+      '<div class="ai-pane" data-pane="history" hidden>',
+      '  <div id="cgm-ai-history"><div class="ai-empty">Laden…</div></div>',
+      '  <div id="cgm-ai-daydetail"></div>',
+      '</div>',
       '<div class="ai-pane" data-pane="rapporten" hidden>',
       '  <div class="ai-row"><button type="button" class="ai-run" id="cgm-ai-genreport">Genereer dagrapport</button></div>',
       '  <div class="ai-status" id="cgm-ai-repstatus"></div>',
@@ -1310,7 +1348,14 @@
     });
     panel.querySelector('#cgm-ai-body').addEventListener('click', onAiItemClick);
     panel.querySelector('#cgm-ai-stats').addEventListener('click', onAiStatsClick);
+    panel.querySelector('#cgm-ai-banner').addEventListener('click', onAiBannerClick);
+    panel.querySelector('#cgm-ai-quicklog').addEventListener('click', onAiQuickLogClick);
+    panel.querySelector('#cgm-ai-history').addEventListener('click', onAiHistoryClick);
+    panel.querySelector('#cgm-ai-daydetail').addEventListener('click', onAiStatsClick);
+    panel.querySelector('#cgm-ai-settings').addEventListener('change', onAiSettingsChange);
     panel.querySelector('.ai-tabs').addEventListener('click', onAiTabClick);
+    renderAiQuickLog();
+    renderAiSettings();
     return panel;
   }
 
@@ -1328,6 +1373,8 @@
     });
     if (tab === 'stats') loadAiStats();
     if (tab === 'rapporten') loadAiReports();
+    if (tab === 'history') loadAiHistory();
+    if (tab === 'inzichten') loadAiPatterns();
   }
 
   // --- Rapporten-tab (C/D): genereren kost 1 LLM-call; lezen is gratis.
@@ -1384,6 +1431,8 @@
     if (open) {
       loadAiModels();
       loadAiRuns(true);
+      loadAiBanner();
+      loadAiPatterns();
       // Ververst alleen de run-lijst (selectie/inhoud blijven), zodat nieuwe
       // achtergrond-runs in de selector verschijnen zonder je weg te trekken.
       if (!aiLatestTimer) aiLatestTimer = window.setInterval(function () { loadAiRuns(false); }, 60000);
@@ -1684,6 +1733,232 @@
     return svg.join('');
   }
 
+  // --- Niet-klinische UI-labels (SmartXdrip §20.6): vertaal interne velden naar
+  // begrijpelijke taal. API-veldnamen blijven intern; dit is alleen presentatie.
+  var AI_LABELS = {
+    areaBelow3_9: 'Hypo-belasting (diepte × duur)',
+    areaBelow3_0: 'Zware hypo-belasting',
+    areaAbove10: 'High-belasting (hoogte × duur)',
+    nadir: 'Laagste punt',
+    peak: 'Hoogste punt',
+    qualityFlags: 'Datakwaliteit',
+    single_point_low: 'Losse lage meting',
+    possible_compression_low: 'Mogelijk sensor-/drukartefact',
+    data_gap_before: 'Datagat ervoor',
+    data_gap_during: 'Datagat tijdens',
+    data_gap_after: 'Datagat erna',
+    lag_sensitive: 'Snelle verandering; CGM kan achterlopen',
+    fingerstick_confirmed: 'Vingerprik bevestigd',
+    fingerstick_disagreed: 'Vingerprik wijkt af',
+    sensor_warmup_or_stale: 'Sensor opwarmen/verouderd',
+    postprandialCandidate: 'Mogelijk na maaltijd'
+  };
+  function aiLabel(key) { return AI_LABELS[key] || String(key); }
+
+  // --- Banner: source-health + helper-reminders (SmartXdrip §20.1/§20.2). Gratis.
+  function loadAiBanner() {
+    Promise.all([
+      fetchWithTimeout('/_ai-review/source-health', { cache: 'no-store' }, 12000).then(function (r) { return r.ok ? r.json() : null; }),
+      fetchWithTimeout('/_ai-review/reminders', { cache: 'no-store' }, 12000).then(function (r) { return r.ok ? r.json() : null; })
+    ]).then(function (res) {
+      renderAiBanner(res[0], res[1] && res[1].reminders ? res[1].reminders : []);
+    }).catch(function () {});
+  }
+
+  function renderAiBanner(health, reminders) {
+    var el = document.getElementById('cgm-ai-banner');
+    if (!el) return;
+    var h = [];
+    if (health && health.ok) {
+      var lvl = health.status === 'good' ? 'goed' : (health.status === 'watch' ? 'let op' : 'slecht');
+      var cls = health.status === 'good' ? 'ok' : (health.status === 'watch' ? 'watch' : 'bad');
+      h.push('<div class="ai-srchealth ' + cls + '">Bron: <b>' + escapeHtml(lvl) + '</b> · laatste ' +
+        (health.ageMinutes != null ? health.ageMinutes + 'm geleden' : '?') + ' · dekking 14d ' + aiNum(health.coverage14d, '%') + '</div>');
+    }
+    (reminders || []).forEach(function (r) {
+      h.push('<div class="ai-reminder ' + escapeHtml(r.severity || 'info') + '" data-rem-key="' + escapeHtml(r.key) + '">' +
+        '<div class="ai-rem-txt"><b>' + escapeHtml(r.title || '') + '</b> ' + escapeHtml(r.message || '') + '</div>' +
+        '<div class="ai-rem-act"><button type="button" data-rem-action="snooze">snooze 30m</button>' +
+        '<button type="button" data-rem-action="ack">gezien</button></div></div>');
+    });
+    el.innerHTML = h.join('');
+  }
+
+  function onAiBannerClick(event) {
+    var btn = event.target && event.target.closest ? event.target.closest('[data-rem-action]') : null;
+    if (!btn) return;
+    var row = btn.closest('[data-rem-key]');
+    if (!row) return;
+    var key = row.getAttribute('data-rem-key');
+    var action = btn.getAttribute('data-rem-action');
+    row.style.opacity = '0.4';
+    fetchWithTimeout('/_ai-review/reminders', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: key, action: action })
+    }, 10000).then(function () { loadAiBanner(); }).catch(function () { row.style.opacity = ''; });
+  }
+
+  // --- Quick-log (SmartXdrip §20.4 / §14): notitie/event toevoegen. POST /events.
+  var AI_QUICKLOG = [
+    { type: 'meal', label: '🍽 maaltijd' },
+    { type: 'snack', label: '🍪 snack' },
+    { type: 'symptom', label: '😵 voelde hypo' },
+    { type: 'fingerstick', label: '🩸 vingerprik' },
+    { type: 'exercise', label: '🏃 beweging' },
+    { type: 'action', label: '✅ gegeten/actie' }
+  ];
+  function renderAiQuickLog() {
+    var el = document.getElementById('cgm-ai-quicklog');
+    if (!el) return;
+    el.innerHTML = '<div class="ai-ql-title">+ notitie (koppelt context aan dips)</div><div class="ai-ql-btns">' +
+      AI_QUICKLOG.map(function (q) { return '<button type="button" class="ai-ql-btn" data-ql-type="' + q.type + '">' + escapeHtml(q.label) + '</button>'; }).join('') +
+      '</div><div class="ai-ql-status" id="cgm-ai-ql-status"></div>';
+  }
+
+  function onAiQuickLogClick(event) {
+    var btn = event.target && event.target.closest ? event.target.closest('[data-ql-type]') : null;
+    if (!btn) return;
+    var type = btn.getAttribute('data-ql-type');
+    var note = null;
+    if (type === 'fingerstick' || type === 'meal' || type === 'snack' || type === 'symptom') {
+      note = window.prompt(type === 'fingerstick' ? 'Vingerprik mmol/L (optioneel notitie):' : 'Korte notitie (optioneel):', '');
+      if (note === null) return; // geannuleerd
+    }
+    var body = { type: type, note: note || null };
+    if (type === 'fingerstick' && note) { var v = parseFloat(String(note).replace(',', '.')); if (isFinite(v)) body.fingerstickMmol = v; }
+    var st = document.getElementById('cgm-ai-ql-status');
+    if (st) st.textContent = 'Opslaan…';
+    fetchWithTimeout('/_ai-review/events', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    }, 10000).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+      if (st) st.textContent = j && j.ok ? 'Genoteerd ✓' : 'Mislukt';
+      loadAiPatterns(true);
+      window.setTimeout(function () { if (st) st.textContent = ''; }, 2500);
+    }).catch(function () { if (st) st.textContent = 'Mislukt'; });
+  }
+
+  // --- Pattern cards + recente events in Inzichten (SmartXdrip §19.5). Gratis.
+  var aiPatternsLoaded = false;
+  function loadAiPatterns(force) {
+    if (aiPatternsLoaded && !force) return;
+    aiPatternsLoaded = true;
+    Promise.all([
+      fetchWithTimeout('/_ai-review/patterns', { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; }),
+      fetchWithTimeout('/_ai-review/events?limit=8', { cache: 'no-store' }, 12000).then(function (r) { return r.ok ? r.json() : null; })
+    ]).then(function (res) {
+      renderAiPatterns(res[0], res[1] && res[1].events ? res[1].events : []);
+    }).catch(function () { aiPatternsLoaded = false; });
+  }
+
+  function renderAiPatterns(patterns, events) {
+    var el = document.getElementById('cgm-ai-patterns');
+    if (!el) return;
+    var h = [];
+    if (patterns && patterns.ok && patterns.cards && patterns.cards.length) {
+      h.push('<div class="ai-sec">Patronen</div>');
+      patterns.cards.forEach(function (c) {
+        h.push('<div class="ai-pcard"><div class="ai-pcard-t">' + escapeHtml(c.title) + '</div><div class="ai-pcard-b">' + escapeHtml(c.body) + '</div></div>');
+      });
+    }
+    if (events && events.length) {
+      h.push('<div class="ai-sec">Recente notities</div>');
+      events.forEach(function (e) {
+        var extra = [];
+        if (e.fingerstickMmol != null) extra.push(e.fingerstickMmol + ' mmol');
+        if (e.note) extra.push(e.note);
+        if (e.relatedEntryMmol != null) extra.push('CGM ' + e.relatedEntryMmol);
+        h.push('<div class="ai-fine">' + escapeHtml((e.eventAt ? new Date(e.eventAt).toLocaleString() : '') + ' · ' + (e.type || '') + (extra.length ? ' · ' + extra.join(' · ') : '')) + '</div>');
+      });
+    }
+    el.innerHTML = h.join('');
+  }
+
+  // --- History-tab (SmartXdrip §19.2): dagcards, klik -> dagdetail. Gratis.
+  var aiHistoryLoaded = false;
+  function loadAiHistory(force) {
+    if (aiHistoryLoaded && !force) return;
+    aiHistoryLoaded = true;
+    var box = document.getElementById('cgm-ai-history');
+    if (box) box.innerHTML = '<div class="ai-empty">Laden…</div>';
+    var days = aiGetSettings().historyDays;
+    fetchWithTimeout('/_ai-review/history?days=' + days, { cache: 'no-store' }, 15000)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (json) { if (json && json.ok) renderAiHistory(json.history || []); else if (box) box.innerHTML = '<div class="ai-empty">Geen history.</div>'; })
+      .catch(function () { aiHistoryLoaded = false; if (box) box.innerHTML = '<div class="ai-empty">Kon history niet laden.</div>'; });
+  }
+
+  function renderAiHistory(history) {
+    var box = document.getElementById('cgm-ai-history');
+    if (!box) return;
+    if (!history.length) { box.innerHTML = '<div class="ai-empty">Geen dagen met data.</div>'; return; }
+    var h = ['<div class="ai-sec">Dag-voor-dag (klik voor detail)</div>'];
+    history.forEach(function (d) {
+      var sev = d.lowCount > 0 || (d.tbr || 0) >= 4 ? 'low' : (d.highCount > 2 ? 'high' : 'ok');
+      var lvl = d.sourceLevel && d.sourceLevel !== 'goed' ? ' · dekking ' + d.coverage + '%' : '';
+      h.push('<div class="ai-hday ' + sev + '" data-hist-date="' + escapeHtml(d.date) + '">' +
+        '<span class="ai-hday-d">' + escapeHtml(d.date) + '</span>' +
+        '<span class="ai-hday-m">TIR ' + aiNum(d.tir, '%') + ' · laag ' + aiNum(d.tbr, '%') + ' · ' + d.lowCount + ' low / ' + d.highCount + ' high' + lvl + '</span></div>');
+    });
+    box.innerHTML = h.join('');
+  }
+
+  function onAiHistoryClick(event) {
+    var row = event.target && event.target.closest ? event.target.closest('[data-hist-date]') : null;
+    if (!row) return;
+    var date = row.getAttribute('data-hist-date');
+    Array.prototype.forEach.call(document.querySelectorAll('#cgm-ai-history .ai-hday'), function (r) { r.classList.toggle('sel', r === row); });
+    loadAiDayDetail(date);
+  }
+
+  function loadAiDayDetail(date) {
+    var box = document.getElementById('cgm-ai-daydetail');
+    if (!box) return;
+    box.innerHTML = '<div class="ai-empty">Dag laden…</div>';
+    fetchWithTimeout('/_ai-review/day?date=' + encodeURIComponent(date), { cache: 'no-store' }, 15000)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (day) {
+        if (!day || !day.ok) { box.innerHTML = '<div class="ai-empty">Geen dagdetail.</div>'; return; }
+        var h = ['<div class="ai-sec">Dagdetail ' + escapeHtml(date) + '</div>', renderAiDayReview(day)];
+        if (day.lowEpisodes && day.lowEpisodes.length) {
+          h.push('<div class="ai-sec">Low episodes</div>');
+          day.lowEpisodes.forEach(function (e) {
+            var head = aiTime(e.peakAt) + ' · ' + aiNum(e.peakMmol, '') + '→' + aiNum(e.nadirMmol, '') + ' mmol';
+            h.push('<div class="ai-ep ai-item" data-ep-kind="low" data-ep-peak="' + escapeHtml(e.peakAt || '') + '">' +
+              '<div class="ai-ep-head ai-item-head"><span class="ai-chev">▸</span>' + escapeHtml(head) + '</div>' +
+              '<div class="ai-detail"><div class="ai-curve"></div></div></div>');
+          });
+        }
+        box.innerHTML = h.join('');
+      })
+      .catch(function () { box.innerHTML = '<div class="ai-empty">Kon dag niet laden.</div>'; });
+  }
+
+  // --- Settings (SmartXdrip §20.3): vensters in localStorage. Raakt de detector niet.
+  var AI_SETTINGS_KEY = 'cgmAiSettings';
+  function aiGetSettings() {
+    var def = { statsDays: 14, historyDays: 14 };
+    try { var s = JSON.parse(localStorage.getItem(AI_SETTINGS_KEY) || '{}'); return { statsDays: s.statsDays || def.statsDays, historyDays: s.historyDays || def.historyDays }; }
+    catch (e) { return def; }
+  }
+  function renderAiSettings() {
+    var el = document.getElementById('cgm-ai-settings');
+    if (!el) return;
+    var s = aiGetSettings();
+    function opts(vals, sel) { return vals.map(function (v) { return '<option value="' + v + '"' + (v === sel ? ' selected' : '') + '>' + v + 'd</option>'; }).join(''); }
+    el.innerHTML = '<div class="ai-sec">Instellingen</div>' +
+      '<div class="ai-set-row"><label>Statistiek-venster</label><select data-set="statsDays">' + opts([7, 14, 30, 90], s.statsDays) + '</select></div>' +
+      '<div class="ai-set-row"><label>History-venster</label><select data-set="historyDays">' + opts([7, 14, 30], s.historyDays) + '</select></div>' +
+      '<div class="ai-fine">Doelbereik: laag 3.9 · zeer laag 3.0 · hoog 10.0 · zeer hoog 13.9 mmol/L (vast; detector ongemoeid).</div>';
+  }
+  function onAiSettingsChange(event) {
+    var sel = event.target && event.target.closest ? event.target.closest('[data-set]') : null;
+    if (!sel) return;
+    var s = aiGetSettings();
+    s[sel.getAttribute('data-set')] = parseInt(sel.value, 10) || s[sel.getAttribute('data-set')];
+    try { localStorage.setItem(AI_SETTINGS_KEY, JSON.stringify(s)); } catch (e) {}
+    aiStatsLoaded = false; aiHistoryLoaded = false;
+    loadAiStats(true); loadAiHistory(true);
+  }
+
   // --- Statistiek-tab (A + B): deterministisch, puur Mongo-reads, geen LLM/quota.
   var aiStatsLoaded = false;
   function loadAiStats(force) {
@@ -1691,12 +1966,14 @@
     aiStatsLoaded = true;
     var box = document.getElementById('cgm-ai-stats');
     if (box) box.innerHTML = '<div class="ai-empty">Laden…</div>';
+    var days = aiGetSettings().statsDays;
     Promise.all([
-      fetchWithTimeout('/_ai-review/stats?days=14', { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; }),
+      fetchWithTimeout('/_ai-review/stats?days=' + days, { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; }),
       fetchWithTimeout('/_ai-review/episodes?limit=20', { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; }),
-      fetchWithTimeout('/_ai-review/day', { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; })
+      fetchWithTimeout('/_ai-review/day', { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; }),
+      fetchWithTimeout('/_ai-review/evaluation?days=' + days, { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; })
     ]).then(function (res) {
-      renderAiStats(res[0], res[1] && res[1].episodes ? res[1].episodes : [], res[2]);
+      renderAiStats(res[0], res[1] && res[1].episodes ? res[1].episodes : [], res[2], res[3]);
     }).catch(function () {
       aiStatsLoaded = false;
       if (box) box.innerHTML = '<div class="ai-empty">Kon statistiek niet laden.</div>';
@@ -1705,7 +1982,7 @@
 
   function aiNum(v, unit) { return (v === null || v === undefined) ? '–' : (v + (unit || '')); }
 
-  function renderAiStats(stats, episodes, day) {
+  function renderAiStats(stats, episodes, day, evaluation) {
     var box = document.getElementById('cgm-ai-stats');
     if (!box) return;
     if (!stats || !stats.ok) { box.innerHTML = '<div class="ai-empty">Geen statistiek beschikbaar.</div>'; return; }
@@ -1806,12 +2083,32 @@
       if (e.areaBelow3_9 != null) meta.push('burden ' + e.areaBelow3_9);
       if (e.recoveryMinutes != null) meta.push('herstel ' + e.recoveryMinutes + 'm');
       if (e.reboundHigh) meta.push('rebound ' + aiNum(e.reboundPeakMmol, ''));
-      if (e.qualityScore != null) meta.push('kwaliteit ' + e.qualityScore + '%');
-      if (e.qualityFlags && e.qualityFlags.length) meta.push('flags: ' + e.qualityFlags.join(', '));
+      if (e.qualityScore != null) meta.push('datakwaliteit ' + e.qualityScore + '%');
+      if (e.qualityFlags && e.qualityFlags.length) meta.push(e.qualityFlags.map(aiLabel).join(', '));
       meta.push(when);
       h.push('<div class="ai-ep ai-item" data-ep-kind="low" data-ep-peak="' + escapeHtml(e.peakAt || '') + '"><div class="ai-ep-head ai-item-head"><span class="ai-chev">▸</span>' + escapeHtml(head) + '</div><div class="ai-meta">' + escapeHtml(meta.join(' · ')) + '</div>' + aiEpisodeDetailHtml(e) + '</div>');
     });
+    if (evaluation && evaluation.ok) h.push(renderAiEvaluation(evaluation));
     box.innerHTML = h.join('');
+  }
+
+  function renderAiEvaluation(ev) {
+    var h = ['<div class="ai-sec">Evaluatie (' + ev.window.days + 'd) · meet of het beter wordt</div>'];
+    var sev = Object.keys(ev.bySeverity || {}).map(function (k) { return k + ': ' + ev.bySeverity[k]; }).join(' · ');
+    h.push('<div class="ai-cards">');
+    h.push(aiCard('Episodes', aiNum(ev.episodes, ''), 'low'));
+    h.push(aiCard(aiLabel('areaBelow3_9'), aiNum(ev.areaBelow3_9, ''), 'low'));
+    h.push(aiCard('Mediane herstel', aiNum(ev.medianRecoveryMin, 'm'), ''));
+    h.push(aiCard('Matige datakwaliteit', aiNum(ev.pctPoorQuality, '%'), ''));
+    h.push(aiCard('Vingerprik-bevestigd', aiNum(ev.pctFingerstickConfirmed, '%'), 'ok'));
+    h.push(aiCard('Mogelijk na maaltijd', aiNum(ev.pctPostprandial, '%'), ''));
+    h.push('</div>');
+    if (sev) h.push('<div class="ai-fine">Ernst — ' + escapeHtml(sev) + '</div>');
+    var tod = Object.keys(ev.byTimeOfDay || {}).map(function (k) { return k + ': ' + ev.byTimeOfDay[k]; }).join(' · ');
+    if (tod) h.push('<div class="ai-fine">Tijd van dag — ' + escapeHtml(tod) + '</div>');
+    var fb = Object.keys(ev.feedback || {}).map(function (k) { return k + ': ' + ev.feedback[k]; }).join(' · ');
+    if (fb) h.push('<div class="ai-fine">Feedback — ' + escapeHtml(fb) + '</div>');
+    return h.join('');
   }
 
   function renderAiDayReview(day) {
