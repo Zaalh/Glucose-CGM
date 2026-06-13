@@ -2265,7 +2265,7 @@
   }
 
   // Glucose Events feed: dag-tegels (TIR/AVG/PEAK/CV) + high-banner + event-tijdlijn.
-  var AI_EVENT_ICONS = { first_reading: '☀', rise_local_peak: '↗', high_episode: '↑', recovery_to_range: '↘', stable_window: '〜' };
+  var AI_EVENT_ICONS = { first_reading: '☀', rise_local_peak: '↗', fall_local_trough: '↘', high_episode: '↑', recovery_to_range: '↘', stable_window: '〜' };
   function renderAiGlucoseEvents(feed) {
     var s = feed.summary || {};
     var h = [];

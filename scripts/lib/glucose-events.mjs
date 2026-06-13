@@ -15,7 +15,10 @@ export const DEFAULT_EVENT_OPTIONS = {
   highMmol: 10.0, // boven = high
   lowMmol: 3.9, // onder = low
   minRiseMmol: 1.0, // lokale piek moet zoveel boven het voorafgaande dal liggen
+  minDropMmol: 1.0, // lokale daling moet zoveel onder de voorafgaande piek liggen
   riseLookbackMin: 60, // venster om dat dal te zoeken
+  dropLookbackMin: 90, // venster om die piek te zoeken
+  dropCooldownMin: 30, // voorkom meerdere events voor dezelfde afdaling
   highMinMinutes: 15, // high-run telt vanaf deze duur ...
   highMinCount: 3, // ... of dit aantal metingen
   stableWindowMin: 45, // minimale lengte van een stabiel venster
@@ -54,6 +57,18 @@ function troughBefore(timeline, i, lookbackMin) {
     if (v < lo) lo = v
   }
   return lo
+}
+
+// Hoogste waarde in het lookback-venster vóór index i (voor de daalhoogte).
+function peakBefore(timeline, i, lookbackMin) {
+  const from = timeline[i].date - lookbackMin * MS_PER_MIN
+  let hi = mmol(timeline[i])
+  let hiAt = timeline[i]
+  for (let j = i - 1; j >= 0 && timeline[j].date >= from; j -= 1) {
+    const v = mmol(timeline[j])
+    if (v > hi) { hi = v; hiAt = timeline[j] }
+  }
+  return { mmol: hi, at: hiAt }
 }
 
 // Hoofd-entree: bouwt de event-stroom uit een dag-timeline.
@@ -132,6 +147,30 @@ export function buildGlucoseEvents(timeline, options = {}) {
       label: 'Stijging gedetecteerd',
       detail: round(mmol(tl[i]), 1) + ' mmol/L · lokale piek',
     })
+  }
+
+  // Lokale dalingen: markeer betekenisvolle dalen na een voorafgaande piek. Dit
+  // staat los van de hypo-episodebuilder; ook een niet-hypo daling hoort in de feed.
+  let lastDropEventAt = null
+  for (let i = 1; i < tl.length - 1; i += 1) {
+    const here = Number(tl[i].sgv)
+    const prev = Number(tl[i - 1].sgv)
+    const next = Number(tl[i + 1].sgv)
+    if (!(here < prev && here <= next)) continue
+    if (lastDropEventAt !== null && (tl[i].date - lastDropEventAt) / MS_PER_MIN < opt.dropCooldownMin) continue
+    const peak = peakBefore(tl, i, opt.dropLookbackMin)
+    const drop = peak.mmol - mmol(tl[i])
+    if (drop < opt.minDropMmol) continue
+    const minutes = Math.max(1, (tl[i].date - peak.at.date) / MS_PER_MIN)
+    events.push({
+      type: 'fall_local_trough',
+      at: isoOf(tl[i]),
+      mmol: round(mmol(tl[i]), 1),
+      label: 'Daling gedetecteerd',
+      detail: '-' + round(drop, 1) + ' mmol vanaf piek · ' + round(-(drop / minutes), 2) + ' mmol/L/min',
+      peakAt: isoOf(peak.at),
+    })
+    lastDropEventAt = tl[i].date
   }
 
   // Stabiele vensters: niet-overlappende segmenten van >= stableWindowMin met

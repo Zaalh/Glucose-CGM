@@ -39,6 +39,7 @@ let ok = false
 try {
   assert.equal(types[0], 'first_reading', 'eerste event = first_reading')
   assert.ok(types.includes('rise_local_peak'), 'sub-10 lokale piek gedetecteerd')
+  assert.ok(types.includes('fall_local_trough'), 'lokale daling gedetecteerd')
   const high = events.find((e) => e.type === 'high_episode')
   assert.ok(high, 'high-episode gedetecteerd')
   assert.ok(high.mmol >= 11.5, 'high-piek ~12.0')
