@@ -319,7 +319,7 @@ export async function loadEpisodeVectors(client) {
     return await client
       .db()
       .collection('episode_vectors')
-      .find({}, { projection: { featureVector: 1, outcome: 1, eventType: 1, peakDate: 1, startDate: 1, endDate: 1 } })
+      .find({}, { projection: { vector: 1, featureVector: 1, outcome: 1, eventType: 1, peakDate: 1, startDate: 1, endDate: 1 } })
       .limit(2000)
       .toArray()
   } catch {

@@ -21,6 +21,12 @@ const DEFAULT_TIME_ZONE = 'Europe/Amsterdam'
 const CURVE_PRE_PEAK_MINUTES = 20
 const CURVE_TOTAL_MINUTES = 60
 const CURVE_TOTAL_POINTS = 24
+// Aanloop-features (stijgsnelheid + spike t.o.v. baseline). Vensters identiek aan
+// build-episode-vectors.mjs zodat live en de opgeslagen episode_vectors exact
+// dezelfde grootheid vergelijken (train/serve-pariteit voor de similarity-match).
+const RISE_BASELINE_FROM_MIN = 40 // baseline = gemiddelde [-40, -15] min vóór de piek
+const RISE_BASELINE_TO_MIN = 15
+const RISE_RATE_MINUTES = 15 // gladde gem. stijgsnelheid over 15 min vóór de piek
 export const SPIKE_FILTER_THRESHOLD_MGDL = 8
 const SPIKE_FILTER_MIN_GAP_MS = 30_000
 const SPIKE_FILTER_MAX_GAP_MS = 150_000
@@ -288,6 +294,36 @@ function findTrough(timeline, latestIndex, windowMinutes) {
   return trough
 }
 
+// Gemiddelde mmol over [fromMs, toMs] (oplopend gesorteerde timeline). null bij
+// geen metingen in het venster.
+function meanInWindow(timeline, fromMs, toMs) {
+  let sum = 0
+  let n = 0
+  for (const entry of timeline) {
+    if (entry.date < fromMs) continue
+    if (entry.date > toMs) break
+    sum += toMmol(entry.sgv)
+    n += 1
+  }
+  return n > 0 ? sum / n : null
+}
+
+// Gladde gem. stijgsnelheid (mmol/min) over ~minutesBack vóór de piek, gemeten
+// vanaf de meting op-of-vóór dat moment. Geclamped op 0 (alleen stijging telt) en
+// null bij onvoldoende historie. Spiegelt riseRateToPeak in build-episode-vectors.
+function riseRateToPeak(timeline, peak, minutesBack) {
+  const target = peak.date - minutesBack * 60_000
+  let before = null
+  for (const entry of timeline) {
+    if (entry.date > target) break
+    before = entry
+  }
+  if (!before) return null
+  const dtMin = (peak.date - before.date) / 60_000
+  if (dtMin <= 0) return null
+  return Math.max(0, (toMmol(peak.sgv) - toMmol(before.sgv)) / dtMin)
+}
+
 function findRecentLow(timeline, latestIndex, windowMinutes) {
   const latest = timeline[latestIndex]
   const from = latest.date - windowMinutes * 60_000
@@ -434,6 +470,17 @@ export function buildHypoFeatures(timeline, idx, options = {}) {
   const peakToCurrentSlope = minutesSincePeak > 0 ? dropFromPeakMmol / minutesSincePeak : 0
   const liveCurveShape = partialCurveShape(workTimeline, peak, latest)
 
+  // Aanloop naar de piek: steile spike (hoog-GI) voorspelt de reactieve crash. We
+  // matchen hier later op zodat twee episodes met dezelfde piek+daling maar een
+  // andere aanloop niet langer als "gelijk" tellen.
+  const riseBaseline = meanInWindow(
+    workTimeline,
+    peak.date - RISE_BASELINE_FROM_MIN * 60_000,
+    peak.date - RISE_BASELINE_TO_MIN * 60_000,
+  )
+  const riseFromBaseline = riseBaseline === null ? null : peakMmol120m - riseBaseline
+  const riseRate15m = riseRateToPeak(workTimeline, peak, RISE_RATE_MINUTES)
+
   const recentLow = findRecentLow(workTimeline, idx, RECENT_LOW_WINDOW_MINUTES)
   const recentLowMmol = toMmol(recentLow.sgv)
   const minutesSinceRecentLow = (latest.date - recentLow.date) / 60_000
@@ -496,6 +543,8 @@ export function buildHypoFeatures(timeline, idx, options = {}) {
     dropFromPeakMmol: round(dropFromPeakMmol, 3),
     dropFromPeakPercent: round(dropFromPeakPercent, 1),
     peakToCurrentSlope: round(peakToCurrentSlope, 4),
+    riseFromBaseline: riseFromBaseline === null ? null : round(riseFromBaseline, 3),
+    riseRate15m: riseRate15m === null ? null : round(riseRate15m, 4),
     postPeakWindow: postPeakWindow(minutesSincePeak, dropFromPeakMmol),
     recentLowMmol: round(recentLowMmol, 3),
     minutesSinceRecentLow: round(minutesSinceRecentLow, 1),

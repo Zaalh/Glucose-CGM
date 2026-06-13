@@ -622,7 +622,9 @@ Er is al meer aanwezig dan alleen een simpele drempel:
 - `prediction_snapshots`: live snapshots met huidige waarde, risico, voorspelling en redenen.
 - `pattern_events`: eerdere patroon-events met piek/eindwaarde en tijd tot onder drempels.
 - `episode_vectors`: vectoren voor similarity matching.
-- `findSimilarEpisodes(...)`: vergelijkt huidige piek/drop/timing met eerdere episodes.
+- `findSimilarEpisodes(...)`: vergelijkt huidige piek/drop/timing én aanloop
+  (`riseRate15m`, `riseFromBaseline`) met eerdere episodes. Afstand = RMS over de actieve
+  dimensies; aanloop-dimensies zijn gegate (oude vectoren zonder die velden blijven matchen).
 - `buildForecast(...)`: maakt voorspellingen op meerdere horizons.
 - `evaluateRiskRuleV1(...)`: huidige regelscore.
 

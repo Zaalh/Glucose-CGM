@@ -12,6 +12,19 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Toegevoegd
 
+- **Aanloop-features in de episode-similarity** — `findSimilarEpisodes` matcht nu naast
+  piek + daling + timing ook op de *aanloop* naar de piek: `riseRate15m` (gladde gem.
+  stijgsnelheid over 15 min vóór de piek) en `riseFromBaseline` (spike t.o.v. baseline
+  `[-40,-15]` min). Onderzoek wijst de stijgsnelheid aan als sterke voorspeller van
+  reactieve hypo (steile, hoog-GI spike → crash); voorheen telden twee episodes met
+  dezelfde piek+daling maar een totaal andere aanloop als "gelijk". De velden worden
+  identiek live (`hypo-features.mjs`) én offline (`build-episode-vectors.mjs`) berekend
+  (train/serve-pariteit). De afstand is nu een RMS over de actieve dimensies
+  (`sqrt(sum/dims)`) i.p.v. `sqrt(sum)`, zodat een extra dimensie de drempel niet
+  opblaast; `SIM_MAX_DIST` = 0.866 (= 1.5/√3) reproduceert exact het oude 3-dimensie-gedrag.
+  Oudere `episode_vectors` zonder de nieuwe velden vallen niet weg (gegate dimensies).
+  **Nodig na deploy:** `npm run vectors:build` (verse `riseRate15m` in de vectoren) +
+  `npm run hypo:backtest` om `SIM_MAX_DIST` te herijken vóór bredere uitrol.
 - **Automatische episode-build in de sync-loop** — de `libreview-sync` `--loop`-modus
   herbouwt `reactive_hypo_episodes` nu vanzelf elke `EPISODES_BUILD_INTERVAL_MINUTES`
   (default 15, in de compose-`environment`; 0 = uit). Voorheen liep de collectie achter
@@ -89,6 +102,28 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   alarm-/actiebeslissingen. Ontwerp + roadmap in `llm.md`.
 - **Multi-provider AI-router** (`scripts/lib/ai-router.mjs`) met fallback-volgorde via
   `AI_ROUTER_PROVIDERS` + per-provider `AI_<NAAM>_*`; legacy `AI_CHAT_*` blijft werken.
+
+### Gefixt
+
+- **Curve-vector werd nooit geladen — curve-match was stil dood** — `build-episode-vectors.mjs`
+  slaat per episode een genormaliseerde curve op in het top-level veld `vector`, en
+  `findCurveMatches` (component 6 / `patternScore` +2) leest dat veld. Beide
+  `loadEpisodeVectors`-projecties (live in `libreview-nightscout-sync.mjs` én offline in
+  `evaluate-hypo-detector.mjs`) lieten `vector` echter weg, waardoor `findCurveMatches`
+  **altijd `null`** teruggaf: `curveMatchCount`/`curveHypoRatio`/`curveSimilarity` stonden
+  permanent op 0/null en de curve-bijdrage aan de patroonscore deed live én in de backtest
+  niets. Dit is een vorm van training-serving skew: de curve-feature was bij serving stil
+  afwezig. Projectie aangevuld met `vector: 1`; een sanity-check bevestigt dat de curve-match
+  nu vuurt (0 → 8 matches op identieke vormen). **Nodig na deploy:** `npm run hypo:backtest`
+  /`hypo:tune` opnieuw draaien, want de patroonscore verandert nu de V2-uitkomst.
+- **Dubbele, uiteenlopende similarity-match in de sync geconsolideerd** — de sync deed per
+  meetpunt twee aparte matches: een losse `findSimilarEpisodes` (alleen piek+daling+timing,
+  op de lokale piek) voor de V1-forecast/reden, én `patternFromFeatures` (volledige
+  featureset incl. `riseRate15m`/`riseFromBaseline`, op de feature-piek) voor V2. Sinds de
+  aanloop-features liepen die op verschillende buren — en op een andere `minutesSincePeak`
+  door de piek-tie-break. Nu voedt de gedeelde `patternFromFeatures` beide: V1-forecast
+  gebruikt de geëxposeerde `pattern.correction` en de "Lijkt op N episodes"-reden komt uit
+  dezelfde match. Eén bron, geen divergentie meer.
 
 ### Gewijzigd
 

@@ -3,8 +3,15 @@
 // leefde findSimilarEpisodes alleen in libreview-nightscout-sync.mjs, waardoor
 // component 6 / patternScore live wél maar in de backtest/tuner niet werd gevoed.
 
-const SIM_SCALES = { peakMmol: 4, dropFromPeakMmol: 3, minutesSincePeak: 30 }
-const SIM_MAX_DIST = 1.5
+// Schalen = "een verschil van deze grootte telt als 1 normeenheid". riseRate15m en
+// riseFromBaseline kwamen erbij om op de aanloop (steile spike = hoog-GI) te matchen,
+// niet alleen op piek+daling.
+const SIM_SCALES = { peakMmol: 4, dropFromPeakMmol: 3, minutesSincePeak: 30, riseRate15m: 0.15, riseFromBaseline: 3 }
+// Afstand = RMS over de actieve dimensies (sqrt(sum/dims)), niet sqrt(sum). Zo
+// blaast een extra dimensie de afstand niet op en blijft de drempel vergelijkbaar
+// of een vector nu 3 of 5 bruikbare features heeft. 0.866 = 1.5/sqrt(3) reproduceert
+// exact het oude 3-dimensie-gedrag (sqrt(sum) <= 1.5). Mogelijk herijken via backtest.
+const SIM_MAX_DIST = 0.866
 const SIM_K = 8
 const MS_PER_DAY = 86_400_000
 const CURVE_MIN_POINTS = 8
@@ -102,11 +109,24 @@ export function findSimilarEpisodes(input, vectors, options = {}) {
     const f = v.featureVector
     if (!f || !Number.isFinite(f.peakMmol) || !Number.isFinite(f.dropFromPeakMmol)) continue
     let sum = sq((f.peakMmol - input.peakMmol) / SIM_SCALES.peakMmol)
+    let dims = 1
     sum += sq((f.dropFromPeakMmol - input.dropFromPeakMmol) / SIM_SCALES.dropFromPeakMmol)
+    dims += 1
     if (Number.isFinite(f.minutesPeakToEnd) && Number.isFinite(input.minutesSincePeak)) {
       sum += sq((f.minutesPeakToEnd - input.minutesSincePeak) / SIM_SCALES.minutesSincePeak)
+      dims += 1
     }
-    const dist = Math.sqrt(sum)
+    // Aanloop-dimensies: alleen meetellen als beide kanten de feature hebben, zodat
+    // oudere episode_vectors (zonder deze velden) niet wegvallen tijdens de overgang.
+    if (Number.isFinite(f.riseRate15m) && Number.isFinite(input.riseRate15m)) {
+      sum += sq((f.riseRate15m - input.riseRate15m) / SIM_SCALES.riseRate15m)
+      dims += 1
+    }
+    if (Number.isFinite(f.riseFromBaseline) && Number.isFinite(input.riseFromBaseline)) {
+      sum += sq((f.riseFromBaseline - input.riseFromBaseline) / SIM_SCALES.riseFromBaseline)
+      dims += 1
+    }
+    const dist = Math.sqrt(sum / dims)
     if (dist <= SIM_MAX_DIST) {
       scored.push({
         dist,
@@ -192,7 +212,13 @@ export function patternFromFeatures(features, vectors, options = {}) {
   if (!isDropContext) return null
   const currentMs = Number.isFinite(features.date) ? features.date : null
   const similar = findSimilarEpisodes(
-    { peakMmol, dropFromPeakMmol, minutesSincePeak },
+    {
+      peakMmol,
+      dropFromPeakMmol,
+      minutesSincePeak,
+      riseRate15m: features.riseRate15m,
+      riseFromBaseline: features.riseFromBaseline,
+    },
     vectors,
     { currentMs, recencyDays: options.recencyDays },
   )
@@ -203,6 +229,11 @@ export function patternFromFeatures(features, vectors, options = {}) {
     similarEpisodeCount: similar.count,
     similarHypoCount: similar.hypoCount,
     similarHypoRatio: round(similar.hypoRatio, 3),
+    // Drop-correctie voor de V1-forecast: gelijk aan wat de losse findSimilarEpisodes-
+    // call vroeger leverde, maar nu uit exact dezelfde (feature-pad) match zodat V1 en
+    // V2 niet langer op verschillende buren steunen.
+    correction: similar.correction,
+    weightedDrop: round(similar.weightedDrop, 3),
     patternNadirMmol: round(Math.max(1.5, peakMmol - similar.weightedDrop), 3),
     curveMatchCount: curve ? curve.count : 0,
     curveHypoCount: curve ? curve.hypoCount : 0,

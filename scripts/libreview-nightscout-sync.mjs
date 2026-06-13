@@ -4,9 +4,10 @@ import { readFileSync } from 'node:fs'
 import { MongoClient } from 'mongodb'
 import { buildHypoFeatures, cleanGlucoseTimeline } from './lib/hypo-features.mjs'
 import { evaluateReactiveHypoRiskV2 } from './lib/reactive-hypo-detector.mjs'
-import { findSimilarEpisodes, patternFromFeatures } from './lib/episode-similarity.mjs'
+import { patternFromFeatures } from './lib/episode-similarity.mjs'
 import { aiRouterConfigured, resolveAiRouterConfig, runAiReview, runAiReport, runAiChat } from './lib/ai-review-core.mjs'
 import { buildReactiveHypoEpisodes } from './build-reactive-hypo-episodes.mjs'
+import { buildGlucoseEvents } from './lib/glucose-events.mjs'
 
 const LIBRE_API = 'https://api-eu.libreview.io'
 const DEFAULT_INTERVAL_SECONDS = 60
@@ -253,20 +254,17 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
     const rate10m = calcRateFromTimeline(workTimeline, idx, 10)
     const rate15m = calcRateFromTimeline(workTimeline, idx, 15)
 
-    // Alleen vergelijken bij een echte recente post-piek daling. pattern_events
-    // bevat enkel drops/hypo's, dus bij stabiele/stijgende metingen zou similarity
-    // ten onrechte matchen en de forecast omlaag trekken.
-    const isDropContext = dropFromPeakMmol >= 2 && minutesSincePeak <= 60
-    const similar = isDropContext
-      ? findSimilarEpisodes(
-          { peakMmol, dropFromPeakMmol, minutesSincePeak },
-          episodeVectors,
-          { currentMs: entry.date, recencyDays: v2State ? v2State.params?.patternRecencyDays : null },
-        )
-      : null
-
     const shadowFeaturesFull = buildHypoFeatures(workTimeline, idx, { nowMs: entry.date, cleanTimeline: false })
     const features = shadowFeaturesFull
+
+    // Eén patroon-match voor zowel de V1-forecast als V2 (component 6). Voorheen deed
+    // de sync hier een aparte findSimilarEpisodes met minder dimensies en de lokale
+    // piek, terwijl V2 patternFromFeatures op de featureset draaide — die liepen sinds
+    // de aanloop-features uiteen. Nu voedt de gedeelde helper beide met dezelfde buren
+    // (incl. drop-context-gate, riseRate15m/riseFromBaseline en curve-match).
+    const pattern = patternFromFeatures(shadowFeaturesFull, episodeVectors, {
+      recencyDays: v2State ? v2State.params?.patternRecencyDays : null,
+    })
 
     const risk = evaluateRiskRuleV1({
       currentMmol,
@@ -279,9 +277,9 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
       dropFromPeakPercent,
       dataQuality: features.dataQuality,
     })
-    if (similar && similar.count >= 3 && similar.hypoRatio >= 0.5) {
+    if (pattern && pattern.similarEpisodeCount >= 3 && pattern.similarHypoRatio >= 0.5) {
       risk.reasons = risk.reasons.concat(
-        `Lijkt op ${similar.count} eerdere episodes; ${similar.hypoCount} gingen onder 4.5`,
+        `Lijkt op ${pattern.similarEpisodeCount} eerdere episodes; ${pattern.similarHypoCount} gingen onder 4.5`,
       )
     }
 
@@ -294,7 +292,7 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
       minutesSincePeak,
       dropFromPeakMmol,
       episodes,
-      patternDrop: similar ? similar.correction : null,
+      patternDrop: pattern ? pattern.correction : null,
     })
 
     const blendedRate = risk.details.blendedRate
@@ -310,13 +308,6 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
       minutesTo40: risk.details.minutesTo40,
       lagAdjustedMmol,
     }
-
-    // V2-pattern uit dezelfde featureset die V2 zelf ziet, via de gedeelde helper —
-    // zo is het pattern in live én backtest exact gelijk (echte train/serve-pariteit;
-    // anders verschilt minutesSincePeak door de tie-break in de piekselectie).
-    const pattern = patternFromFeatures(shadowFeaturesFull, episodeVectors, {
-      recencyDays: v2State ? v2State.params?.patternRecencyDays : null,
-    })
 
     // V2 (reactieve detector) berekenen — hergebruik de al gebouwde featureset.
     let shadow = null
@@ -558,7 +549,7 @@ async function loadEpisodeVectors() {
     client = new MongoClient(config.mongoUri)
     await client.connect()
     return await client.db().collection('episode_vectors')
-      .find({}, { projection: { featureVector: 1, outcome: 1, eventType: 1, peakDate: 1, startDate: 1, endDate: 1 } })
+      .find({}, { projection: { vector: 1, featureVector: 1, outcome: 1, eventType: 1, peakDate: 1, startDate: 1, endDate: 1 } })
       .limit(2000)
       .toArray()
   } catch {
@@ -891,6 +882,30 @@ function startServer() {
         res.end(JSON.stringify({ ok: true, ...result }))
       } catch (err) {
         res.writeHead(500)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
+    if (url.pathname === '/ai-review/explore-episodes' && req.method === 'GET') {
+      try {
+        const days = parsePositiveInt(url.searchParams.get('days'), 14, 90)
+        const limit = parsePositiveInt(url.searchParams.get('limit'), 20, 100)
+        const result = await getExploreEpisodes(days, limit)
+        res.end(JSON.stringify({ ok: true, ...result }))
+      } catch (err) {
+        res.writeHead(500)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
+    if (url.pathname === '/ai-review/glucose-events' && req.method === 'GET') {
+      try {
+        const result = await getGlucoseEventsFeed(url.searchParams.get('date'))
+        res.end(JSON.stringify({ ok: true, ...result }))
+      } catch (err) {
+        res.writeHead(err && err.statusCode ? err.statusCode : 500)
         res.end(JSON.stringify({ ok: false, message: formatError(err) }))
       }
       return
@@ -1311,16 +1326,13 @@ async function getAiStats(days) {
     const hourFmt = new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', hour12: false })
     const weekdayFmt = new Intl.DateTimeFormat('en-GB', { timeZone: tz, weekday: 'short' })
     const WD = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 }
-    const hourAgg = Array.from({ length: 24 }, () => ({ sum: 0, n: 0, low: 0, high: 0, inRange: 0 }))
+    const hourAgg = Array.from({ length: 24 }, () => ({ sum: 0, n: 0, low: 0, high: 0, inRange: 0, vals: [] }))
     const wdAgg = Array.from({ length: 7 }, () => ({ sum: 0, n: 0, low: 0, high: 0, inRange: 0 }))
     const heatmapAgg = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => ({ n: 0, low: 0, high: 0, inRange: 0 })))
     const vals = []
     let inRange = 0, below = 0, veryLow = 0, above = 0, veryHigh = 0
     let min = Infinity, max = -Infinity
     let lowEpisodes = 0, longestLowMin = 0, curLowStart = null, prevLow = false
-    // 7d-vs-7d trend.
-    const half = to - 7 * 86_400_000
-    let recN = 0, recIn = 0, recBelow = 0, prevN = 0, prevIn = 0, prevBelow = 0
     for (const r of rows) {
       const mmol = Number(r.sgv) / MGDL_PER_MMOL
       vals.push(mmol)
@@ -1335,14 +1347,12 @@ async function getAiStats(days) {
       if (mmol > 13.9) veryHigh++
       const h = Number(hourFmt.format(new Date(r.date))) % 24
       const isHigh = mmol > 10.0
-      const a = hourAgg[h]; a.sum += mmol; a.n++; if (isLow) a.low++; if (isHigh) a.high++; if (isIn) a.inRange++
+      const a = hourAgg[h]; a.sum += mmol; a.n++; a.vals.push(mmol); if (isLow) a.low++; if (isHigh) a.high++; if (isIn) a.inRange++
       const wd = WD[weekdayFmt.format(new Date(r.date))]
       if (wd != null) {
         const w = wdAgg[wd]; w.sum += mmol; w.n++; if (isLow) w.low++; if (isHigh) w.high++; if (isIn) w.inRange++
         const cell = heatmapAgg[wd][h]; cell.n++; if (isLow) cell.low++; if (isHigh) cell.high++; if (isIn) cell.inRange++
       }
-      if (r.date >= half) { recN++; if (isIn) recIn++; if (isLow) recBelow++ }
-      else { prevN++; if (isIn) prevIn++; if (isLow) prevBelow++ }
       if (isLow && !prevLow) { lowEpisodes++; curLowStart = r.date }
       if (!isLow && prevLow && curLowStart != null) longestLowMin = Math.max(longestLowMin, Math.round((r.date - curLowStart) / 60000))
       prevLow = isLow
@@ -1352,12 +1362,24 @@ async function getAiStats(days) {
     const sd = n ? Math.sqrt(vals.reduce((s, v) => s + (v - mean) * (v - mean), 0) / n) : 0
     const pct = (x) => (n ? round((x / n) * 100, 1) : 0)
     const expected = days * 1440
+    // Percentiel uit een (ongesorteerde) waarden-array; voor de AGP-banden per uur.
+    const pctl = (arr, p) => {
+      if (!arr.length) return null
+      const s = arr.slice().sort((a, b) => a - b)
+      return round(s[Math.min(s.length - 1, Math.floor(p * s.length))], 1)
+    }
     const perHour = hourAgg.map((a, h) => ({
       hour: h,
       mean: a.n ? round(a.sum / a.n, 1) : null,
       lowPct: a.n ? round((a.low / a.n) * 100, 1) : 0,
       highPct: a.n ? round((a.high / a.n) * 100, 1) : 0,
       tir: a.n ? round((a.inRange / a.n) * 100, 1) : 0,
+      // AGP-percentielen per uur (p10/p25/p50/p75/p90).
+      p10: pctl(a.vals, 0.10),
+      p25: pctl(a.vals, 0.25),
+      p50: pctl(a.vals, 0.50),
+      p75: pctl(a.vals, 0.75),
+      p90: pctl(a.vals, 0.90),
       n: a.n,
     }))
     // Mediaan + IQR (AGP gebruikt percentielen).
@@ -1382,13 +1404,40 @@ async function getAiStats(days) {
       highPct: c.n ? round((c.high / c.n) * 100, 1) : 0,
       tir: c.n ? round((c.inRange / c.n) * 100, 1) : 0,
     })))
-    const recTir = recN ? round((recIn / recN) * 100, 1) : null
-    const prevTir = prevN ? round((prevIn / prevN) * 100, 1) : null
+    // Trend: huidige `days`-window vs het direct voorafgaande gelijke window
+    // (prev = [from - days, from)). Aparte lichte query zodat de hoofdaggregatie
+    // ongemoeid blijft; alleen sgv nodig voor TIR/gemiddelde/CV/laag.
+    const prevFrom = from - days * 86_400_000
+    const prevRows = await client.db().collection('entries')
+      .find({ type: 'sgv', sgv: { $exists: true }, date: { $gte: prevFrom, $lt: from } }, { projection: { _id: 0, sgv: 1 } })
+      .toArray()
+    let pN = 0, pIn = 0, pBelow = 0, pSum = 0
+    const pVals = []
+    for (const r of prevRows) {
+      const m = Number(r.sgv) / MGDL_PER_MMOL
+      pN++; pSum += m; pVals.push(m)
+      if (m >= 3.9 && m <= 10.0) pIn++
+      if (m < 3.9) pBelow++
+    }
+    const prevTir = pN ? round((pIn / pN) * 100, 1) : null
+    const prevMean = pN ? round(pSum / pN, 1) : null
+    const prevSd = pN ? Math.sqrt(pVals.reduce((s, v) => s + (v - pSum / pN) * (v - pSum / pN), 0) / pN) : null
+    const prevCv = pN && pSum ? round((prevSd / (pSum / pN)) * 100, 0) : null
+    const prevLowPct = pN ? round((pBelow / pN) * 100, 1) : null
+    const curTir = n ? round((inRange / n) * 100, 1) : null
+    const curMean = n ? round(mean, 1) : null
+    const curCv = mean ? round((sd / mean) * 100, 0) : null
+    const curLowPct = n ? round((below / n) * 100, 1) : null
+    const delta = (a, b) => (a != null && b != null ? round(a - b, 1) : null)
     const trend = {
-      recentTir: recTir, prevTir: prevTir,
-      tirDelta: (recTir != null && prevTir != null) ? round(recTir - prevTir, 1) : null,
-      recentLowPct: recN ? round((recBelow / recN) * 100, 1) : null,
-      prevLowPct: prevN ? round((prevBelow / prevN) * 100, 1) : null,
+      // recentTir/prevTir behouden voor backward-compat met bestaande overlay-tekst.
+      recentTir: curTir, prevTir,
+      tirDelta: delta(curTir, prevTir),
+      meanDelta: delta(curMean, prevMean),
+      cvDelta: delta(curCv, prevCv),
+      recentLowPct: curLowPct, prevLowPct,
+      lowPctDelta: delta(curLowPct, prevLowPct),
+      prevDays: days,
     }
     const reactiveSince = new Date(from).toISOString()
     const reactiveEpisodes = await client.db().collection('reactive_hypo_episodes')
@@ -2324,6 +2373,57 @@ async function getAiEpisodes(limit, days = null) {
   }
 }
 
+// Explore-overzicht: recente high- én low-episodes naast elkaar, elk met een peakAt
+// zodat de overlay het bestaande episode-detail-endpoint kan openen. Geen LLM.
+async function getExploreEpisodes(days = 14, limit = 20) {
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    const db = client.db()
+    const from = Date.now() - days * 86_400_000
+    const rows = await db.collection('entries')
+      .find({ type: 'sgv', sgv: { $exists: true }, date: { $gte: from } }, { projection: { _id: 0, sgv: 1, date: 1 } })
+      .sort({ date: 1 }).toArray()
+    const highs = buildHighEpisodes(rows)
+      .sort((a, b) => Date.parse(b.peakAt) - Date.parse(a.peakAt))
+      .slice(0, limit)
+    const lows = await db.collection('reactive_hypo_episodes')
+      .find({ peakAt: { $gte: new Date(from).toISOString() } }, {
+        projection: { _id: 0, peakAt: 1, nadirAt: 1, nadirMmol: 1, peakMmol: 1, dropFromPeakMmol: 1, minutesPeakToNadir: 1, recoveryMinutes: 1, severity: 1, outcome: 1, timeOfDayBucket: 1 },
+      })
+      .sort({ peakAt: -1 }).limit(limit).toArray()
+    return { window: { days, from: new Date(from).toISOString(), to: new Date().toISOString() }, highs, lows }
+  } finally {
+    if (client) await client.close().catch(() => undefined)
+  }
+}
+
+// History-feed voor één dag: dag-tegels (TIR/AVG/PEAK/CV) + de intraday event-stroom
+// (eerste meting, lokale pieken, high-episodes, herstel, stabiele vensters). De
+// high-episode-events dragen peakAt zodat de overlay naar de Explore-detail kan linken.
+async function getGlucoseEventsFeed(dateParam) {
+  const tz = process.env.LIBREVIEW_TZ || 'Europe/Amsterdam'
+  const dateKey = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : dayKeyInTz(new Date(), tz)
+  const range = localDayRange(dateKey, tz)
+  if (!range) { const err = new Error('Ongeldige datum (YYYY-MM-DD).'); err.statusCode = 400; throw err }
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    const rows = await client.db().collection('entries')
+      .find({ type: 'sgv', sgv: { $exists: true }, date: { $gte: range.from, $lt: range.to } }, { projection: { _id: 0, sgv: 1, date: 1, dateString: 1 } })
+      .sort({ date: 1 }).toArray()
+    const expectedMinutes = Math.round((range.to - range.from) / 60_000)
+    const summary = summarizeEntries(rows, expectedMinutes)
+    const events = buildGlucoseEvents(rows)
+    const highEpisodeCount = events.filter((e) => e.type === 'high_episode').length
+    return { date: dateKey, window: { from: new Date(range.from).toISOString(), to: new Date(range.to).toISOString() }, summary, events, highEpisodeCount }
+  } finally {
+    if (client) await client.close().catch(() => undefined)
+  }
+}
+
 // Trapezoïdale integratie boven/onder een grens over reading-punten ({t:ms, mmol}).
 // Gaten > 30 min worden overgeslagen (geen interpolatie over ontbrekende data).
 function integrateBeyond(pts, threshold, direction) {
@@ -2365,6 +2465,15 @@ function buildPattern(items, thisMs, tz, windowLabel) {
   const mins = inBucket.map((t) => clockMinutes(t, tz))
   const total = items.length || 1
   const distribution = Object.keys(dist).map((k) => ({ bucket: k, label: TOD_LABEL[k], count: dist[k], pct: round((dist[k] / total) * 100, 0) }))
+  // Per-dag dot-reeks: laatste 7 kalenderdagen (incl. de episode-dag), hit = een
+  // episode van dit type in hetzelfde dagdeel op die dag (zoals de screenshot-dots).
+  const bucketDays = new Set(inBucket.map((t) => dayKeyInTz(new Date(t), tz)))
+  const days = []
+  for (let i = 0; i < 7; i += 1) {
+    const ms = thisMs - i * 86_400_000
+    const key = dayKeyInTz(new Date(ms), tz)
+    days.push({ date: key, hit: bucketDays.has(key) })
+  }
   return {
     window: windowLabel,
     bucket: thisBucket,
@@ -2374,6 +2483,7 @@ function buildPattern(items, thisMs, tz, windowLabel) {
     fromHM: mins.length ? hmFromMin(Math.min.apply(null, mins)) : null,
     toHM: mins.length ? hmFromMin(Math.max.apply(null, mins)) : null,
     distribution,
+    days,
   }
 }
 

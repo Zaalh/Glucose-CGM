@@ -9,6 +9,7 @@ var PRE_PEAK_MIN = 20           // venster voor de piek
 var POST_PEAK_MIN = 40          // venster na de piek
 var BASELINE_FROM_MIN = 40      // baseline = gemiddelde [-40, -15] min voor piek
 var BASELINE_TO_MIN = 15
+var RISE_RATE_MIN = 15          // gladde gem. stijgsnelheid over 15 min voor piek
 
 function mmol(entry) { return Number(entry.sgv) / MGDL_PER_MMOL }
 function round(v, d) { var f = Math.pow(10, d); return Math.round(v * f) / f }
@@ -104,6 +105,21 @@ for (var ei = 0; ei < events.length; ei += 1) {
     if (rate < maxFall) maxFall = rate
   }
 
+  // Gladde gem. stijgsnelheid (mmol/min) over 15 min voor de piek, vanaf de meting
+  // op-of-voor dat moment. Identiek aan riseRateToPeak in hypo-features.mjs zodat
+  // de live-match en deze opgeslagen waarde dezelfde grootheid vergelijken.
+  var riseTarget = peakMs - RISE_RATE_MIN * MS_PER_MIN
+  var riseBefore = null
+  for (var r = 0; r < entries.length; r += 1) {
+    if (entries[r].date > riseTarget) break
+    riseBefore = entries[r]
+  }
+  var riseRate15m = null
+  if (riseBefore && Number.isFinite(peakM)) {
+    var riseDt = (peakMs - riseBefore.date) / MS_PER_MIN
+    if (riseDt > 0) riseRate15m = Math.max(0, (peakM - mmol(riseBefore)) / riseDt)
+  }
+
   // outcome: laagste waarde tot 60 min na piek
   var afterWindow = entriesBetween(peakMs, peakMs + 60 * MS_PER_MIN)
   var minAfter = Infinity
@@ -119,6 +135,7 @@ for (var ei = 0; ei < events.length; ei += 1) {
     dropPercentFromPeak: peakM > 0 ? round((drop / peakM) * 100, 2) : 0,
     minutesPeakToEnd: round((endMs - peakMs) / MS_PER_MIN, 2),
     maxRiseRate: round(maxRise, 4),
+    riseRate15m: riseRate15m === null ? null : round(riseRate15m, 4),
     maxFallRate: round(maxFall, 4),
     minMmolAfter60: round(minAfter, 3),
   }

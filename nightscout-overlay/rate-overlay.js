@@ -861,6 +861,21 @@
       '#cgm-ai-panel .ai-curve{margin-top:6px}',
       '#cgm-ai-panel .ai-svg{width:100%;height:auto;display:block;background:rgba(0,0,0,.25);border-radius:4px}',
       '#cgm-ai-panel .ai-rev-head{font-size:12px;font-weight:700;margin-bottom:4px;color:#e2e8f0}',
+      '#cgm-ai-panel .ai-mgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin:4px 0 6px}',
+      '#cgm-ai-panel .ai-mcell{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:5px;padding:5px 4px;text-align:center}',
+      '#cgm-ai-panel .ai-mcell.low{border-color:rgba(96,165,250,.45)}',
+      '#cgm-ai-panel .ai-mcell.high{border-color:rgba(251,113,133,.45)}',
+      '#cgm-ai-panel .ai-mcell-v{font-size:12px;font-weight:900;line-height:1.15}',
+      '#cgm-ai-panel .ai-mcell-l{font-size:8px;opacity:.6;margin-top:2px}',
+      '#cgm-ai-panel .ai-ex-badge{font-size:9px;font-weight:800;padding:1px 5px;border-radius:6px}',
+      '#cgm-ai-panel .ai-ex-badge.high{color:#fb7185;background:rgba(251,113,133,.16)}',
+      '#cgm-ai-panel .ai-ex-badge.low{color:#60a5fa;background:rgba(96,165,250,.16)}',
+      '#cgm-ai-panel .ai-dots{display:flex;gap:6px;margin:4px 0}',
+      '#cgm-ai-panel .ai-dot-col{display:flex;flex-direction:column;align-items:center;gap:2px}',
+      '#cgm-ai-panel .ai-dot{width:11px;height:11px;border-radius:50%;background:rgba(255,255,255,.12)}',
+      '#cgm-ai-panel .ai-dot.on.high{background:#fb7185}',
+      '#cgm-ai-panel .ai-dot.on.low{background:#60a5fa}',
+      '#cgm-ai-panel .ai-dot-col label{font-size:7px;opacity:.5}',
       '#cgm-ai-panel .ai-rev-ctx{margin-top:6px;padding:5px 7px;border-radius:5px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08)}',
       '#cgm-ai-panel .ai-rev-ctx-t{font-size:10px;font-weight:700;opacity:.7;text-transform:uppercase;letter-spacing:.03em;margin-bottom:3px}',
       '#cgm-ai-panel .ai-ev-chip{display:inline-block;font-size:10px;padding:1px 6px;margin:2px 3px 0 0;border-radius:10px;background:rgba(99,102,241,.16);border:1px solid rgba(129,140,248,.3)}',
@@ -915,6 +930,13 @@
       '#cgm-ai-panel .ai-card.high{border-color:rgba(250,204,21,.5)}',
       '#cgm-ai-panel .ai-card-v{font-size:15px;font-weight:900;line-height:1.1}',
       '#cgm-ai-panel .ai-card-l{font-size:9px;opacity:.7;margin-top:2px}',
+      '#cgm-ai-panel .ai-card-d{display:inline-block;font-size:8px;font-weight:800;margin-top:3px;padding:1px 4px;border-radius:6px;line-height:1.3}',
+      '#cgm-ai-panel .ai-card-d.up{color:#4ade80;background:rgba(74,222,128,.14)}',
+      '#cgm-ai-panel .ai-card-d.down{color:#fb7185;background:rgba(251,113,133,.14)}',
+      '#cgm-ai-panel .ai-card-d.flat{color:#cbd5e1;background:rgba(255,255,255,.08)}',
+      '#cgm-ai-panel .ai-period{display:flex;gap:4px;margin:2px 0 8px}',
+      '#cgm-ai-panel .ai-period button{flex:1;font-size:11px;font-weight:800;padding:5px 0;border:1px solid rgba(255,255,255,.18);border-radius:6px;background:#1e293b;color:#cbd5e1;cursor:pointer}',
+      '#cgm-ai-panel .ai-period button.active{background:#16a34a;color:#fff;border-color:#16a34a}',
       '#cgm-ai-panel .ai-fine{font-size:10px;opacity:.6;margin-bottom:4px}',
       '#cgm-ai-panel .ai-targets{display:flex;flex-wrap:wrap;gap:4px;margin:2px 0 6px}',
       '#cgm-ai-panel .ai-tg{font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid rgba(255,255,255,.15)}',
@@ -928,6 +950,38 @@
       '#cgm-ai-panel .ai-ep{border-top:1px solid rgba(255,255,255,.1);padding:5px 0}',
       '#cgm-ai-panel .ai-ep-head{font-weight:700}',
       '#cgm-ai-panel .ai-ep .ai-meta{font-size:10px;opacity:.6;margin-top:2px}',
+      '#cgm-ai-panel .ai-home{display:flex;gap:10px;align-items:center;margin:2px 0 8px}',
+      '#cgm-ai-panel .ai-donut{flex:0 0 76px;width:76px;height:76px;border-radius:50%;display:flex;align-items:center;justify-content:center}',
+      '#cgm-ai-panel .ai-donut-h{width:52px;height:52px;border-radius:50%;background:#0b1220;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1}',
+      '#cgm-ai-panel .ai-donut-h b{font-size:16px;font-weight:900;color:#4ade80}',
+      '#cgm-ai-panel .ai-donut-h span{font-size:8px;opacity:.6;margin-top:1px}',
+      '#cgm-ai-panel .ai-home-r{flex:1;min-width:0}',
+      '#cgm-ai-panel .ai-home-cards{grid-template-columns:repeat(3,1fr);margin-bottom:4px}',
+      '#cgm-ai-panel .ai-home-br{display:flex;gap:8px;font-size:9px;opacity:.75}',
+      '#cgm-ai-panel .ai-home-br .lo{color:#fb7185}#cgm-ai-panel .ai-home-br .in{color:#4ade80}#cgm-ai-panel .ai-home-br .hi{color:#facc15}',
+      '#cgm-ai-panel .ai-insight{border-left:3px solid #4ade80;padding:6px 8px;margin:2px 0 8px;background:rgba(74,222,128,.06);border-radius:0 6px 6px 0}',
+      '#cgm-ai-panel .ai-insight-t{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#4ade80;opacity:.9}',
+      '#cgm-ai-panel .ai-insight-b{font-size:12px;line-height:1.4;margin-top:3px}',
+      '#cgm-ai-panel .ai-agp{margin:3px 0 4px}',
+      '#cgm-ai-panel .ai-agp svg{display:block;width:100%;height:auto}',
+      '#cgm-ai-panel .ai-tirstrip{display:grid;grid-template-columns:repeat(24,1fr);gap:1px;height:18px;border-radius:3px;overflow:hidden;margin:3px 0 1px}',
+      '#cgm-ai-panel .ai-tirstrip i{display:block;height:100%}',
+      '#cgm-ai-panel .ai-tiraxis{display:grid;grid-template-columns:repeat(5,1fr);font-size:8px;opacity:.45;margin-bottom:6px}',
+      '#cgm-ai-panel .ai-tiraxis span:last-child{text-align:right}',
+      '#cgm-ai-panel .ai-evfeed{display:flex;flex-direction:column;margin:2px 0 6px}',
+      '#cgm-ai-panel .ai-ev{display:flex;gap:7px;align-items:flex-start;padding:6px 0;border-top:1px solid rgba(255,255,255,.08)}',
+      '#cgm-ai-panel .ai-ev-t{flex:0 0 38px;font-size:10px;opacity:.6;padding-top:2px}',
+      '#cgm-ai-panel .ai-ev-ic{flex:0 0 18px;text-align:center;font-size:13px;opacity:.85}',
+      '#cgm-ai-panel .ai-ev.high_episode .ai-ev-ic{color:#fb7185}',
+      '#cgm-ai-panel .ai-ev.recovery_to_range .ai-ev-ic{color:#4ade80}',
+      '#cgm-ai-panel .ai-ev.first_reading .ai-ev-ic{color:#fbbf24}',
+      '#cgm-ai-panel .ai-ev.stable_window .ai-ev-ic{color:#4ade80}',
+      '#cgm-ai-panel .ai-ev-b{flex:1;min-width:0}',
+      '#cgm-ai-panel .ai-ev-l{display:flex;justify-content:space-between;gap:8px;font-size:12px;font-weight:700}',
+      '#cgm-ai-panel .ai-ev-v{font-weight:900;white-space:nowrap}',
+      '#cgm-ai-panel .ai-ev-d{display:block;font-size:10px;opacity:.65;margin-top:1px}',
+      '#cgm-ai-panel .ai-ev-badge{display:inline-block;font-size:8px;font-weight:800;padding:1px 5px;border-radius:6px;background:rgba(250,204,21,.18);color:#fbbf24;margin-left:3px}',
+      '#cgm-ai-panel .ai-ev.recovery_to_range .ai-ev-badge{background:rgba(74,222,128,.16);color:#4ade80}',
       '#cgm-ai-panel .ai-heatmap{margin:3px 0 8px}',
       '#cgm-ai-panel .ai-hm-row{display:grid;grid-template-columns:22px repeat(24,1fr);gap:1px;align-items:center;margin-bottom:1px}',
       '#cgm-ai-panel .ai-hm-day{font-size:8px;opacity:.65;text-align:right;padding-right:3px}',
@@ -1317,10 +1371,12 @@
       '  <button type="button" class="ai-tab active" data-tab="inzichten">Inzichten</button>',
       '  <button type="button" class="ai-tab" data-tab="stats">Statistiek</button>',
       '  <button type="button" class="ai-tab" data-tab="history">History</button>',
+      '  <button type="button" class="ai-tab" data-tab="explore">Explore</button>',
       '  <button type="button" class="ai-tab" data-tab="rapporten">Rapporten</button>',
       '  <button type="button" class="ai-tab" data-tab="chat">Chat</button>',
       '</div>',
       '<div class="ai-pane" data-pane="inzichten">',
+      '  <div id="cgm-ai-home"></div>',
       '  <div id="cgm-ai-quicklog" class="ai-quicklog"></div>',
       '  <div id="cgm-ai-patterns"></div>',
       '  <div class="ai-row">',
@@ -1336,6 +1392,9 @@
       '<div class="ai-pane" data-pane="history" hidden>',
       '  <div id="cgm-ai-daydetail"></div>',
       '  <div id="cgm-ai-history"><div class="ai-empty">Laden…</div></div>',
+      '</div>',
+      '<div class="ai-pane" data-pane="explore" hidden>',
+      '  <div id="cgm-ai-explore"><div class="ai-empty">Laden…</div></div>',
       '</div>',
       '<div class="ai-pane" data-pane="rapporten" hidden>',
       '  <div class="ai-row"><button type="button" class="ai-run" id="cgm-ai-genreport">Genereer dagrapport</button></div>',
@@ -1367,6 +1426,7 @@
     panel.querySelector('#cgm-ai-banner').addEventListener('click', onAiBannerClick);
     panel.querySelector('#cgm-ai-quicklog').addEventListener('click', onAiQuickLogClick);
     panel.querySelector('#cgm-ai-history').addEventListener('click', onAiHistoryClick);
+    panel.querySelector('#cgm-ai-explore').addEventListener('click', onAiStatsClick);
     panel.querySelector('#cgm-ai-daydetail').addEventListener('click', onAiStatsClick);
     panel.querySelector('#cgm-ai-settings').addEventListener('change', onAiSettingsChange);
     panel.querySelector('.ai-tabs').addEventListener('click', onAiTabClick);
@@ -1389,7 +1449,8 @@
     });
     if (tab === 'stats') loadAiStats(true); // altijd verversen: toon de nieuwste metingen
     if (tab === 'rapporten') loadAiReports();
-    if (tab === 'history') loadAiHistory();
+    if (tab === 'history') { loadAiHistory(); loadAiTodayEvents(); }
+    if (tab === 'explore') loadAiExplore(true);
     if (tab === 'inzichten') loadAiPatterns();
   }
 
@@ -1642,6 +1703,19 @@
   // (deterministisch, alleen Mongo-reads — geen LLM/quota).
   function onAiStatsClick(event) {
     var t = event.target;
+    var periodBtn = t && t.closest ? t.closest('[data-stats-days]') : null;
+    if (periodBtn) {
+      event.preventDefault();
+      var nd = parseInt(periodBtn.getAttribute('data-stats-days'), 10);
+      if (nd && nd !== aiGetSettings().statsDays) {
+        var s = aiGetSettings(); s.statsDays = nd;
+        try { localStorage.setItem(AI_SETTINGS_KEY, JSON.stringify(s)); } catch (e) {}
+        renderAiSettings();
+        aiExploreLoaded = false;
+        loadAiStats(true);
+      }
+      return;
+    }
     var secBtn = t && t.closest ? t.closest('[data-ai-section-toggle]') : null;
     if (secBtn) {
       event.preventDefault();
@@ -1671,6 +1745,57 @@
     if (item.classList.contains('open') && item.getAttribute('data-ep-peak') && !item.getAttribute('data-curve-loaded')) {
       aiLoadEpisodeCurve(item);
     }
+  }
+
+  // --- Explore-tab: blader door recente high- en low-episodes. Klik = open het
+  // bestaande episode-detail (metrics/context/severity/pattern/similar). Geen LLM.
+  var aiExploreLoaded = false;
+  function loadAiExplore(force) {
+    if (aiExploreLoaded && !force) return;
+    aiExploreLoaded = true;
+    var box = document.getElementById('cgm-ai-explore');
+    if (box) box.innerHTML = '<div class="ai-empty">Laden…</div>';
+    var days = aiGetSettings().statsDays;
+    fetchWithTimeout('/_ai-review/explore-episodes?days=' + days + '&limit=30', { cache: 'no-store' }, 15000)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { renderAiExplore(d); })
+      .catch(function () { aiExploreLoaded = false; if (box) box.innerHTML = '<div class="ai-empty">Kon episodes niet laden.</div>'; });
+  }
+
+  function aiExploreItem(kind, peakAt, badge, head, meta) {
+    return '<div class="ai-ep ai-item" data-ep-kind="' + kind + '" data-ep-peak="' + escapeHtml(peakAt || '') + '">' +
+      '<div class="ai-ep-head ai-item-head"><span class="ai-chev">▸</span>' +
+      '<span class="ai-ex-badge ' + kind + '">' + escapeHtml(badge) + '</span> ' +
+      '<span class="ai-item-title">' + escapeHtml(head) + '</span></div>' +
+      (meta ? '<div class="ai-meta">' + escapeHtml(meta) + '</div>' : '') +
+      '<div class="ai-detail"><div class="ai-curve"></div></div></div>';
+  }
+
+  function renderAiExplore(d) {
+    var box = document.getElementById('cgm-ai-explore');
+    if (!box) return;
+    if (!d || !d.ok) { box.innerHTML = '<div class="ai-empty">Geen episodes beschikbaar.</div>'; return; }
+    var h = ['<div class="ai-sec">Explore · laatste ' + (d.window ? d.window.days : '') + ' dagen · tik voor diepteanalyse</div>'];
+    var highs = d.highs || [], lows = d.lows || [];
+    h.push('<div class="ai-sec">High-episodes (' + highs.length + ')</div>');
+    if (!highs.length) h.push('<div class="ai-empty">Geen high-episodes in dit venster.</div>');
+    highs.forEach(function (e) {
+      var head = aiTime(e.peakAt) + ' · piek ' + aiNum(e.peakMmol, '') + ' mmol';
+      var meta = (e.durationMinutes != null ? e.durationMinutes + ' min boven 10.0' : '');
+      h.push(aiExploreItem('high', e.peakAt, '↑ High', head, meta));
+    });
+    h.push('<div class="ai-sec">Low-episodes (' + lows.length + ')</div>');
+    if (!lows.length) h.push('<div class="ai-empty">Geen low-episodes in dit venster.</div>');
+    lows.forEach(function (e) {
+      var lbl = e.nadirMmol != null && e.nadirMmol < 3.9 ? '↓ Low' : '↓ Dip';
+      var head = aiTime(e.nadirAt || e.peakAt) + ' · dal ' + aiNum(e.nadirMmol, '') + ' mmol';
+      var bits = [];
+      if (e.peakMmol != null) bits.push('piek ' + e.peakMmol);
+      if (e.minutesPeakToNadir != null) bits.push(e.minutesPeakToNadir + 'm');
+      if (e.severity) bits.push(e.severity);
+      h.push(aiExploreItem('low', e.peakAt, lbl, head, bits.join(' · ')));
+    });
+    box.innerHTML = h.join('');
   }
 
   function aiSiblingEpisode(item, dir) {
@@ -1725,6 +1850,23 @@
   var AI_EVENT_GLYPH = { meal: '🍽', snack: '🍪', symptom: '😵', fingerstick: '🩸', exercise: '🏃', stress: '⚡', sleep: '🛌', illness: '🤒', alcohol: '🍷', action: '✅', note: '📝' };
   function aiHM(iso) { var d = new Date(iso); return isNaN(d) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
 
+  // Afgeleide rate (mmol/L/min) uit een delta en een duur in minuten.
+  function aiRate(deltaMmol, minutes) {
+    if (deltaMmol == null || minutes == null || !Number.isFinite(Number(minutes)) || Number(minutes) <= 0) return null;
+    return Math.round((Number(deltaMmol) / Number(minutes)) * 100) / 100;
+  }
+  function aiRateStr(deltaMmol, minutes) {
+    var r = aiRate(deltaMmol, minutes);
+    if (r == null) return '–';
+    return (r > 0 ? '+' : '') + r.toFixed(2) + ' mmol/L/min';
+  }
+  // Compacte metrics-grid (zoals het detailscherm in de screenshots).
+  function aiMetricGrid(cells) {
+    return '<div class="ai-mgrid">' + cells.map(function (c) {
+      return '<div class="ai-mcell ' + (c[2] || '') + '"><div class="ai-mcell-v">' + escapeHtml(String(c[1])) + '</div><div class="ai-mcell-l">' + escapeHtml(c[0]) + '</div></div>';
+    }).join('') + '</div>';
+  }
+
   // Focused review (deterministisch, Mongo-reads, geen LLM). GEEN curve: Nightscout
   // toont de glucose-grafiek al — wij geven alleen de analyse (metrics/context/severity).
   function aiRenderEpisodeCurve(d) {
@@ -1737,6 +1879,17 @@
       var lowLbl = (Number(e.nadirMmol) < 3.9) ? 'Low' : 'Dip';
       headLine = lowLbl + ' · ' + aiTime(e.nadirAt || e.peakAt) + ' · piek ' + aiNum(e.peakMmol, '') + ' → dal ' + aiNum(e.nadirMmol, '') + ' mmol';
       h.push('<div class="ai-rev-head">' + escapeHtml(headLine) + '</div>');
+      // Metrics-grid: nadir, duur, daal-/herstelsnelheid, herstel, hypo-belasting.
+      var descRate = e.fallRateMmolPerMin != null ? '-' + Math.abs(Number(e.fallRateMmolPerMin)).toFixed(2) + ' mmol/L/min' : (e.dropFromPeakMmol != null && e.minutesPeakToNadir ? aiRateStr(-e.dropFromPeakMmol, e.minutesPeakToNadir) : '–');
+      var recRate = (e.recoveryMinutes && e.nadirMmol != null) ? aiRateStr(3.9 - Number(e.nadirMmol), e.recoveryMinutes) : '–';
+      h.push(aiMetricGrid([
+        ['Nadir', aiNum(e.nadirMmol, '') + ' mmol', 'low'],
+        ['Daalsnelheid', descRate, 'low'],
+        ['Piek→nadir', aiNum(e.minutesPeakToNadir, ' min'), ''],
+        ['Herstelsnelheid', recRate, ''],
+        ['Herstel', aiNum(e.recoveryMinutes, ' min'), ''],
+        ['Hypo-belasting', aiNum(e.areaBelow3_9, ' mmol·min'), 'low']
+      ]));
       var lm = [];
       if (e.timeBelow3_9Minutes != null) lm.push('onder 3.9: ' + aiNum(e.timeBelow3_9Minutes, 'm'));
       if (e.timeBelow3_0Minutes) lm.push('onder 3.0: ' + aiNum(e.timeBelow3_0Minutes, 'm'));
@@ -1749,6 +1902,18 @@
       var m = d.metrics;
       headLine = aiTime(m.peakAt) + ' · piek ' + aiNum(m.peakMmol, '') + ' mmol';
       h.push('<div class="ai-rev-head">' + escapeHtml(headLine) + '</div>');
+      // Onset/recovery-rate t.o.v. de 10.0-drempel (geen baseline opgeslagen).
+      var onsetMin = (m.startAt && m.peakAt) ? (Date.parse(m.peakAt) - Date.parse(m.startAt)) / 60000 : null;
+      var onsetRate = (onsetMin && m.peakMmol != null) ? aiRateStr(Number(m.peakMmol) - 10.0, onsetMin) : '–';
+      var hRecRate = (m.recoveryMinutes && m.peakMmol != null) ? aiRateStr(10.0 - Number(m.peakMmol), m.recoveryMinutes) : '–';
+      h.push(aiMetricGrid([
+        ['Piek', aiNum(m.peakMmol, '') + ' mmol', 'high'],
+        ['Boven 10', aiNum(m.durationAbove10Minutes, ' min'), 'high'],
+        ['Stijgsnelheid', onsetRate, 'high'],
+        ['Herstelsnelheid', hRecRate, ''],
+        ['Herstel', aiNum(m.recoveryMinutes, ' min'), ''],
+        ['High-belasting', aiNum(m.areaAbove10, ' mmol·min'), 'high']
+      ]));
       var mh = [];
       mh.push('boven 10: ' + aiNum(m.durationAbove10Minutes, 'm'));
       if (m.durationAbove13_9Minutes) mh.push('boven 13.9: ' + aiNum(m.durationAbove13_9Minutes, 'm'));
@@ -1802,6 +1967,13 @@
       var p = d.pattern, plabel = kind === 'low' ? 'lows' : 'highs';
       var pr = ['<div class="ai-rev-ctx"><div class="ai-rev-ctx-t">Patroon</div>'];
       pr.push('<div class="ai-d-row"><b>' + p.count + '/' + p.total + '</b> ' + escapeHtml(p.bucketLabel) + '-' + plabel + ' in ' + escapeHtml(p.window) + (p.fromHM ? ' · tussen ' + escapeHtml(p.fromHM + '–' + p.toHM) : '') + '</div>');
+      // Per-dag dot-rij (laatste 7 dagen; gevuld = episode in dit dagdeel).
+      if (p.days && p.days.length) {
+        pr.push('<div class="ai-dots">' + p.days.map(function (dd) {
+          var lbl = (dd.date || '').slice(5).replace('-', '/');
+          return '<div class="ai-dot-col"><span class="ai-dot ' + (dd.hit ? ('on ' + kind) : '') + '" title="' + escapeHtml(dd.date + (dd.hit ? ' · episode' : '')) + '"></span><label>' + escapeHtml(lbl) + '</label></div>';
+        }).join('') + '</div>');
+      }
       var dist = (p.distribution || []).filter(function (x) { return x.count; }).map(function (x) { return x.label + ' ' + x.pct + '%'; }).join(' · ');
       if (dist) pr.push('<div class="ai-fine">verdeling: ' + escapeHtml(dist) + '</div>');
       pr.push('</div>');
@@ -1945,10 +2117,40 @@
     aiPatternsLoaded = true;
     Promise.all([
       fetchWithTimeout('/_ai-review/patterns', { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; }),
-      fetchWithTimeout('/_ai-review/events?limit=8', { cache: 'no-store' }, 12000).then(function (r) { return r.ok ? r.json() : null; })
+      fetchWithTimeout('/_ai-review/events?limit=8', { cache: 'no-store' }, 12000).then(function (r) { return r.ok ? r.json() : null; }),
+      fetchWithTimeout('/_ai-review/stats?days=1', { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; }),
+      fetchWithTimeout('/_ai-review/stats?days=7', { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; })
     ]).then(function (res) {
+      renderAiHome(res[2], res[3], res[0]);
       renderAiPatterns(res[0], res[1] && res[1].events ? res[1].events : []);
     }).catch(function () { aiPatternsLoaded = false; });
+  }
+
+  // Home-samenvatting: TIR-donut (24u) + AVG/TIR/CV-kaarten + "Inzicht van vandaag".
+  function renderAiHome(s24, s7, patterns) {
+    var el = document.getElementById('cgm-ai-home');
+    if (!el) return;
+    if (!s24 || !s24.ok) { el.innerHTML = ''; return; }
+    var tir = s24.tir || 0, low = s24.tbr || 0, high = (s24.tar || 0);
+    // Conic-gradient ring: laag (rood) · in bereik (groen) · hoog (geel).
+    var a1 = low, a2 = low + tir;
+    var ring = 'conic-gradient(#fb7185 0 ' + a1 + '%, #4ade80 ' + a1 + '% ' + a2 + '%, #facc15 ' + a2 + '% 100%)';
+    var h = ['<div class="ai-home">'];
+    h.push('<div class="ai-donut" style="background:' + ring + '"><div class="ai-donut-h"><b>' + Math.round(tir) + '%</b><span>TIR</span></div></div>');
+    h.push('<div class="ai-home-r">');
+    h.push('<div class="ai-cards ai-home-cards">');
+    h.push(aiCard('Gem. 24u', aiNum(s24.mean, ''), ''));
+    h.push(aiCard('TIR 24u', aiNum(s24.tir, '%'), 'ok'));
+    h.push(aiCard('CV 7d', aiNum(s7 && s7.ok ? s7.cv : null, '%'), ''));
+    h.push('</div>');
+    h.push('<div class="ai-home-br"><span class="lo">laag ' + aiNum(low, '%') + '</span><span class="in">bereik ' + aiNum(tir, '%') + '</span><span class="hi">hoog ' + aiNum(high, '%') + '</span></div>');
+    h.push('</div></div>');
+    // Inzicht van vandaag (eerste patroon-kaart als tekst).
+    if (patterns && patterns.ok && patterns.cards && patterns.cards.length) {
+      var c = patterns.cards[0];
+      h.push('<div class="ai-insight"><div class="ai-insight-t">✦ Inzicht van vandaag</div><div class="ai-insight-b">' + escapeHtml(c.body || c.title || '') + '</div></div>');
+    }
+    el.innerHTML = h.join('');
   }
 
   function renderAiPatterns(patterns, events) {
@@ -1986,6 +2188,19 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (json) { if (json && json.ok) renderAiHistory(json.history || []); else if (box) box.innerHTML = '<div class="ai-empty">Geen history.</div>'; })
       .catch(function () { aiHistoryLoaded = false; if (box) box.innerHTML = '<div class="ai-empty">Kon history niet laden.</div>'; });
+  }
+
+  // Toont bij het openen van History meteen de feed van vandaag, tenzij de
+  // gebruiker al een dag heeft aangeklikt (dan blijft die selectie staan).
+  var aiTodayEventsLoaded = false;
+  function loadAiTodayEvents() {
+    if (aiTodayEventsLoaded) return;
+    var box = document.getElementById('cgm-ai-daydetail');
+    if (box && box.querySelector('.ai-evfeed')) { aiTodayEventsLoaded = true; return; }
+    var now = new Date();
+    var key = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+    aiTodayEventsLoaded = true;
+    loadAiDayDetail(key);
   }
 
   function renderAiHistory(history) {
@@ -2028,19 +2243,61 @@
     if (!box) return;
     box.innerHTML = '<div class="ai-empty">Dag laden…</div>';
     if (box.scrollIntoView) box.scrollIntoView({ block: 'nearest' });
-    fetchWithTimeout('/_ai-review/day?date=' + encodeURIComponent(date), { cache: 'no-store' }, 15000)
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (day) {
-        if (!day || !day.ok) { box.innerHTML = '<div class="ai-empty">Geen dagdetail.</div>'; return; }
-        var h = ['<div class="ai-sec">Dagdetail ' + escapeHtml(date) + '</div>', renderAiDayReview(day)];
-        if (day.lowEpisodes && day.lowEpisodes.length) {
-          h.push(renderDayEpisodeGroup('Lows dagdetail', day.lowEpisodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol < 3.9; })));
-          h.push(renderDayEpisodeGroup('Near-hypo’s dagdetail', day.lowEpisodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol >= 3.9 && e.nadirMmol < 4.5; })));
-          h.push(renderDayEpisodeGroup('Dips dagdetail', day.lowEpisodes.filter(function (e) { return !(e.nadirMmol != null && e.nadirMmol < 4.5); })));
+    Promise.all([
+      fetchWithTimeout('/_ai-review/day?date=' + encodeURIComponent(date), { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; }),
+      fetchWithTimeout('/_ai-review/glucose-events?date=' + encodeURIComponent(date), { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; })
+    ]).then(function (res) {
+        var day = res[0], feed = res[1];
+        if ((!day || !day.ok) && (!feed || !feed.ok)) { box.innerHTML = '<div class="ai-empty">Geen dagdetail.</div>'; return; }
+        var h = ['<div class="ai-sec">Dagdetail ' + escapeHtml(date) + '</div>'];
+        if (feed && feed.ok) h.push(renderAiGlucoseEvents(feed));
+        if (day && day.ok) {
+          h.push(renderAiDayReview(day));
+          if (day.lowEpisodes && day.lowEpisodes.length) {
+            h.push(renderDayEpisodeGroup('Lows dagdetail', day.lowEpisodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol < 3.9; })));
+            h.push(renderDayEpisodeGroup('Near-hypo’s dagdetail', day.lowEpisodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol >= 3.9 && e.nadirMmol < 4.5; })));
+            h.push(renderDayEpisodeGroup('Dips dagdetail', day.lowEpisodes.filter(function (e) { return !(e.nadirMmol != null && e.nadirMmol < 4.5); })));
+          }
         }
         box.innerHTML = h.join('');
       })
       .catch(function () { box.innerHTML = '<div class="ai-empty">Kon dag niet laden.</div>'; });
+  }
+
+  // Glucose Events feed: dag-tegels (TIR/AVG/PEAK/CV) + high-banner + event-tijdlijn.
+  var AI_EVENT_ICONS = { first_reading: '☀', rise_local_peak: '↗', high_episode: '↑', recovery_to_range: '↘', stable_window: '〜' };
+  function renderAiGlucoseEvents(feed) {
+    var s = feed.summary || {};
+    var h = [];
+    h.push('<div class="ai-cards">');
+    h.push(aiCard('TIR', aiNum(s.tir, '%'), 'ok'));
+    h.push(aiCard('Gemiddelde', aiNum(s.mean, ''), ''));
+    h.push(aiCard('Piek', aiNum(s.max, ''), 'high'));
+    h.push(aiCard('CV', aiNum(s.cv, '%'), ''));
+    h.push('</div>');
+    // High-episodes → uitklapbare diepteanalyse (hergebruikt de Explore-detailcurve).
+    var highs = (feed.events || []).filter(function (e) { return e.type === 'high_episode'; });
+    if (highs.length) {
+      h.push('<div class="ai-sec">High-episode' + (highs.length > 1 ? 's (' + highs.length + ')' : '') + ' · tik voor analyse</div>');
+      highs.forEach(function (hi) {
+        var head = aiTime(hi.at) + ' · piek ' + aiNum(hi.mmol, ' mmol/L');
+        h.push(aiExploreItem('high', hi.peakAt, '↑ High', head, hi.detail || ''));
+      });
+    }
+    h.push('<div class="ai-sec">Glucose-events</div>');
+    var evs = feed.events || [];
+    if (!evs.length) { h.push('<div class="ai-empty">Geen events op deze dag.</div>'); return h.join(''); }
+    h.push('<div class="ai-evfeed">');
+    evs.forEach(function (e) {
+      h.push('<div class="ai-ev ' + e.type + '">' +
+        '<span class="ai-ev-t">' + escapeHtml(aiTime(e.at)) + '</span>' +
+        '<span class="ai-ev-ic">' + (AI_EVENT_ICONS[e.type] || '•') + '</span>' +
+        '<span class="ai-ev-b"><span class="ai-ev-l">' + escapeHtml(e.label || '') +
+        '<b class="ai-ev-v">' + aiNum(e.mmol, ' mmol/L') + '</b></span>' +
+        '<span class="ai-ev-d">' + escapeHtml(e.detail || '') + (e.badge ? ' <span class="ai-ev-badge">' + escapeHtml(e.badge) + '</span>' : '') + '</span></span></div>');
+    });
+    h.push('</div>');
+    return h.join('');
   }
 
   function renderDayEpisodeGroup(title, list) {
@@ -2111,14 +2368,20 @@
     if (!box) return;
     if (!stats || !stats.ok) { box.innerHTML = '<div class="ai-empty">Geen statistiek beschikbaar.</div>'; return; }
     var h = [];
-    // Metric-kaartjes (TIR/TBR/TAR + gemiddelde/CV).
+    // Periodeknoppen (7/14/30/90) — zetten statsDays en herladen.
+    var curDays = stats.window.days;
+    h.push('<div class="ai-period">' + [7, 14, 30, 90].map(function (v) {
+      return '<button type="button" data-stats-days="' + v + '"' + (v === curDays ? ' class="active"' : '') + '>' + v + 'd</button>';
+    }).join('') + '</div>');
+    // Metric-kaartjes (TIR/TBR/TAR + gemiddelde/CV) met Δ vs vorige periode.
+    var tr = stats.trend || {};
     h.push('<div class="ai-sec">Laatste ' + stats.window.days + ' dagen · dekking ' + aiNum(stats.coveragePct, '%') + '</div>');
     h.push('<div class="ai-cards">');
-    h.push(aiCard('In bereik (TIR)', aiNum(stats.tir, '%'), 'ok'));
-    h.push(aiCard('Onder (TBR)', aiNum(stats.tbr, '%'), 'low'));
+    h.push(aiCard('In bereik (TIR)', aiNum(stats.tir, '%'), 'ok', aiDelta(tr.tirDelta, 'pp', false)));
+    h.push(aiCard('Onder (TBR)', aiNum(stats.tbr, '%'), 'low', aiDelta(tr.lowPctDelta, 'pp', true)));
     h.push(aiCard('Boven (TAR)', aiNum(stats.tar, '%'), 'high'));
-    h.push(aiCard('Gemiddelde', aiNum(stats.mean, ''), ''));
-    h.push(aiCard('Variabiliteit (CV)', aiNum(stats.cv, '%'), ''));
+    h.push(aiCard('Gemiddelde', aiNum(stats.mean, ''), '', aiDelta(tr.meanDelta, '', 'neutral')));
+    h.push(aiCard('Variabiliteit (CV)', aiNum(stats.cv, '%'), '', aiDelta(tr.cvDelta, 'pp', true)));
     h.push(aiCard('Lows', aiNum(stats.lows ? stats.lows.count : null, '') + (stats.lows && stats.lows.longestMin ? ' · ' + stats.lows.longestMin + 'm' : ''), 'low'));
     h.push('</div>');
     h.push('<div class="ai-fine">GMI ' + aiNum(stats.gmi, '%') + ' · mediaan ' + aiNum(stats.median, '') + ' (IQR ' + aiNum(stats.p25, '') + '–' + aiNum(stats.p75, '') + ') · very-low &lt;3.0: ' + aiNum(stats.veryLow, '%') + ' · very-high &gt;13.9: ' + aiNum(stats.veryHigh, '%') + ' · min ' + aiNum(stats.min, '') + ' · max ' + aiNum(stats.max, '') + '</div>');
@@ -2136,12 +2399,18 @@
       aiTarget('CV <36%', stats.cv != null && stats.cv < 36) +
       aiTarget('GMI <7%', stats.gmi != null && stats.gmi < 7) +
       '</div>');
-    // 7d-vs-7d trend.
+    // Trend: huidige periode vs direct voorafgaande gelijke periode.
     if (stats.trend && stats.trend.recentTir != null && stats.trend.prevTir != null) {
       var d = stats.trend.tirDelta;
       var arrow = d > 0.5 ? '▲' : (d < -0.5 ? '▼' : '▬');
-      h.push('<div class="ai-fine">Trend TIR (laatste 7d vs vorige 7d): ' + stats.trend.prevTir + '% → ' + stats.trend.recentTir + '% ' + arrow +
+      var pd = stats.trend.prevDays || stats.window.days;
+      h.push('<div class="ai-fine">Trend TIR (laatste ' + pd + 'd vs vorige ' + pd + 'd): ' + stats.trend.prevTir + '% → ' + stats.trend.recentTir + '% ' + arrow +
         ' · laag ' + aiNum(stats.trend.prevLowPct, '%') + ' → ' + aiNum(stats.trend.recentLowPct, '%') + '</div>');
+    }
+    // AGP-percentielprofiel + 24u TIR-balk (beide uit perHour).
+    if (stats.perHour && stats.perHour.length) {
+      h.push(renderAiAgp(stats.perHour));
+      h.push(renderAiHourlyTir(stats.perHour));
     }
     // Per-uur risicoprofiel (%low per uur) als mini-balken.
     if (stats.perHour && stats.perHour.length) {
@@ -2432,6 +2701,64 @@
     return h.join('');
   }
 
+  // AGP: gevulde percentielbanden (p10–p90 licht, p25–p75 donker) + medianlijn p50,
+  // over 24 uur. Puur SVG uit stats.perHour; geen externe lib.
+  function renderAiAgp(perHour) {
+    if (!perHour || !perHour.length) return '';
+    var pts = perHour.filter(function (p) { return p.p50 != null; });
+    if (pts.length < 4) return '';
+    var W = 320, H = 120, padL = 22, padR = 6, padT = 6, padB = 14;
+    var yMin = 3, yMax = 14;
+    var x = function (hour) { return padL + (hour / 23) * (W - padL - padR); };
+    var y = function (v) {
+      var cl = Math.max(yMin, Math.min(yMax, v));
+      return padT + (1 - (cl - yMin) / (yMax - yMin)) * (H - padT - padB);
+    };
+    // Gesloten band-polygoon tussen twee percentiel-series (heen langs lo, terug langs hi).
+    function band(loKey, hiKey) {
+      var fwd = pts.map(function (p) { return x(p.hour) + ',' + y(p[loKey]); });
+      var bwd = pts.slice().reverse().map(function (p) { return x(p.hour) + ',' + y(p[hiKey]); });
+      return fwd.concat(bwd).join(' ');
+    }
+    function line(key) { return pts.map(function (p) { return x(p.hour) + ',' + y(p[key]); }).join(' '); }
+    var parts = ['<div class="ai-sec">AGP — 24-uurs patroon (' + pts[0].n + '+ p/uur)</div>', '<div class="ai-agp">'];
+    parts.push('<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" aria-label="AGP percentielprofiel">');
+    // Doellijnen 3.9 en 10.0.
+    [[3.9, '#22c55e'], [10.0, '#eab308']].forEach(function (t) {
+      parts.push('<line x1="' + padL + '" y1="' + y(t[0]).toFixed(1) + '" x2="' + (W - padR) + '" y2="' + y(t[0]).toFixed(1) + '" stroke="' + t[1] + '" stroke-opacity=".35" stroke-dasharray="3 3" stroke-width="1"/>');
+    });
+    parts.push('<polygon points="' + band('p10', 'p90') + '" fill="#4ade80" fill-opacity=".14"/>');
+    parts.push('<polygon points="' + band('p25', 'p75') + '" fill="#4ade80" fill-opacity=".28"/>');
+    parts.push('<polyline points="' + line('p50') + '" fill="none" stroke="#4ade80" stroke-width="1.6"/>');
+    // Y-labels.
+    [3.9, 7, 10, 14].forEach(function (v) {
+      parts.push('<text x="2" y="' + (y(v) + 3).toFixed(1) + '" fill="#9ca3af" font-size="7">' + v + '</text>');
+    });
+    parts.push('</svg>');
+    parts.push('<div class="ai-tiraxis"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>');
+    parts.push('</div>');
+    return parts.join('');
+  }
+
+  // 24-cellen TIR-balk: kleur per uur van rood (laag TIR) → groen (hoog TIR).
+  function renderAiHourlyTir(perHour) {
+    if (!perHour || !perHour.length) return '';
+    var cells = [];
+    for (var hh = 0; hh < 24; hh++) {
+      var p = perHour[hh] || {};
+      var tir = p.n ? (p.tir || 0) : null;
+      var bg;
+      if (tir == null) { bg = 'rgba(255,255,255,.05)'; }
+      else { var hue = Math.round((tir / 100) * 130); bg = 'hsl(' + hue + ',62%,45%)'; }
+      var title = String(hh).padStart ? String(hh).padStart(2, '0') : ('0' + hh).slice(-2);
+      title += ':00 · TIR ' + (tir == null ? '–' : tir + '%') + ' · n=' + (p.n || 0);
+      cells.push('<i title="' + escapeHtml(title) + '" style="background:' + bg + '"></i>');
+    }
+    return '<div class="ai-sec">TIR per uur (24u)</div>' +
+      '<div class="ai-tirstrip">' + cells.join('') + '</div>' +
+      '<div class="ai-tiraxis"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>';
+  }
+
   function renderAiHeatmap(heatmap) {
     var h = ['<div class="ai-sec">Heatmap laag-risico (weekdag × uur)</div>', '<div class="ai-heatmap">'];
     heatmap.forEach(function (row) {
@@ -2460,8 +2787,20 @@
     return '<div class="ai-detail">' + rows.join('') + '</div>';
   }
 
-  function aiCard(label, value, cls) {
-    return '<div class="ai-card ' + (cls || '') + '"><div class="ai-card-v">' + escapeHtml(String(value)) + '</div><div class="ai-card-l">' + escapeHtml(label) + '</div></div>';
+  function aiCard(label, value, cls, deltaHtml) {
+    return '<div class="ai-card ' + (cls || '') + '"><div class="ai-card-v">' + escapeHtml(String(value)) + '</div><div class="ai-card-l">' + escapeHtml(label) + '</div>' + (deltaHtml || '') + '</div>';
+  }
+
+  // Δ-badge t.o.v. de vorige periode. lowerIsBetter keert de kleur om (CV/laag).
+  function aiDelta(delta, unit, lowerIsBetter) {
+    if (delta === null || delta === undefined || !Number.isFinite(Number(delta))) return '';
+    var d = Number(delta);
+    var dir = d > 0.05 ? 'up' : (d < -0.05 ? 'down' : 'flat');
+    var cls;
+    if (lowerIsBetter === 'neutral' || dir === 'flat') cls = 'flat';
+    else cls = (lowerIsBetter ? d < 0 : d > 0) ? 'up' : 'down';
+    var sign = d > 0 ? '+' : '';
+    return '<span class="ai-card-d ' + cls + '">' + sign + (Math.round(d * 10) / 10) + (unit || '') + ' vs vorige</span>';
   }
 
   function aiTarget(label, ok) {
