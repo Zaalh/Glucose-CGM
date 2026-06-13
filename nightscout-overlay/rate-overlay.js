@@ -2193,7 +2193,7 @@
     var lowsList = episodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol < 3.9; });
     var nearList = episodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol >= 3.9 && e.nadirMmol < 4.5; });
     var dipsList = episodes.filter(function (e) { return !(e.nadirMmol != null && e.nadirMmol < 4.5); });
-    h.push(renderRecentEpisodes(episodes));
+    h.push(renderRecentEpisodes(episodes, stats));
     h.push(aiEpisodeSection('Lows (' + lowsList.length + ' getoond) · nadir onder 3.9', lowsList, 'Geen echte lows in dit venster.'));
     if (nearList.length) {
       h.push(aiEpisodeSection('Near-hypo’s (' + nearList.length + ' getoond) · nadir 3.9–4.5', nearList, null));
@@ -2205,11 +2205,20 @@
     box.innerHTML = h.join('');
   }
 
-  function renderRecentEpisodes(episodes) {
+  function renderRecentEpisodes(episodes, stats) {
     var recent = (episodes || []).slice(0, 8);
-    var h = ['<div class="ai-sec">Recente lows/dips</div>'];
+    var h = ['<div class="ai-sec">Laatste episode-records</div>'];
+    var latestEntry = stats && stats.latestEntryAt ? new Date(stats.latestEntryAt) : null;
+    var latestEpisode = recent.length && recent[0].peakAt ? new Date(recent[0].peakAt) : null;
+    var meta = [];
+    if (latestEntry) meta.push('nieuwste CGM ' + latestEntry.toLocaleString());
+    if (latestEpisode) meta.push('nieuwste episode ' + latestEpisode.toLocaleString());
+    if (latestEntry && latestEpisode && latestEntry.getTime() - latestEpisode.getTime() > 3 * 60 * 60 * 1000) {
+      meta.push('geen nieuwere gebouwde episode in de laatste ' + Math.round((latestEntry.getTime() - latestEpisode.getTime()) / 3600000) + 'u');
+    }
+    if (meta.length) h.push('<div class="ai-fine">' + escapeHtml(meta.join(' · ')) + '</div>');
     if (!recent.length) {
-      h.push('<div class="ai-empty">Geen recente lows/dips in dit venster.</div>');
+      h.push('<div class="ai-empty">Geen episode-records in dit venster.</div>');
       return h.join('');
     }
     recent.forEach(function (e) {
