@@ -1418,10 +1418,18 @@ async function getAiStats(days) {
       .toArray()
     const highToLowContext = buildHighToLowContext(buildHighEpisodes(rows), reactiveEpisodes)
     const reactive = summarizeReactiveEpisodes(reactiveEpisodes)
+    // Wanneer draaide de episode-builder voor het laatst? Elke build zet updatedAt
+    // op alle episodes, dus de hoogste updatedAt = laatste build. Hiermee meten we
+    // staleness van de BUILD (loopt achter op de data), niet "geen recente daling".
+    const lastBuilt = await client.db().collection('reactive_hypo_episodes')
+      .find({}, { projection: { _id: 0, updatedAt: 1 } })
+      .sort({ updatedAt: -1 }).limit(1).toArray()
+    const episodesBuiltAt = lastBuilt.length ? lastBuilt[0].updatedAt : null
     return {
       window: { days, from: new Date(from).toISOString(), to: new Date(to).toISOString() },
       count: n,
       latestEntryAt: rows.length ? new Date(rows[rows.length - 1].date).toISOString() : null,
+      episodesBuiltAt,
       coveragePct: round(Math.min(100, expected ? (n / expected) * 100 : 0), 0),
       mean: n ? round(mean, 1) : null, sd: n ? round(sd, 1) : null, cv: mean ? round((sd / mean) * 100, 0) : null,
       gmi, median: q(0.5), p25: q(0.25), p75: q(0.75),
@@ -2001,13 +2009,17 @@ async function getAiPatterns() {
         body: `<3.9 totaal ${r.totalTimeBelow3_9Min ?? '–'} min · burden ${r.totalAreaBelow3_9 ?? '–'} mmol·min · artefactflags ${r.artefactFlags?.singlePoint ?? 0}/${r.artefactFlags?.possibleCompression ?? 0}`,
       })
       if (stats.latestEntryAt || r.latestPeakAt) {
-        const gapMin = stats.latestEntryAt && r.latestPeakAt
-          ? round((Date.parse(stats.latestEntryAt) - Date.parse(r.latestPeakAt)) / 60000, 0)
+        // Build loopt achter = de builder heeft de nieuwste metingen nog niet
+        // verwerkt (latestEntry veel nieuwer dan laatste build). NIET: er was
+        // geen recente daling — dat is de gezonde toestand.
+        const buildLagMin = stats.latestEntryAt && stats.episodesBuiltAt
+          ? round((Date.parse(stats.latestEntryAt) - Date.parse(stats.episodesBuiltAt)) / 60000, 0)
           : null
+        const stale = buildLagMin != null && buildLagMin > 60
         cards.push({
           key: 'freshness',
           title: 'Recentheid episodes',
-          body: `Nieuwste CGM ${stats.latestEntryAt ? new Date(stats.latestEntryAt).toLocaleString('nl-NL') : '–'} · nieuwste episode ${r.latestPeakAt ? new Date(r.latestPeakAt).toLocaleString('nl-NL') : '–'}${gapMin != null && gapMin > 180 ? ' · check episodes:build als recente lows ontbreken' : ''}`,
+          body: `Nieuwste CGM ${stats.latestEntryAt ? new Date(stats.latestEntryAt).toLocaleString('nl-NL') : '–'} · nieuwste episode ${r.latestPeakAt ? new Date(r.latestPeakAt).toLocaleString('nl-NL') : '–'}${stats.episodesBuiltAt ? ` · episodes bijgewerkt ${new Date(stats.episodesBuiltAt).toLocaleString('nl-NL')}` : ''}${stale ? ' · build loopt achter: draai episodes:build' : ''}`,
         })
       }
     }

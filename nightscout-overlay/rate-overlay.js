@@ -2210,11 +2210,15 @@
     var h = ['<div class="ai-sec">Laatste episode-records</div>'];
     var latestEntry = stats && stats.latestEntryAt ? new Date(stats.latestEntryAt) : null;
     var latestEpisode = recent.length && recent[0].peakAt ? new Date(recent[0].peakAt) : null;
+    var builtAt = stats && stats.episodesBuiltAt ? new Date(stats.episodesBuiltAt) : null;
     var meta = [];
     if (latestEntry) meta.push('nieuwste CGM ' + latestEntry.toLocaleString());
     if (latestEpisode) meta.push('nieuwste episode ' + latestEpisode.toLocaleString());
-    if (latestEntry && latestEpisode && latestEntry.getTime() - latestEpisode.getTime() > 3 * 60 * 60 * 1000) {
-      meta.push('geen nieuwere gebouwde episode in de laatste ' + Math.round((latestEntry.getTime() - latestEpisode.getTime()) / 3600000) + 'u');
+    if (builtAt) meta.push('episodes bijgewerkt ' + builtAt.toLocaleString());
+    // Alleen waarschuwen als de build achterloopt op de data, niet als er
+    // simpelweg geen recente daling was.
+    if (latestEntry && builtAt && latestEntry.getTime() - builtAt.getTime() > 60 * 60 * 1000) {
+      meta.push('build loopt achter (' + Math.round((latestEntry.getTime() - builtAt.getTime()) / 3600000) + 'u): draai episodes:build');
     }
     if (meta.length) h.push('<div class="ai-fine">' + escapeHtml(meta.join(' · ')) + '</div>');
     if (!recent.length) {
@@ -2266,13 +2270,17 @@
   function renderStatsFreshness(stats) {
     var latestEntry = stats.latestEntryAt ? new Date(stats.latestEntryAt) : null;
     var latestEpisode = stats.reactive && stats.reactive.latestPeakAt ? new Date(stats.reactive.latestPeakAt) : null;
+    var builtAt = stats.episodesBuiltAt ? new Date(stats.episodesBuiltAt) : null;
     var parts = [];
     if (latestEntry) parts.push('nieuwste CGM ' + latestEntry.toLocaleString());
     if (latestEpisode) parts.push('nieuwste episode ' + latestEpisode.toLocaleString());
-    var stale = latestEntry && latestEpisode && (latestEntry.getTime() - latestEpisode.getTime()) > 3 * 60 * 60 * 1000;
+    if (builtAt) parts.push('episodes bijgewerkt ' + builtAt.toLocaleString());
     if (!parts.length) return '';
+    // Stale = de build heeft de nieuwste metingen nog niet verwerkt — NIET dat er
+    // simpelweg geen recente daling was (dat is juist de gezonde toestand).
+    var stale = latestEntry && builtAt && (latestEntry.getTime() - builtAt.getTime()) > 60 * 60 * 1000;
     return '<div class="ai-fine">' + escapeHtml(parts.join(' · ')) +
-      (stale ? ' · als recente lows/dips ontbreken: draai episodes:build om episodes bij te werken' : '') + '</div>';
+      (stale ? ' · build loopt achter: draai episodes:build om episodes bij te werken' : '') + '</div>';
   }
 
   function renderHighToLowContext(ctx) {
