@@ -109,7 +109,7 @@
     lo=Math.floor(lo-0.4);hi=Math.ceil(hi+0.4);var ry=Math.max(1,hi-lo);
     function X(t){return pl+(Date.parse(t)-t0)/sp*(W-pl-pr);}
     function Y(v){return pt+(hi-v)/ry*(H-pt-pb);}
-    var s=['<svg class="chart" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'];
+    var s=['<svg class="chart" viewBox="0 0 '+W+' '+H+'">'];
     // target band 3.9-10
     s.push('<rect x="'+pl+'" y="'+Y(10).toFixed(1)+'" width="'+(W-pl-pr)+'" height="'+(Y(3.9)-Y(10)).toFixed(1)+'" fill="rgba(74,222,128,0.06)"/>');
     if(o.spanStart&&o.spanEnd){var xs=X(o.spanStart),xe=X(o.spanEnd);s.push('<rect x="'+Math.min(xs,xe).toFixed(1)+'" y="'+pt+'" width="'+Math.abs(xe-xs).toFixed(1)+'" height="'+(H-pt-pb).toFixed(1)+'" fill="rgba(148,163,184,0.10)"/>');}
@@ -270,19 +270,19 @@
       var h=['<div class="ep-hd"><button onclick="history.back()">‹</button><div><div class="h1">'+ttl+'</div><div class="h2">'+esc(dmon(when))+' · '+esc(hm(when))+'</div></div></div>'];
       // metric card
       var val=isLow?ep.nadirMmol:m.peakMmol;
-      var dur=isLow?(ep.recoveryMinutes!=null?(ep.minutesPeakToNadir||0)+(ep.recoveryMinutes||0):ep.minutesPeakToNadir):m.durationAbove10Minutes;
+      var dur=isLow?(ep.timeBelow3_9Minutes!=null?ep.timeBelow3_9Minutes:ep.minutesPeakToNadir):m.durationAbove10Minutes;
       h.push('<div class="card" style="border-color:'+(isLow?'rgba(96,165,250,.3)':'rgba(248,113,113,.3)')+'">');
       h.push('<div class="big"><div><div class="mut" style="font-size:11px">'+(isLow?'NADIR':'PIEK')+'</div><div class="v '+(isLow?'blue':'red')+'">'+num(val,'')+'</div><div class="mut">mmol/L</div></div>'+
-        '<div style="text-align:right"><div class="mut" style="font-size:11px">DUUR</div><div class="v">'+num(dur,'')+' <small style="font-size:16px">min</small></div></div></div>');
+        '<div style="text-align:right"><div class="mut" style="font-size:11px">'+(isLow?'DUUR <3.9':'DUUR >10')+'</div><div class="v">'+num(dur,'')+' <small style="font-size:16px">min</small></div></div></div>');
       h.push('<div class="grid g3" style="margin-top:14px">');
       if(isLow){
-        h.push(mc(isLow?'DALING':'STIJGING',num(ep.fallRateMmolPerMin,'')+'/min','blue'));
+        h.push(mc('DALINGSSNELHEID',num(ep.fallRateMmolPerMin,'')+'/min','blue'));
         h.push(mc('HERSTEL',num(ep.recoveryMinutes,'m'),'green'));
-        h.push(mc('AREA <doel',num(ep.areaBelow3_9,''),'blue'));
+        h.push(mc('BELASTING <3.9',num(ep.areaBelow3_9,''),'blue'));
       }else{
-        h.push(mc('STIJGING',num(m.areaAbove10!=null?'':'',''))); // placeholder replaced below
+        h.push(mc('BOVEN 13.9',num(m.durationAbove13_9Minutes,'m'),'red'));
         h.push(mc('HERSTEL',num(m.recoveryMinutes,'m'),'green'));
-        h.push(mc('AREA >doel',num(m.areaAbove10,''),'red'));
+        h.push(mc('BELASTING >10',num(m.areaAbove10,''),'red'));
       }
       h.push('</div></div>');
       // timeline
@@ -311,8 +311,6 @@
       if(d.notableReasons&&d.notableReasons.length){h.push('<div class="sec">Waarom opvallend</div><div class="card"><ul style="margin:0;padding-left:18px">'+d.notableReasons.map(function(r){return '<li style="margin-bottom:5px">'+esc(r)+'</li>';}).join('')+'</ul></div>');}
       h.push('<div class="disc">Observationele CGM-analyse, geen medisch advies. Raadpleeg je arts voor klinische beslissingen.</div>');
       app.innerHTML=h.join('');
-      // fix high onset placeholder
-      if(!isLow){var cards=app.querySelectorAll('.card .grid.g3 .stat');if(cards[0]){cards[0].querySelector('.v').textContent=num(m.durationAbove13_9Minutes,'m');cards[0].querySelector('.l').textContent='>13.9';}}
     });
   }
   function mc(l,v,cls){return '<div class="stat" style="padding:10px"><div class="l">'+esc(l)+'</div><div class="v '+(cls||'')+'" style="font-size:18px">'+v+'</div></div>';}
