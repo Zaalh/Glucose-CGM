@@ -1564,6 +1564,14 @@
   }
 
   function aiTime(s) { return s ? new Date(s).toLocaleString() : ''; }
+  function aiClock(s) { return s ? new Date(s).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''; }
+  function aiDayMon(s) { if (!s) return ''; var d = new Date(s); return d.getDate() + '-' + (d.getMonth() + 1); }
+  // Klok, met datum-prefix als de dag afwijkt van refIso (voor koppelingen over middernacht).
+  function aiClockRel(s, refIso) {
+    if (!s) return '';
+    return (refIso && aiDayMon(s) !== aiDayMon(refIso) ? aiDayMon(s) + ' ' : '') + aiClock(s);
+  }
+  function aiMinBetween(a, b) { return (a && b) ? Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60000) : null; }
   function aiClip(s, n) { s = String(s || ''); return s.length > n ? s.slice(0, n) + '…' : s; }
 
   // Detail-HTML uit reeds-opgehaalde data (geen extra netwerk/LLM-call).
@@ -2291,19 +2299,31 @@
       h.push('<div class="ai-empty">Geen high→low koppelingen in dit venster.</div>');
       return h.join('');
     }
-    list.forEach(function (x) {
-      var line = aiTime(x.highPeakAt) + ' high ' + aiNum(x.highPeakMmol, '') + ' mmol → ' +
-        aiTime(x.lowNadirAt || x.lowPeakAt) + ' low ' + aiNum(x.lowNadirMmol, '') + ' mmol';
-      var meta = [];
-      if (x.minutesHighEndToLowPeak != null) meta.push(x.minutesHighEndToLowPeak + 'm na high');
-      if (x.lowDropFromPeakMmol != null) meta.push('daling ' + x.lowDropFromPeakMmol + ' mmol');
-      if (x.lowAreaBelow3_9 != null) meta.push('burden ' + x.lowAreaBelow3_9);
-      if (x.lowOutcome) meta.push(x.lowOutcome);
-      if (x.lowSeverity) meta.push(x.lowSeverity);
-      if (x.relevantReasons && x.relevantReasons.length) meta.push('relevant: ' + x.relevantReasons.join(', '));
-      h.push('<div class="ai-fine">' + escapeHtml(line + ' · ' + meta.join(' · ')) + '</div>');
-    });
+    list.forEach(function (x) { h.push(renderHighToLowItem(x)); });
     return h.join('');
+  }
+
+  // Toont alle vier de tijdstippen expliciet (high-piek, high-einde, low-piek =
+  // start daling, low-nadir) + de deelintervallen, zodat de getoonde tijden en de
+  // minuten op hetzelfde meten. Datum één keer als anker; afwijkende dagen krijgen
+  // een eigen datum-prefix (koppelingen over middernacht).
+  function renderHighToLowItem(x) {
+    var ref = x.highPeakAt;
+    var line = aiDayMon(x.highPeakAt) + ': high-piek ' + aiClock(x.highPeakAt) + ' ' + aiNum(x.highPeakMmol, '') + ' mmol' +
+      (x.highEndAt ? ' · high-einde ' + aiClockRel(x.highEndAt, ref) : '') +
+      (x.lowPeakAt ? ' → daling vanaf ' + aiClockRel(x.lowPeakAt, ref) : '') +
+      ' → nadir ' + aiClockRel(x.lowNadirAt || x.lowPeakAt, ref) + ' ' + aiNum(x.lowNadirMmol, '') + ' mmol';
+    var descentMin = aiMinBetween(x.lowPeakAt, x.lowNadirAt);
+    var meta = [];
+    if (x.highDurationMinutes != null) meta.push('high duurde ' + x.highDurationMinutes + 'm');
+    if (x.minutesHighEndToLowPeak != null) meta.push(x.minutesHighEndToLowPeak + 'm high→daling');
+    if (descentMin != null) meta.push(descentMin + 'm daling');
+    if (x.lowDropFromPeakMmol != null) meta.push('Δ ' + x.lowDropFromPeakMmol + ' mmol');
+    if (x.lowAreaBelow3_9 != null) meta.push('burden ' + x.lowAreaBelow3_9);
+    if (x.lowOutcome) meta.push(x.lowOutcome);
+    if (x.lowSeverity) meta.push(x.lowSeverity);
+    if (x.relevantReasons && x.relevantReasons.length) meta.push('relevant: ' + x.relevantReasons.join(', '));
+    return '<div class="ai-fine">' + escapeHtml(line + ' · ' + meta.join(' · ')) + '</div>';
   }
 
   function renderReactiveHypoInfo() {
@@ -2399,7 +2419,7 @@
     if (day.highToLow && day.highToLow.length) {
       h.push('<div class="ai-sec">High→low context</div>');
       day.highToLow.slice(0, 5).forEach(function (x) {
-        h.push('<div class="ai-fine">' + escapeHtml('High ' + x.highPeakMmol + ' mmol → low ' + x.lowNadirMmol + ' mmol (' + x.minutesHighEndToLowPeak + 'm later)') + '</div>');
+        h.push(renderHighToLowItem(x));
       });
     }
     return h.join('');

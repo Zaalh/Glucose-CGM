@@ -1703,7 +1703,9 @@ async function getAiDayReview(dateKey) {
       if (low) {
         highToLow.push({
           highPeakAt: high.peakAt,
+          highEndAt: high.endAt,
           highPeakMmol: high.peakMmol,
+          highDurationMinutes: high.durationMinutes,
           lowPeakAt: low.peakAt,
           lowNadirAt: low.nadirAt,
           lowNadirMmol: low.nadirMmol,
