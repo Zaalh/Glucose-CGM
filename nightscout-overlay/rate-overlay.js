@@ -860,6 +860,9 @@
       '#cgm-ai-panel .ai-rev-ctx{margin-top:6px;padding:5px 7px;border-radius:5px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08)}',
       '#cgm-ai-panel .ai-rev-ctx-t{font-size:10px;font-weight:700;opacity:.7;text-transform:uppercase;letter-spacing:.03em;margin-bottom:3px}',
       '#cgm-ai-panel .ai-ev-chip{display:inline-block;font-size:10px;padding:1px 6px;margin:2px 3px 0 0;border-radius:10px;background:rgba(99,102,241,.16);border:1px solid rgba(129,140,248,.3)}',
+      '#cgm-ai-panel .ai-sevband{font-size:11px;padding:3px 7px;margin:3px 0;border-left:3px solid rgba(148,163,184,.4);border-radius:0 4px 4px 0}',
+      '#cgm-ai-panel .ai-sevband.on{background:rgba(248,113,133,.12);border-left-color:#f43f5e}',
+      '#cgm-ai-panel .ai-sev-tag{font-size:9px;font-weight:700;color:#fbbf24;border:1px solid #fbbf24;border-radius:5px;padding:0 5px}',
       '#cgm-ai-panel .ai-rev-actions{display:flex;gap:5px;margin-top:8px}',
       '#cgm-ai-panel .ai-rev-btn{flex:1;font-size:10px;padding:4px 6px;border:1px solid rgba(255,255,255,.2);border-radius:5px;background:#1e293b;color:#cbd5e1;cursor:pointer}',
       '#cgm-ai-panel .ai-rev-btn:hover{background:#334155}',
@@ -1689,38 +1692,35 @@
   var AI_EVENT_GLYPH = { meal: '🍽', snack: '🍪', symptom: '😵', fingerstick: '🩸', exercise: '🏃', stress: '⚡', sleep: '🛌', illness: '🤒', alcohol: '🍷', action: '✅', note: '📝' };
   function aiHM(iso) { var d = new Date(iso); return isNaN(d) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
 
-  // Focused review (SmartXdrip-stijl): chart + 'wat gebeurde eromheen' + waarom opvallend
-  // + vergelijking + navigatie/notitie. Volledig deterministisch (Mongo-reads), geen LLM.
+  // Focused review (deterministisch, Mongo-reads, geen LLM). GEEN curve: Nightscout
+  // toont de glucose-grafiek al — wij geven alleen de analyse (metrics/context/severity).
   function aiRenderEpisodeCurve(d) {
     var kind = d.type === 'high' ? 'high' : 'low';
-    var readings = d.readings || [];
     var events = d.events || [];
-    var markers = [], spanStart = null, spanEnd = null, headLine = '';
+    var headLine = '';
+    var h = [];
     if (kind === 'low' && d.episode) {
       var e = d.episode;
-      markers.push({ t: e.peakAt, label: 'piek', color: '#fbbf24' });
-      markers.push({ t: e.nadirAt, label: 'nadir', color: '#f43f5e' });
-      if (e.recoveredAt) markers.push({ t: e.recoveredAt, label: 'herstel', color: '#34d399' });
-      spanStart = e.peakAt; spanEnd = e.recoveredAt || e.nadirAt;
-      headLine = aiTime(e.nadirAt || e.peakAt) + ' · ' + aiNum(e.peakMmol, '') + '→' + aiNum(e.nadirMmol, '') + ' mmol';
+      headLine = aiTime(e.nadirAt || e.peakAt) + ' · piek ' + aiNum(e.peakMmol, '') + ' → nadir ' + aiNum(e.nadirMmol, '') + ' mmol';
+      h.push('<div class="ai-rev-head">' + escapeHtml(headLine) + '</div>');
+      var lm = [];
+      if (e.timeBelow3_9Minutes != null) lm.push('onder 3.9: ' + aiNum(e.timeBelow3_9Minutes, 'm'));
+      if (e.timeBelow3_0Minutes) lm.push('onder 3.0: ' + aiNum(e.timeBelow3_0Minutes, 'm'));
+      if (e.fallRateMmolPerMin != null) lm.push('daling ' + aiNum(e.fallRateMmolPerMin, '') + '/min');
+      if (e.recoveryMinutes != null) lm.push('herstel ' + aiNum(e.recoveryMinutes, 'm'));
+      if (e.areaBelow3_9 != null) lm.push(aiLabel('areaBelow3_9') + ' ' + aiNum(e.areaBelow3_9, ''));
+      if (e.reboundHigh) lm.push('rebound ' + aiNum(e.reboundPeakMmol, '') + ' mmol');
+      h.push('<div class="ai-d-row"><b>Metrics:</b> ' + escapeHtml(lm.join(' · ')) + '</div>');
     } else if (kind === 'high' && d.metrics) {
       var m = d.metrics;
-      if (m.startAt) markers.push({ t: m.startAt, label: 'start', color: '#34d399' });
-      markers.push({ t: m.peakAt, label: 'piek', color: '#fbbf24' });
-      if (m.endAt) markers.push({ t: m.endAt, label: 'einde', color: '#93c5fd' });
-      spanStart = m.startAt; spanEnd = m.endAt;
       headLine = aiTime(m.peakAt) + ' · piek ' + aiNum(m.peakMmol, '') + ' mmol';
-    }
-    var h = ['<div class="ai-rev-head">' + escapeHtml(headLine) + '</div>'];
-    h.push(aiEpisodeSvg(readings, markers, kind, events, spanStart, spanEnd));
-
-    if (kind === 'high' && d.metrics) {
-      var m2 = d.metrics, mh = [];
-      mh.push('boven 10: ' + aiNum(m2.durationAbove10Minutes, 'm'));
-      if (m2.durationAbove13_9Minutes) mh.push('boven 13.9: ' + aiNum(m2.durationAbove13_9Minutes, 'm'));
-      mh.push(aiLabel('areaAbove10') + ' ' + aiNum(m2.areaAbove10, ''));
-      if (m2.recoveryMinutes != null) mh.push('herstel ' + aiNum(m2.recoveryMinutes, 'm'));
-      if (m2.followedByLow) mh.push('→ low na ' + aiNum(m2.followedByLow.minutesToLowPeak, 'm') + ' (nadir ' + aiNum(m2.followedByLow.nadirMmol, '') + ')');
+      h.push('<div class="ai-rev-head">' + escapeHtml(headLine) + '</div>');
+      var mh = [];
+      mh.push('boven 10: ' + aiNum(m.durationAbove10Minutes, 'm'));
+      if (m.durationAbove13_9Minutes) mh.push('boven 13.9: ' + aiNum(m.durationAbove13_9Minutes, 'm'));
+      mh.push(aiLabel('areaAbove10') + ' ' + aiNum(m.areaAbove10, ''));
+      if (m.recoveryMinutes != null) mh.push('herstel ' + aiNum(m.recoveryMinutes, 'm'));
+      if (m.followedByLow) mh.push('→ low na ' + aiNum(m.followedByLow.minutesToLowPeak, 'm') + ' (nadir ' + aiNum(m.followedByLow.nadirMmol, '') + ')');
       h.push('<div class="ai-d-row"><b>Metrics:</b> ' + escapeHtml(mh.join(' · ')) + '</div>');
     }
 
@@ -1745,6 +1745,15 @@
     if (ctx.length) h.push('<div class="ai-rev-ctx"><div class="ai-rev-ctx-t">Wat gebeurde eromheen</div>' + ctx.join('') + '</div>');
     else h.push('<div class="ai-rev-ctx"><div class="ai-rev-ctx-t">Wat gebeurde eromheen</div><div class="ai-fine">Geen notities/events in dit venster. Voeg context toe ↓</div></div>');
 
+    // Severity-banden (alleen low) — afgeleid van de nadir.
+    if (kind === 'low' && d.episode && d.episode.nadirMmol != null) {
+      var nadir = Number(d.episode.nadirMmol);
+      var bands = [['Mild', '3.0–3.9', nadir >= 3.0 && nadir < 3.9], ['Significant', '2.8–3.0', nadir >= 2.8 && nadir < 3.0], ['Severe', '<2.8', nadir < 2.8]];
+      h.push('<div class="ai-rev-ctx"><div class="ai-rev-ctx-t">Severity</div>' + bands.map(function (b) {
+        return '<div class="ai-sevband' + (b[2] ? ' on' : '') + '"><b>' + escapeHtml(b[0]) + '</b>' + (b[2] ? ' <span class="ai-sev-tag">deze</span>' : '') + ' <span class="ai-fine">' + escapeHtml(b[1]) + ' mmol/L</span></div>';
+      }).join('') + '</div>');
+    }
+
     // Vergelijking met je normaal (alleen low).
     if (kind === 'low' && d.cohort && d.cohort.count > 2 && d.episode) {
       var c = d.cohort, cmp = [];
@@ -1767,88 +1776,6 @@
       '</div>');
     h.push('<div class="ai-d-id">review, geen behandeladvies · alleen je eigen data</div>');
     return h.join('');
-  }
-
-  // SVG-curve met gridlines, tijd-as, episode-arcering, zone-shading, markers en
-  // event-markers (maaltijd/symptoom/vingerprik). Geen library.
-  function aiEpisodeSvg(readings, markers, kind, events, spanStart, spanEnd) {
-    if (!readings || readings.length < 2) return '<div class="ai-empty">Te weinig punten voor een curve.</div>';
-    var W = 480, H = 158, padL = 24, padR = 10, padT = 12, padB = 18;
-    var t0 = Date.parse(readings[0].t), t1 = Date.parse(readings[readings.length - 1].t);
-    var span = Math.max(1, t1 - t0);
-    var ys = readings.map(function (p) { return p.mmol; });
-    var lo = Math.min.apply(null, ys), hi = Math.max.apply(null, ys);
-    lo = Math.min(lo, kind === 'high' ? 9 : 3.0);
-    hi = Math.max(hi, kind === 'high' ? 14 : 5);
-    lo = Math.floor(lo - 0.5); hi = Math.ceil(hi + 0.5);
-    var rangeY = Math.max(1, hi - lo);
-    function X(t) { return padL + (Date.parse(t) - t0) / span * (W - padL - padR); }
-    function Y(v) { return padT + (hi - v) / rangeY * (H - padT - padB); }
-    function nearest(t) {
-      var tt = Date.parse(t), best = null, bd = Infinity;
-      readings.forEach(function (p) { var dd = Math.abs(Date.parse(p.t) - tt); if (dd < bd) { bd = dd; best = p; } });
-      return best ? best.mmol : null;
-    }
-    function band(top, bot, color) {
-      var y1 = Y(top), y2 = Y(bot);
-      return '<rect x="' + padL + '" y="' + y1.toFixed(1) + '" width="' + (W - padL - padR).toFixed(1) + '" height="' + Math.max(0, y2 - y1).toFixed(1) + '" fill="' + color + '"/>';
-    }
-    function hline(v, color, dash) {
-      var y = Y(v).toFixed(1);
-      return '<line x1="' + padL + '" y1="' + y + '" x2="' + (W - padR) + '" y2="' + y + '" stroke="' + color + '" stroke-width="0.6"' + (dash ? ' stroke-dasharray="3 3"' : '') + '/>';
-    }
-    var svg = ['<svg class="ai-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Glucose-curve rond episode">'];
-    // Episode-span arcering (start -> herstel).
-    if (spanStart && spanEnd) {
-      var xs = X(spanStart), xe = X(spanEnd);
-      svg.push('<rect x="' + Math.min(xs, xe).toFixed(1) + '" y="' + padT + '" width="' + Math.abs(xe - xs).toFixed(1) + '" height="' + (H - padT - padB).toFixed(1) + '" fill="rgba(148,163,184,0.12)"/>');
-    }
-    // Zone-shading + drempellijn.
-    if (kind === 'high') {
-      svg.push(band(hi, Math.max(lo, 10), 'rgba(251,191,36,0.12)'));
-      if (hi > 13.9) svg.push(band(hi, 13.9, 'rgba(248,113,113,0.14)'));
-      svg.push(hline(10, 'rgba(251,191,36,0.85)', true));
-    } else {
-      svg.push(band(3.9, lo, 'rgba(251,113,133,0.12)'));
-      svg.push(band(3.0, lo, 'rgba(220,38,38,0.18)'));
-      svg.push(hline(3.9, 'rgba(251,113,133,0.85)', true));
-    }
-    // Horizontale gridlines + mmol-labels.
-    var step = rangeY > 6 ? 2 : 1;
-    for (var v = Math.ceil(lo); v <= hi; v += step) {
-      svg.push(hline(v, 'rgba(148,163,184,0.13)', false));
-      svg.push('<text x="2" y="' + (Y(v) + 3).toFixed(1) + '" fill="#94a3b8" font-size="8">' + v + '</text>');
-    }
-    // Tijd-as: start / midden / eind.
-    [t0, t0 + span / 2, t1].forEach(function (tx, i) {
-      var x = X(new Date(tx).toISOString());
-      var anc = i === 0 ? 'start' : (i === 2 ? 'end' : 'middle');
-      svg.push('<text x="' + x.toFixed(1) + '" y="' + (H - 5) + '" fill="#94a3b8" font-size="8" text-anchor="' + anc + '">' + escapeHtml(aiHM(new Date(tx).toISOString())) + '</text>');
-    });
-    // Curve.
-    var pts = readings.map(function (p) { return X(p.t).toFixed(1) + ',' + Y(p.mmol).toFixed(1); }).join(' ');
-    svg.push('<polyline fill="none" stroke="#93c5fd" stroke-width="1.6" points="' + pts + '"/>');
-    // Event-markers (verticale guide + glyph bovenin).
-    (events || []).forEach(function (ev) {
-      var et = Date.parse(ev.eventAt);
-      if (!Number.isFinite(et) || et < t0 || et > t1) return;
-      var x = X(ev.eventAt);
-      svg.push('<line x1="' + x.toFixed(1) + '" y1="' + padT + '" x2="' + x.toFixed(1) + '" y2="' + (H - padB).toFixed(1) + '" stroke="rgba(99,102,241,0.35)" stroke-width="0.8"/>');
-      svg.push('<text x="' + x.toFixed(1) + '" y="' + (padT + 7) + '" font-size="9" text-anchor="middle">' + (AI_EVENT_GLYPH[ev.type] || '•') + '<title>' + escapeHtml(ev.type + ' ' + aiHM(ev.eventAt) + (ev.note ? ' — ' + ev.note : '')) + '</title></text>');
-    });
-    // Episode-markers (piek/nadir/herstel).
-    (markers || []).forEach(function (mk) {
-      if (!mk.t) return;
-      var mv = nearest(mk.t);
-      if (mv == null) return;
-      var x = X(mk.t), y = Y(mv);
-      svg.push('<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="2.8" fill="' + mk.color + '"/>');
-      var anchor = x > W - 60 ? 'end' : 'start';
-      var tx = anchor === 'end' ? x - 4 : x + 4;
-      svg.push('<text x="' + tx.toFixed(1) + '" y="' + Math.max(padT + 8, y - 4).toFixed(1) + '" fill="' + mk.color + '" font-size="8" text-anchor="' + anchor + '">' + escapeHtml(mk.label) + '</text>');
-    });
-    svg.push('</svg>');
-    return svg.join('');
   }
 
   // --- Niet-klinische UI-labels (SmartXdrip §20.6): vertaal interne velden naar
