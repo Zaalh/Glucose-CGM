@@ -45,14 +45,18 @@ async function main() {
   try {
     const coll = client.db().collection('reactive_hypo_episodes')
 
-    // Groepen met meer dan één document per peakAt.
+    // Álle peakAt-groepen (ook singletons): we verwijderen niet alleen duplicaten,
+    // maar normaliseren ook episodeKey naar het nieuwe peakAt-formaat. Anders houdt
+    // een niet-duplicate doc zijn oude `peakAt|nadirAt`-sleutel; de volgende
+    // build-run matcht die niet en zet er een NIEUW peakAt-doc náást → opnieuw
+    // duplicaten. Door hier alles te normaliseren is `dedup → build` idempotent.
     const groups = await coll.aggregate([
       { $group: { _id: '$peakAt', count: { $sum: 1 }, ids: { $push: '$_id' } } },
-      { $match: { count: { $gt: 1 } } },
       { $sort: { _id: 1 } },
     ]).toArray()
 
-    const summary = { dupGroups: groups.length, docsToDelete: 0, docsToKeep: 0, examples: [] }
+    const dupGroups = groups.filter((g) => g.count > 1)
+    const summary = { dupGroups: dupGroups.length, docsToDelete: 0, keysToRewrite: 0, docsToKeep: 0, examples: [] }
 
     for (const g of groups) {
       const docs = await coll.find({ _id: { $in: g.ids } }).toArray()
@@ -62,10 +66,12 @@ async function main() {
       // Feedback samenvoegen + vroegste createdAt behouden.
       const mergedFeedback = docs.flatMap((d) => Array.isArray(d.feedback) ? d.feedback : [])
       const createdAt = earliest(docs.map((d) => d.createdAt))
+      const needsRewrite = survivor.episodeKey !== g._id
 
       summary.docsToKeep += 1
       summary.docsToDelete += losers.length
-      if (summary.examples.length < 8) {
+      if (needsRewrite) summary.keysToRewrite += 1
+      if (g.count > 1 && summary.examples.length < 8) {
         summary.examples.push({
           peakAt: g._id,
           keptNadirMmol: survivor.nadirMmol,
@@ -74,17 +80,19 @@ async function main() {
       }
 
       if (APPLY) {
-        await coll.updateOne(
-          { _id: survivor._id },
-          {
-            $set: {
-              episodeKey: g._id,
-              feedback: mergedFeedback,
-              ...(createdAt ? { createdAt } : {}),
+        if (needsRewrite || losers.length) {
+          await coll.updateOne(
+            { _id: survivor._id },
+            {
+              $set: {
+                episodeKey: g._id,
+                feedback: mergedFeedback,
+                ...(createdAt ? { createdAt } : {}),
+              },
             },
-          },
-        )
-        await coll.deleteMany({ _id: { $in: losers.map((d) => d._id) } })
+          )
+        }
+        if (losers.length) await coll.deleteMany({ _id: { $in: losers.map((d) => d._id) } })
       }
     }
 
