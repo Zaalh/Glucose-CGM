@@ -11,6 +11,10 @@ import { buildGlucoseEvents } from './lib/glucose-events.mjs'
 
 const LIBRE_API = 'https://api-eu.libreview.io'
 const DEFAULT_INTERVAL_SECONDS = 60
+// Nominale cadans = sync-poll-interval (default 60s → 1 meting/min). Fallback voor de
+// dekkings-noemer wanneer medianIntervalMinutes() niets oplevert. Staat hier (boven de
+// top-level await) i.v.m. de module-TDZ in --loop-modus.
+const NOMINAL_INTERVAL_MIN = DEFAULT_INTERVAL_SECONDS / 60
 const DEFAULT_GRACE_WINDOW_MINUTES = 30
 const DEFAULT_RETRY_ATTEMPTS = 3
 const DEFAULT_RETRY_BASE_DELAY_MS = 750
@@ -1332,7 +1336,6 @@ async function getAiStats(days) {
     const vals = []
     let inRange = 0, below = 0, veryLow = 0, above = 0, veryHigh = 0
     let min = Infinity, max = -Infinity
-    let lowEpisodes = 0, longestLowMin = 0, curLowStart = null, prevLow = false
     for (const r of rows) {
       const mmol = Number(r.sgv) / MGDL_PER_MMOL
       vals.push(mmol)
@@ -1353,15 +1356,17 @@ async function getAiStats(days) {
         const w = wdAgg[wd]; w.sum += mmol; w.n++; if (isLow) w.low++; if (isHigh) w.high++; if (isIn) w.inRange++
         const cell = heatmapAgg[wd][h]; cell.n++; if (isLow) cell.low++; if (isHigh) cell.high++; if (isIn) cell.inRange++
       }
-      if (isLow && !prevLow) { lowEpisodes++; curLowStart = r.date }
-      if (!isLow && prevLow && curLowStart != null) longestLowMin = Math.max(longestLowMin, Math.round((r.date - curLowStart) / 60000))
-      prevLow = isLow
     }
+    // Drempel-lows via de gedeelde builder: splitst correct bij datagaten >30 min en
+    // sluit een lopende low aan het venster-einde af (de oude inline-lus deed beide niet).
+    const thresholdLows = buildThresholdLows(rows)
+    const lowEpisodes = thresholdLows.length
+    const longestLowMin = thresholdLows.reduce((m, l) => Math.max(m, l.durationMinutes || 0), 0)
     const n = vals.length
     const mean = n ? vals.reduce((s, v) => s + v, 0) / n : 0
     const sd = n ? Math.sqrt(vals.reduce((s, v) => s + (v - mean) * (v - mean), 0) / n) : 0
     const pct = (x) => (n ? round((x / n) * 100, 1) : 0)
-    const expected = days * 1440
+    const expected = expectedSamples(rows, days * 1440)
     // Percentiel uit een (ongesorteerde) waarden-array; voor de AGP-banden per uur.
     const pctl = (arr, p) => {
       if (!arr.length) return null
@@ -1484,7 +1489,7 @@ async function getAiStats(days) {
       gmi, median: q(0.5), p25: q(0.25), p75: q(0.75),
       tir: pct(inRange), tbr: pct(below), veryLow: pct(veryLow), tar: pct(above), veryHigh: pct(veryHigh),
       min: n ? round(min, 1) : null, max: n ? round(max, 1) : null,
-      lows: { count: lowEpisodes, longestMin: longestLowMin },
+      lows: { count: lowEpisodes, longestMin: round(longestLowMin, 0) },
       perHour, perWeekday, heatmap, trend, reactive, highToLowContext,
     }
   } finally {
@@ -1568,14 +1573,20 @@ function buildHighToLowContext(highEpisodes, lowEpisodes) {
     .filter((l) => Number.isFinite(Date.parse(l.peakAt)))
     .sort((a, b) => Date.parse(a.peakAt) - Date.parse(b.peakAt))
   const pairs = []
+  // Eén low mag maar door één high geclaimd worden (anders dubbeltelling als twee
+  // highs binnen 4u vóór dezelfde low liggen). Greedy: vroegste ongebruikte low per high.
+  const usedLows = new Set()
   for (const high of highEpisodes) {
     const highEnd = Date.parse(high.endAt)
     if (!Number.isFinite(highEnd)) continue
-    const low = lows.find((l) => {
+    const lowIdx = lows.findIndex((l, i) => {
+      if (usedLows.has(i)) return false
       const peak = Date.parse(l.peakAt)
       return peak >= highEnd && peak <= highEnd + 4 * 3_600_000
     })
-    if (!low) continue
+    if (lowIdx < 0) continue
+    usedLows.add(lowIdx)
+    const low = lows[lowIdx]
     const minutes = round((Date.parse(low.peakAt) - highEnd) / 60000, 0)
     const lowNadir = Number(low.nadirMmol)
     const drop = Number(low.dropFromPeakMmol)
@@ -1638,7 +1649,7 @@ function localDayRange(dateKey, timeZone) {
   return { from: start, to: end }
 }
 
-function summarizeEntries(rows, expectedMinutes) {
+function summarizeEntries(rows, expectedSampleCount) {
   const vals = rows.map((r) => Number(r.sgv) / MGDL_PER_MMOL).filter(Number.isFinite)
   const n = vals.length
   let inRange = 0, below = 0, veryLow = 0, above = 0, veryHigh = 0
@@ -1657,7 +1668,7 @@ function summarizeEntries(rows, expectedMinutes) {
   const pct = (x) => (n ? round((x / n) * 100, 1) : 0)
   return {
     count: n,
-    coveragePct: round(Math.min(100, expectedMinutes ? (n / expectedMinutes) * 100 : 0), 0),
+    coveragePct: round(Math.min(100, expectedSampleCount ? (n / expectedSampleCount) * 100 : 0), 0),
     mean: n ? round(mean, 1) : null,
     sd: n ? round(sd, 1) : null,
     cv: mean ? round((sd / mean) * 100, 0) : null,
@@ -1743,13 +1754,17 @@ async function getAiDayReview(dateKey) {
       .toArray()
     const highEpisodes = buildHighEpisodes(rows)
     const highToLow = []
+    const usedLows = new Set()
     for (const high of highEpisodes) {
       const highEnd = Date.parse(high.endAt)
-      const low = lows.find((l) => {
+      const lowIdx = lows.findIndex((l, i) => {
+        if (usedLows.has(i)) return false
         const peak = Date.parse(l.peakAt)
         return Number.isFinite(peak) && peak >= highEnd && peak <= highEnd + 4 * 3_600_000
       })
-      if (low) {
+      if (lowIdx >= 0) {
+        usedLows.add(lowIdx)
+        const low = lows[lowIdx]
         highToLow.push({
           highPeakAt: high.peakAt,
           highEndAt: high.endAt,
@@ -1762,7 +1777,7 @@ async function getAiDayReview(dateKey) {
         })
       }
     }
-    const expected = Math.max(1, Math.round((range.to - range.from) / 60000))
+    const expected = expectedSamples(rows, (range.to - range.from) / 60000)
     const stats = summarizeEntries(rows, expected)
     const thresholdLows = buildThresholdLows(rows)
     const burden = lows.reduce((s, e) => s + (Number(e.areaBelow3_9) || 0), 0)
@@ -1813,16 +1828,21 @@ function longestGapMinutes(rows) {
 function buildThresholdLows(rows, options = {}) {
   const thresholdMmol = options.thresholdMmol ?? 3.9
   const gapMs = (options.gapMinutes ?? 30) * 60000
+  const sampleMinutes = options.sampleMinutes ?? medianIntervalMinutes(rows) ?? 1
   const runs = []
   let cur = null
   const flush = () => {
     if (!cur) return
+    const measuredDuration = (cur.lastDate - cur.startDate) / 60000
+    const durationMinutes = cur.count === 1
+      ? Math.max(sampleMinutes, measuredDuration)
+      : measuredDuration
     runs.push({
       startAt: new Date(cur.startDate).toISOString(),
       nadirAt: new Date(cur.nadirDate).toISOString(),
       endAt: new Date(cur.lastDate).toISOString(),
       nadirMmol: round(cur.nadirMmol, 3),
-      durationMinutes: round((cur.lastDate - cur.startDate) / 60000, 1),
+      durationMinutes: round(durationMinutes, 1),
       pointCount: cur.count,
       areaBelow3_9: round(cur.area, 3),
     })
@@ -1863,6 +1883,15 @@ function medianIntervalMinutes(rows) {
   return round(gaps[Math.floor(gaps.length / 2)], 1)
 }
 
+// Gedeelde dekkings-noemer: verwacht aantal metingen in een venster van `windowMinutes`,
+// data-gedreven uit de werkelijke mediane meetinterval (valt terug op de nominale cadans).
+// Eén bron van waarheid zodat statistiek/history/dag/feed én source-health dezelfde
+// dekking% rapporteren, ook als de cadans ooit afwijkt van 1/min.
+function expectedSamples(rows, windowMinutes) {
+  const step = medianIntervalMinutes(rows) || NOMINAL_INTERVAL_MIN
+  return Math.max(1, Math.round(windowMinutes / step))
+}
+
 // Source-health als first-class inzicht (SmartXdrip §20.2). Deterministisch, geen LLM.
 // status good/watch/bad + reasons[] sturen hoe stellig rapporten/chat mogen zijn.
 async function getSourceHealth() {
@@ -1884,9 +1913,9 @@ async function getSourceHealth() {
     const last = rows.length ? rows[rows.length - 1].date : null
     const ageMinutes = last != null ? round((now - last) / 60000, 0) : null
     const rows24 = rows.filter((r) => r.date >= from24)
-    const medianInterval = medianIntervalMinutes(rows) || 5
-    const expected14 = Math.max(1, (14 * 24 * 60) / medianInterval)
-    const expected24 = Math.max(1, (24 * 60) / medianInterval)
+    const medianInterval = medianIntervalMinutes(rows) || NOMINAL_INTERVAL_MIN
+    const expected14 = expectedSamples(rows, 14 * 24 * 60)
+    const expected24 = expectedSamples(rows24, 24 * 60)
     const coverage14d = round(Math.min(100, (rows.length / expected14) * 100), 0)
     const coverageToday = round(Math.min(100, (rows24.length / expected24) * 100), 0)
     const longestGap24h = longestGapMinutes(rows24)
@@ -1961,7 +1990,7 @@ async function getAiHistory(days) {
     }
     const history = []
     for (const [date, dayRows] of byDay) {
-      const stats = summarizeEntries(dayRows, 1440)
+      const stats = summarizeEntries(dayRows, expectedSamples(dayRows, 1440))
       const dayEpisodes = episodesByDay.get(date) || []
       const dayLows = dayEpisodes.filter((e) => Number(e.nadirMmol) < 3.9)
       const dayNear = dayEpisodes.filter((e) => Number(e.nadirMmol) >= 3.9 && Number(e.nadirMmol) < 4.5)
@@ -2086,10 +2115,13 @@ async function getAiPatterns() {
     const lowEps = await db.collection('reactive_hypo_episodes')
       .find({ peakAt: { $gte: since14 } }, { projection: { _id: 0, peakAt: 1, nadirMmol: 1 } }).toArray()
     const highs = buildHighEpisodes(rows)
+    const lowEpsSorted = lowEps.slice().sort((a, b) => Date.parse(a.peakAt) - Date.parse(b.peakAt))
+    const usedLowEps = new Set()
     let highToLow = 0
     for (const h of highs) {
       const hEnd = Date.parse(h.endAt)
-      if (lowEps.some((l) => { const p = Date.parse(l.peakAt); return p >= hEnd && p <= hEnd + 4 * 3_600_000 })) highToLow++
+      const idx = lowEpsSorted.findIndex((l, i) => { if (usedLowEps.has(i)) return false; const p = Date.parse(l.peakAt); return p >= hEnd && p <= hEnd + 4 * 3_600_000 })
+      if (idx >= 0) { usedLowEps.add(idx); highToLow++ }
     }
     const artefacts = eps.filter((e) => Array.isArray(e.qualityFlags) && (e.qualityFlags.includes('single_point_low') || e.qualityFlags.includes('possible_compression_low'))).length
     const worstHour = (stats.perHour || []).filter((p) => p.n >= 10).sort((a, b) => b.lowPct - a.lowPct)[0] || null
@@ -2464,8 +2496,8 @@ async function getGlucoseEventsFeed(dateParam) {
     const rows = await client.db().collection('entries')
       .find({ type: 'sgv', sgv: { $exists: true }, date: { $gte: range.from, $lt: range.to } }, { projection: { _id: 0, sgv: 1, date: 1, dateString: 1 } })
       .sort({ date: 1 }).toArray()
-    const expectedMinutes = Math.round((range.to - range.from) / 60_000)
-    const summary = summarizeEntries(rows, expectedMinutes)
+    const expectedCount = expectedSamples(rows, (range.to - range.from) / 60_000)
+    const summary = summarizeEntries(rows, expectedCount)
     const events = buildGlucoseEvents(rows).slice().reverse()
     const highEpisodeCount = events.filter((e) => e.type === 'high_episode').length
     return { date: dateKey, window: { from: new Date(range.from).toISOString(), to: new Date(range.to).toISOString() }, summary, events, highEpisodeCount }

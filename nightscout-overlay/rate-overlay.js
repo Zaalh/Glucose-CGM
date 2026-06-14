@@ -20,6 +20,10 @@
   var latestReading = null;
   var updatingCurrentGlucose = false;
   var currentRows = [];
+  // Forecast/risk-basis: altijd verhouding-stijl (trailing average), los van de
+  // momentaan/verhouding-weergave-toggle. Zo verandert een wéérgave-voorkeur nooit
+  // de hypo-risk-rate of de forecast-lijn. Het grid (currentRows) volgt wél de toggle.
+  var currentForecastRows = [];
   var currentReadings = [];
   var selectedReadingTime = null;
   var currentHypoRisk = null;
@@ -369,13 +373,13 @@
     });
   }
 
-  function calculateHypoRisk(readings, rows) {
+  function calculateHypoRisk(readings, forecastRows) {
     var latest = readings[0];
     if (!latest || !Number.isFinite(Number(latest.sgv))) return null;
 
     var valueMmol = mmol(Number(latest.sgv));
-    var blendedRate = getForecastRateMmol(rows);
-    var primaryRate = getPrimaryRate(rows);
+    var blendedRate = getForecastRateMmol(forecastRows);
+    var primaryRate = getPrimaryRate(forecastRows);
     var rateMmol = Number.isFinite(blendedRate) ? blendedRate : (primaryRate ? primaryRate.rateMmol : 0);
     var minutesToHypo = rateMmol < -0.01 ? (valueMmol - 3.9) / Math.abs(rateMmol) : null;
     var minutesToLow = rateMmol < -0.01 ? (valueMmol - 3.8) / Math.abs(rateMmol) : null;
@@ -567,11 +571,11 @@
   }
 
   function horizonPredictionText() {
-    if (!latestReading || !currentRows || !currentRows.length) return '';
+    if (!latestReading || !currentForecastRows || !currentForecastRows.length) return '';
     var baseMmol = mmol(Number(latestReading.sgv));
     if (!Number.isFinite(baseMmol)) return '';
-    var blendedRate = getForecastRateMmol(currentRows);
-    var primaryRate = getPrimaryRate(currentRows);
+    var blendedRate = getForecastRateMmol(currentForecastRows);
+    var primaryRate = getPrimaryRate(currentForecastRows);
     var rate = Number.isFinite(blendedRate) ? blendedRate : (primaryRate ? primaryRate.rateMmol : NaN);
     if (!Number.isFinite(rate)) return '';
     if (latestDbPrediction && latestDbPrediction.predictedMmol && latestDbPrediction.entryIdentifier === latestReading.identifier) {
@@ -1189,6 +1193,7 @@
     if (!currentReadings.length) return;
     selectedReadingTime = anchorTime;
     var anchorEntry = currentReadings.find(function (entry) { return readingTime(entry) === anchorTime; }) || null;
+    currentForecastRows = calculateRows(currentReadings, anchorEntry);
     render(computeRows(currentReadings, anchorEntry));
   }
 
@@ -3077,7 +3082,8 @@
     }
 
     alert.style.display = 'flex';
-    var safeRisk = risk || { css: 'ok', title: 'HYPO OK', detail: 'Patroon actief', rate: (currentRows && currentRows.length ? getPrimaryRate(currentRows).rateMmol : 0) };
+    var fallbackPrimaryRate = currentForecastRows && currentForecastRows.length ? getPrimaryRate(currentForecastRows) : null;
+    var safeRisk = risk || { css: 'ok', title: 'HYPO OK', detail: 'Patroon actief', rate: fallbackPrimaryRate ? fallbackPrimaryRate.rateMmol : 0 };
     var hadCarb = alert.classList.contains('has-carb');
     alert.className = safeRisk.css + (hadCarb ? ' has-carb' : '');
     var dropLine = dropFromPeakText(currentReadings);
@@ -3086,8 +3092,8 @@
     // onderschat ernstige lows — bloed kan onder 2.0 zitten terwijl de sensor 2.4 toont).
     // Een precies voorspeld getal is daar misleidend; toon risico + onzekerheid i.p.v. een cijfer.
     var nowMmol = latestReading ? mmol(Number(latestReading.sgv)) : NaN;
-    var blendedRateNow = getForecastRateMmol(currentRows);
-    var primaryNow = getPrimaryRate(currentRows);
+    var blendedRateNow = getForecastRateMmol(currentForecastRows);
+    var primaryNow = getPrimaryRate(currentForecastRows);
     var rateNow = Number.isFinite(blendedRateNow) ? blendedRateNow : (primaryNow ? primaryNow.rateMmol : 0);
     var proj20 = Number.isFinite(nowMmol) ? nowMmol + rateNow * 20 : NaN;
     var lowUnreliable = (Number.isFinite(nowMmol) && nowMmol <= 3.9) ||
@@ -3403,7 +3409,7 @@
   }
 
   function averageRateText(withSpeedWord) {
-    var usableRows = currentRows.filter(function (row) {
+    var usableRows = currentForecastRows.filter(function (row) {
       return row && !row.missing && Number.isFinite(row.rateMmol) && row.actualMinutes <= 15;
     });
     if (!usableRows.length) return '';
@@ -3815,16 +3821,18 @@
           anchorEntry = readings[0];
         }
         var rows = computeRows(readings, anchorEntry);
+        // Forecast/risk altijd uit verhouding-rijen, los van de weergave-toggle.
+        currentForecastRows = calculateRows(readings, anchorEntry);
         latestReading = readings[0] || null;
         renderCurrentGlucose(anchorEntry || readings[0]);
         renderCurrentDelta();
-        currentHypoRisk = calculateHypoRisk(readings, rows);
+        currentHypoRisk = calculateHypoRisk(readings, currentForecastRows);
         var peakSignal = detectPeakDropSignal(readings);
         currentPatternCorrection = computePatternCorrection(readings, peakSignal);
         if (peakSignal && currentHypoRisk) {
-          var trendRate = getForecastRateMmol(rows);
+          var trendRate = getForecastRateMmol(currentForecastRows);
           if (!Number.isFinite(trendRate)) {
-            var fallbackPrimary = getPrimaryRate(rows);
+            var fallbackPrimary = getPrimaryRate(currentForecastRows);
             trendRate = fallbackPrimary ? fallbackPrimary.rateMmol : 0;
           }
           var nowMmol = mmol(Number((anchorEntry || readings[0]).sgv));

@@ -14,6 +14,26 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 >
 > _Eerder (2026-06-04, commit `f280478`): meal-onset/`riseFromTrough`-features in V2-shadow._
 
+### Gewijzigd
+
+- **Cijfer-correcties in Statistiek/History/Inzichten + forecast losgekoppeld van de weergave-toggle.**
+  Grondige doorrekening van alle getallen in de Stats/AI-overlay en de momentum/verhouding-vakjes;
+  vier punten gecorrigeerd:
+  - **Forecast & hypo-risk-rate ontkoppeld van de momentaan/verhouding-toggle** (`nightscout-overlay/rate-overlay.js`).
+    De forecast-blend (`getForecastRateMmol`) en `getPrimaryRate`/`averageRateText` wogen op `actualMinutes`;
+    in **momentaan**-modus is dat voor élk vakje ~1 min, waardoor alle vensters in de eerste band vielen en de
+    forecast degenereerde tot een ~2-uurs vlak gemiddelde (een daling van −0.15 mmol/min werd als −0.02 getoond).
+    De forecast/risk-basis is nu **altijd** verhouding-stijl (trailing average) via een nieuwe `currentForecastRows`,
+    los van wat het grid toont. Een wéérgave-voorkeur verandert dus nooit meer de hypo-risk-rate. Default
+    (verhouding) gedrag is byte-voor-byte identiek; alleen momentaan stopt met degenereren.
+  - **Eén gedeelde dekkings-noemer** (`expectedSamples()`): `getAiStats`/`getAiHistory`/`getAiDayReview`/
+    `getGlucoseEventsFeed` hardcodeerden 1440 metingen/dag terwijl `getSourceHealth` de noemer uit het werkelijke
+    mediane meetinterval afleidde. Nu rapporteren alle paden dezelfde dekking%, ook als de cadans van 1/min afwijkt.
+  - **`lows`-telling in `getAiStats`** loopt nu via `buildThresholdLows()` i.p.v. een inline-lus: splitst correct bij
+    datagaten >30 min en sluit een lopende low aan het venster-einde af (de oude lus deed beide niet).
+  - **High→low-dedup**: één low kan niet langer door meerdere highs geclaimd worden (greedy, vroegste ongebruikte
+    low per high) in `buildHighToLowContext`, de Inzichten-kaart en de dag-review.
+
 ### Toegevoegd
 
 - **Drempel-lows naast reactieve daal-episodes ("een low is een low")** — de Stats & AI-overlay
