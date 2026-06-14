@@ -16,8 +16,13 @@ const MONGO_URI = process.env.MONGODB_URI ?? 'mongodb://nightscout-mongo:27017/n
 const MAX_ENTRIES = Number(process.env.EPISODE_MAX_ENTRIES ?? 200_000)
 
 // Stabiele sleutel per episode zodat herhaald draaien upsert i.p.v. dupliceert.
+// Anker op peakAt alleen: binnen één run is een piek uniek per episode
+// (de loop springt na elke nadir door, episode-builder.mjs `i = nadirIdx + 1`),
+// en de nadir verschuift dieper/later terwijl een live daling nog loopt. Zou
+// nadirAt in de sleutel zitten, dan kreeg elke tussenstand van dezelfde daling
+// een eigen document (dubbele "dips" met identieke peakAt). Zie scripts/dedup-reactive-hypo-episodes.mjs.
 function episodeKey(ep) {
-  return `${ep.peakAt}|${ep.nadirAt}`
+  return `${ep.peakAt}`
 }
 
 // Pure build + upsert; geeft het samenvattingsobject terug i.p.v. te loggen,
