@@ -48,6 +48,16 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   - **Snelheidsklasse** volgt de eigen kwartielen (>0,16 snel / <0,09 langzaam / ertussen normaal); badge
     krijgt een kleur-accent (snel = rood, langzaam = geel) náást het tekst-label.
   - Geen extra API-call: berekend uit de readings die de overlay al heeft. Cache-buster → `meal-dynamic-20260614e`.
+  - **Pre-dip fase + zelfkalibratie (portable).** Data-analyse liet zien dat in 99% van de meetbare episodes een
+    pre-dip vooraf gaat aan de stijging; 86% is ≥0,3 mmol en 77% is ≥0,4 mmol (mediaan ~0,9 mmol, p25 ~0,47).
+    Dit past bij een cephale/anticipatoire insulinerespons. Het badge kent nu
+    een tentatieve voorfase **"🍽 Dip — mogelijk maaltijd"** (blauw) die naar **"🍽️ Maaltijd \<snel|normaal|langzaam\> ·
+    Xm · dip ~HH:MM"** schakelt zodra de stijging bevestigt; de "dip ~HH:MM" is de verwachte reactieve dal o.b.v.
+    de eigen piek→dal-mediaan. **Alle drempels zijn nu zelfkalibrerend** (`calibrateMealFromHistory` +
+    `loadMealCalibration`, localStorage `cgm-meal-calibration-v1`, zelfde patroon als `calibrateFromHistory`):
+    snel/langzaam-grenzen (p75/p25 stijgsnelheid), pre-dip-grootte en piek→dal-tijd worden per browser uit de eigen
+    historie geleerd, met generieke defaults voor nieuwe gebruikers (samples < 12). Geen drempel meer hardcoded op
+    één persoon → drop-in bruikbaar voor anderen. Cache-buster → `meal-predip-20260614f`.
 
 ### Gewijzigd
 

@@ -29,6 +29,7 @@
   var currentHypoRisk = null;
   var currentPatternCorrection = null;
   var FORECAST_CALIBRATION_KEY = 'cgm-forecast-calibration-v1';
+  var MEAL_CALIBRATION_KEY = 'cgm-meal-calibration-v1';
   var refreshTimer = null;
   var PEAK_DROP_THRESHOLDS = {
     watch: { minDrop: 1.4, minRate: 0.05, maxMinutes: 75 },
@@ -794,6 +795,7 @@
       '#cgm-meal-badge .meal-time{font-family:monospace;font-weight:900;opacity:.9}',
       '#cgm-meal-badge.meal-snel{border-color:#fb7185;background:linear-gradient(135deg,#fecaca 0%,#fb7185 100%)}',
       '#cgm-meal-badge.meal-langzaam{border-color:#fcd34d;background:linear-gradient(135deg,#fef9c3 0%,#fde047 100%)}',
+      '#cgm-meal-badge.meal-dip{border-color:#93c5fd;background:linear-gradient(135deg,#e0f2fe 0%,#bae6fd 100%);color:#0c3a5b;font-weight:800;opacity:.92}',
       '@media(max-width:700px){#cgm-meal-badge{font-size:11px;padding:3px 7px}#cgm-meal-badge .meal-ic{font-size:12px}}',
       '#cgm-point-rate-tooltip{position:absolute!important;z-index:10001!important;display:none;min-width:178px;border:1px solid rgba(255,255,255,.22);border-radius:5px;background:rgba(0,0,0,.86);color:#f3f4f6;font-family:Arial,Helvetica,sans-serif;padding:7px 8px;box-shadow:0 2px 12px rgba(0,0,0,.55);pointer-events:none}',
       '#cgm-point-rate-tooltip .pt-head{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:8px;font-size:12px;font-weight:900;line-height:1.15;margin-bottom:4px}',
@@ -1267,21 +1269,124 @@
     return badge;
   }
 
-  // Dynamische maaltijd-onset herkenning. I.p.v. één vaste drempel (die alleen
-  // ~normale stijgingen ving en de traagste ~5% miste, gekalibreerd op de eigen
-  // 216 episode-stijgingen) herkent dit op MEERDERE tijdschalen, maximaal-vroeg
-  // afgesteld zodat er zo veel mogelijk lead-time vóór de reactieve daling is:
-  //   - snel:     steile spike → al na ~5 min bevestigen
-  //   - normaal:  matige stijging vanaf de bodem (≈0,6 mmol in ~10 min)
-  //   - langzaam: sluipende drift die pas over een langer venster genoeg oploopt
-  // De bodem (laagste meting in 60 min) is het vermoedelijke startpunt; minutesSince
-  // ~ tijd sinds de maaltijd begon te werken. Snelheidsklassen volgen de eigen
-  // kwartielen (mmol/L/min): >0,16 = snel (p75), <0,09 = langzaam (~p25), ertussen normaal.
+  // ===== Maaltijddetectie — zelfkalibrerend & portable =====
+  // Drie fasen, maximaal-vroeg afgesteld voor zo veel mogelijk lead-time vóór de
+  // reactieve daling:
+  //   - 'dip'    : cephale pre-dip (lichte daling vóór de stijging) → tentatief.
+  //   - 'rising' : bevestigde maaltijdstijging, geklasseerd snel/normaal/langzaam,
+  //                herkend op meerdere tijdschalen (steile spike vs sluipende drift).
+  // Drempels komen uit loadMealCalibration() — per browser/persoon geleerd uit de
+  // eigen data (calibrateMealFromHistory), met generieke defaults voor nieuwe
+  // gebruikers. Niets is hardcoded op één persoon → drop-in voor anderen.
   var MEAL_TROUGH_WINDOW_MS = 60 * 60000;
-  var MEAL_RATE_FAST = 0.16;
-  var MEAL_RATE_SLOW = 0.09;
-  function detectMealOnset(readings) {
+  // Generieke defaults zolang er te weinig eigen data is (samples < MEAL_MIN_SAMPLES).
+  var MEAL_DEFAULTS = { fastRate: 0.13, slowRate: 0.07, preDipMmol: 0.40, dipToNadirMin: 60, samples: 0 };
+  var MEAL_MIN_SAMPLES = 12;
+  var MEAL_SAMPLE_CAP = 200;
+
+  function median(arr) {
+    if (!arr.length) return null;
+    var a = arr.slice().sort(function (x, y) { return x - y; });
+    return a[Math.floor(a.length / 2)];
+  }
+  function percentile(arr, p) {
+    if (!arr.length) return null;
+    var a = arr.slice().sort(function (x, y) { return x - y; });
+    return a[Math.min(a.length - 1, Math.floor(p * a.length))];
+  }
+
+  function loadMealCalibration() {
+    try {
+      var parsed = JSON.parse(localStorage.getItem(MEAL_CALIBRATION_KEY) || 'null');
+      if (!parsed || !Array.isArray(parsed.riseRates) || parsed.riseRates.length < MEAL_MIN_SAMPLES) {
+        return Object.assign({}, MEAL_DEFAULTS);
+      }
+      var preDips = Array.isArray(parsed.preDips) ? parsed.preDips : [];
+      var peakToNadir = Array.isArray(parsed.peakToNadir) ? parsed.peakToNadir : [];
+      return {
+        fastRate: percentile(parsed.riseRates, 0.75),
+        slowRate: percentile(parsed.riseRates, 0.25),
+        preDipMmol: median(preDips) || MEAL_DEFAULTS.preDipMmol,
+        dipToNadirMin: median(peakToNadir) || MEAL_DEFAULTS.dipToNadirMin,
+        samples: parsed.riseRates.length
+      };
+    } catch (_err) {
+      return Object.assign({}, MEAL_DEFAULTS);
+    }
+  }
+
+  // Leert per browser uit de eigen historie (~5,5 dag beschikbaar). Detecteert
+  // stijg-segmenten (bodem → piek ≥0,8 mmol) en bewaart per segment de stijgsnelheid,
+  // de pre-dip vóór de bodem en de tijd piek→dal. Rollend (cap MEAL_SAMPLE_CAP),
+  // gededupliceerd op bodem-tijd zodat het over dagen verbetert. Spiegelt het patroon
+  // van calibrateFromHistory (zelfde localStorage-aanpak).
+  function calibrateMealFromHistory(readings) {
+    if (!readings || readings.length < 60) return;
+    var pts = readings.slice().filter(function (e) {
+      return Number.isFinite(readingTime(e)) && Number.isFinite(Number(e.sgv)) && Number(e.sgv) > 20;
+    }).sort(function (a, b) { return readingTime(a) - readingTime(b); });
+    if (pts.length < 60) return;
+
+    var store;
+    try { store = JSON.parse(localStorage.getItem(MEAL_CALIBRATION_KEY) || 'null'); } catch (_e) { store = null; }
+    if (!store || !Array.isArray(store.riseRates)) store = { riseRates: [], preDips: [], peakToNadir: [], lastTroughTime: 0 };
+    if (!Array.isArray(store.preDips)) store.preDips = [];
+    if (!Array.isArray(store.peakToNadir)) store.peakToNadir = [];
+    var lastTrough = store.lastTroughTime || 0;
+    var maxTrough = lastTrough;
+
+    // Loop over lokale bodems: punt lager dan z'n directe buren.
+    for (var i = 1; i < pts.length - 1; i++) {
+      var tT = readingTime(pts[i]);
+      if (tT <= lastTrough) continue;
+      var tMmol = mmol(Number(pts[i].sgv));
+      if (!(mmol(Number(pts[i - 1].sgv)) >= tMmol && mmol(Number(pts[i + 1].sgv)) > tMmol)) continue;
+
+      // Piek ná de bodem: hoogste punt totdat het weer ≥0,4 mmol onder die piek zakt.
+      var peakMmol = tMmol, peakIdx = i, peakTime = tT;
+      for (var j = i + 1; j < pts.length; j++) {
+        var v = mmol(Number(pts[j].sgv));
+        if (v > peakMmol) { peakMmol = v; peakIdx = j; peakTime = readingTime(pts[j]); }
+        else if (peakMmol - v >= 0.4) break;
+      }
+      var riseMmol = peakMmol - tMmol;
+      var riseMin = (peakTime - tT) / 60000;
+      if (riseMmol < 0.8 || riseMin <= 0 || riseMin > 90) { continue; }
+
+      // Pre-dip: gemiddeld niveau 20–35 min vóór de bodem, min de bodem.
+      var preSum = 0, preN = 0;
+      for (var k = i - 1; k >= 0; k--) {
+        var dtk = (tT - readingTime(pts[k])) / 60000;
+        if (dtk > 35) break;
+        if (dtk >= 20) { preSum += mmol(Number(pts[k].sgv)); preN++; }
+      }
+      // Dal ná de piek (binnen 120 min): laagste punt.
+      var nadirMmol = peakMmol, nadirTime = peakTime;
+      for (var m = peakIdx + 1; m < pts.length; m++) {
+        var dtm = (readingTime(pts[m]) - peakTime) / 60000;
+        if (dtm > 120) break;
+        var vm = mmol(Number(pts[m].sgv));
+        if (vm < nadirMmol) { nadirMmol = vm; nadirTime = readingTime(pts[m]); }
+      }
+
+      store.riseRates.push(riseMmol / riseMin);
+      if (preN > 0) store.preDips.push((preSum / preN) - tMmol);
+      if (nadirTime > peakTime) store.peakToNadir.push((nadirTime - peakTime) / 60000);
+      if (tT > maxTrough) maxTrough = tT;
+      i = peakIdx; // spring door naar ná de piek
+    }
+
+    function cap(a) { return a.length > MEAL_SAMPLE_CAP ? a.slice(a.length - MEAL_SAMPLE_CAP) : a; }
+    store.riseRates = cap(store.riseRates);
+    store.preDips = cap(store.preDips);
+    store.peakToNadir = cap(store.peakToNadir);
+    store.lastTroughTime = maxTrough;
+    try { localStorage.setItem(MEAL_CALIBRATION_KEY, JSON.stringify(store)); } catch (_err2) {}
+  }
+
+  function detectMealState(readings) {
     if (!readings || readings.length < 2) return null;
+    var cal = loadMealCalibration();
     var latest = readings[0];
     var latestTime = readingTime(latest);
     var currentMmol = mmol(Number(latest.sgv));
@@ -1299,7 +1404,6 @@
     if (!trough) return null;
     var ageMin = (latestTime - readingTime(trough)) / 60000;
     var riseFromTrough = currentMmol - troughMmol;
-    if (riseFromTrough <= 0) return null;
 
     // Korte-termijn snelheid (~10 min) om steile spikes vroeg te pakken.
     var prev10 = findBaseline(readings, latestTime, 10);
@@ -1308,35 +1412,67 @@
       var dt = (latestTime - readingTime(prev10)) / 60000;
       if (dt > 0) rate10 = (currentMmol - mmol(Number(prev10.sgv))) / dt;
     }
+
+    // --- Fase 'rising': bevestigde stijging (prioriteit) ---
     var rising = rate10 !== null ? rate10 > 0 : riseFromTrough >= 0.8;
-    if (!rising) return null;
+    if (rising && riseFromTrough > 0) {
+      var fastGate = rate10 !== null && rate10 >= cal.slowRate && riseFromTrough >= 0.5 && ageMin >= 5;
+      var medium = riseFromTrough >= 0.6 && ageMin >= 10;
+      var slow = riseFromTrough >= 0.9 && ageMin >= 25;
+      if (fastGate || medium || slow) {
+        var avgRate = ageMin > 0 ? riseFromTrough / ageMin : 0;
+        var effRate = Math.max(rate10 || 0, avgRate);
+        var speed = effRate >= cal.fastRate ? 'snel' : (effRate < cal.slowRate ? 'langzaam' : 'normaal');
+        return {
+          phase: 'rising',
+          speed: speed,
+          minutesSinceMeal: Math.round(ageMin),
+          expectedDipAt: latestTime + cal.dipToNadirMin * 60000
+        };
+      }
+    }
 
-    // Multi-tijdschaal OR-gate (maximaal-vroeg). De 0,5 mmol-vloer weert ruis.
-    var fast = rate10 !== null && rate10 >= 0.10 && riseFromTrough >= 0.5 && ageMin >= 5;
-    var medium = riseFromTrough >= 0.6 && ageMin >= 10;
-    var slow = riseFromTrough >= 0.9 && ageMin >= 25;
-    if (!(fast || medium || slow)) return null;
-
-    // Klasse op de snelste van (recente snelheid, gemiddelde vanaf de bodem).
-    var avgRate = ageMin > 0 ? riseFromTrough / ageMin : 0;
-    var effRate = Math.max(rate10 || 0, avgRate);
-    var speed = effRate >= MEAL_RATE_FAST ? 'snel' : (effRate < MEAL_RATE_SLOW ? 'langzaam' : 'normaal');
-
-    return { minutesSinceMeal: Math.round(ageMin), speed: speed };
+    // --- Fase 'dip': tentatieve cephale pre-dip (alleen als niet rising) ---
+    // Niveau 20–35 min vóór de bodem versus de bodem; bodem zeer recent en afvlakkend.
+    var preSum = 0, preN = 0;
+    for (var p = 0; p < readings.length; p++) {
+      var pt = readingTime(readings[p]);
+      var dtp = (latestTime - pt) / 60000;
+      var ddt = (readingTime(trough) - pt) / 60000; // t.o.v. de bodem
+      if (ddt >= 20 && ddt <= 35) { preSum += mmol(Number(readings[p].sgv)); preN++; }
+      if (dtp > 50) break;
+    }
+    if (preN > 0) {
+      var preDip = (preSum / preN) - troughMmol;
+      var bottoming = rate10 === null || (rate10 >= -0.02 && rate10 <= 0.05);
+      if (preDip >= cal.preDipMmol && ageMin <= 15 && riseFromTrough < 0.5 && bottoming) {
+        return { phase: 'dip' };
+      }
+    }
+    return null;
   }
 
   function renderMealBadge(readings) {
     var badge = ensureMealBadge();
-    var meal = detectMealOnset(readings);
+    var meal = detectMealState(readings);
     if (!meal) {
       badge.style.display = 'none';
       return;
     }
-    badge.className = 'meal-' + meal.speed;
-    badge.innerHTML =
-      '<span class="meal-ic">🍽️</span>' +
-      '<span class="meal-label">Maaltijd ' + meal.speed + '</span>' +
-      '<span class="meal-time">· ' + meal.minutesSinceMeal + 'm</span>';
+    if (meal.phase === 'dip') {
+      badge.className = 'meal-dip';
+      badge.innerHTML =
+        '<span class="meal-ic">🍽</span>' +
+        '<span class="meal-label">Dip — mogelijk maaltijd</span>';
+    } else {
+      badge.className = 'meal-' + meal.speed;
+      var dipTxt = Number.isFinite(meal.expectedDipAt)
+        ? '<span class="meal-time">· dip ~' + formatClock(meal.expectedDipAt) + '</span>' : '';
+      badge.innerHTML =
+        '<span class="meal-ic">🍽️</span>' +
+        '<span class="meal-label">Maaltijd ' + meal.speed + '</span>' +
+        '<span class="meal-time">· ' + meal.minutesSinceMeal + 'm</span>' + dipTxt;
+    }
     badge.style.display = 'flex';
     positionMealBadge();
   }
@@ -3907,6 +4043,7 @@
         currentReadings = readings;
         chartReadingsAsc = readings.slice().reverse();
         calibrateFromHistory(readings);
+        calibrateMealFromHistory(readings);
         var anchorEntry = null;
         if (getViewMode() === 'history' && selectedReadingTime !== null) {
           // If history mode was still following the previously-latest point,
