@@ -847,6 +847,33 @@ Label elke episode achteraf:
 - `false_alarm`: waarschuwing zonder near-hypo en door feedback bevestigd.
 - `unknown`: onvoldoende data.
 
+### Episode severity
+
+Naast `outcome` (puur de diepte van de nadir) krijgt elke episode een klinisch
+`severity`-label (`episodeSeverity` in `scripts/lib/episode-builder.mjs`), gebaseerd op
+de hypo-niveaus van ADA/EASD/International Hypoglycaemia Study Group:
+
+- **Level 1 (3.0–3.9 mmol/L)**: alert/laag.
+- **Level 2 (< 3.0 mmol/L)**: klinisch significant — "clinically important independent
+  of symptom severity/duration".
+- **Level 3**: ernstig, hulp van derden nodig (niet uit CGM af te leiden).
+
+Regels (volgorde telt):
+
+1. `possible_compression_low` → `uncertain`. Mechanisch sensor-artefact (op de sensor
+   liggen); CGM is per richtlijn onbetrouwbaar bij lage waarden.
+2. `single_point_low` met nadir `>= 3.0` → `uncertain`. Korte Level 1-blip, vaak ruis.
+3. nadir `< 3.0` **óf** `>= 30` min onder 3.9 **óf** burden `>= 12` → `severe`.
+4. nadir `< 3.9` **óf** `>= 10` min onder 3.9 **óf** burden `>= 4` → `relevant`.
+5. anders → `mild`.
+
+Kernpunt: een korte, scherpe dip naar `< 3.0` (Level 2) wordt **niet** als `uncertain`
+weggezet alleen omdat hij kort was — dat past bij een zeldzaam, snel reactief-hypo
+patroon waar de echte hypo's binnen enkele metingen voorbij zijn. Een `single_point_low`
+is `nadir < 3.9` met `<= 6` min onder 3.9; `possible_compression_low` is een nachtelijke
+single-point low die snel herstelt zonder rebound. Bevestig een twijfelgeval met een
+vingerprik/context-notitie (`fingerstick_confirmed`) om het hard te maken.
+
 ### Episode document
 
 Voorstel voor MongoDB collection `reactive_hypo_episodes`:

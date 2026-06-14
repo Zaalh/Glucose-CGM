@@ -62,6 +62,27 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   - **High→low-dedup**: één low kan niet langer door meerdere highs geclaimd worden (greedy, vroegste ongebruikte
     low per high) in `buildHighToLowContext`, de Inzichten-kaart en de dag-review.
 
+- **Reactieve-hypo statistieken: tijdzone, herstel-mediaan en severity volgens ADA-niveaus.**
+  Drie correcties uit een doorlichting van de hypo-cijfers, getriggerd door afwijkende tijden in de Inzichten-kaarten:
+  - **Tijdzone in server-gerenderde Inzichten-kaarten** (`scripts/libreview-nightscout-sync.mjs`). De kaarten
+    "recente lows/dips" en "Recentheid episodes" gebruikten `toLocaleString('nl-NL')` zónder `timeZone`, wat de
+    tijdzone van het server-proces pakt (= UTC in de Docker-container). Server-tijden weken daardoor 2u af van de
+    client-panelen (Statistiek/Explore/Lows renderen client-side in CEST). Nieuwe helper `fmtLocalNL()` forceert
+    `LIBREVIEW_TZ` (`Europe/Amsterdam`), consistent met `dayKeyInTz`/`localDayRange`. Voorbeeld: een low van
+    2,83 mmol toonde `13:29` in Inzichten vs `15:29` overal elders → nu overal `15:29`.
+  - **Herstel-mediaan zonder null-vervuiling** (`summarizeReactiveEpisodes` + `getEvaluation`). Episodes die binnen de
+    horizon niet herstelden hebben `recoveryMinutes = null`; via `Number(null) === 0` glipten die door het
+    `Number.isFinite`-filter en telden als "0 min herstel", wat het herstel kunstmatig snel maakte. Nu uitgesloten vóór
+    de mediaan; `getEvaluation` gebruikt voortaan dezelfde `median()`-helper (gemiddelde van twee middelste) i.p.v. de
+    bovenste-van-twee. (In de huidige 14d-data had maar 1/75 episode `null`, dus de getoonde "1m herstel" blijkt reëel —
+    snelle dips veren echt binnen ~1 meting terug — niet langer beïnvloed door de bug.)
+  - **Episode-severity volgt ADA/EASD/IHSG-niveaus** (`scripts/lib/episode-builder.mjs`). `episodeSeverity` zette élke
+    `single_point_low`/`possible_compression_low` op `uncertain`. Een korte, scherpe dip naar <3,0 mmol/L (Level 2,
+    "klinisch significant ongeacht duur") werd daardoor onterecht weggezet. Nu: `possible_compression_low` blijft
+    `uncertain` (mechanisch sensor-artefact), `single_point_low` blijft `uncertain` alleen bij nadir ≥3,0 (Level 1), en
+    een nadir <3,0 valt door naar de normale severity (`severe`). Past bij het zeldzame, snelle reactieve-hypo profiel.
+    Vereist een episodes-rebuild (de loop doet dit elke `EPISODES_BUILD_INTERVAL_MINUTES`). Zie `hypo.md` → *Episode severity*.
+
 ### Toegevoegd
 
 - **Drempel-lows naast reactieve daal-episodes ("een low is een low")** — de Stats & AI-overlay
