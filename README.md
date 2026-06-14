@@ -368,7 +368,10 @@ features, backtest en tuner; ruwe CGM-entries blijven ongewijzigd. Stap 10 marke
 timestamp-/datakwaliteit en dempt V1/V2 escalatie als de input twijfelachtig is,
 zonder actuele lage glucose te verbergen. Stap 8 (meal-onset) waarschuwt al in de
 stijgende fase: een lage `watch` zodra een maaltijdpiek begint (~10-15 min eerder
-dan de daling).
+dan de daling). De overlay spiegelt deze meal-onset client-side en toont
+rechtsboven in de grafiek een badge **"🍽️ Maaltijd · Xm"** (X = minuten sinds de
+bodem ≈ tijd sinds de maaltijd) zolang een maaltijdpiek loopt; geen extra API-call,
+berekend uit de readings die de overlay al heeft.
 
 Nog open (databottleneck, niet code):
 
