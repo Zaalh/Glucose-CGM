@@ -14,6 +14,24 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 >
 > _Eerder (2026-06-04, commit `f280478`): meal-onset/`riseFromTrough`-features in V2-shadow._
 
+### Prestatie
+
+- **MongoDB-indexen voor `prediction_snapshots` + `user_feedback`** (`scripts/libreview-nightscout-sync.mjs`).
+  `getLatestPredictionSnapshot()` deed bij elke overlay-refresh `find({}).sort({createdAt:-1}).limit(1)` —
+  een full collection scan + in-memory sort over álle snapshots (~24k, groeit ~1440/dag). De per-cyclus
+  snapshot-upsert filterde ongeïndexeerd op `entryIdentifier`, en `user_feedback` werd met
+  `createdAt`-`$gte`-ranges gescand. `ensureAuxIndexes()` is uitgebreid en wordt nu óók vanuit
+  `writePredictionSnapshots` aangeroepen (bouwt de indexen al bij de eerste sync-cyclus i.p.v. pas bij de
+  eerste feedback-request):
+  - `prediction_snapshots`: `{ createdAt: -1 }` (hot-path sort), `{ outcomeEvaluated: 1 }` (train/summarize),
+    en `{ entryIdentifier: 1 }` **unique + partial** (`$type:'string'`) → snelle upsert + dedup-guard, met
+    legacy/PDF-snapshots (`entryIdentifier: null`) buiten de constraint.
+  - `user_feedback`: `{ createdAt: -1 }`.
+  Dup-check vooraf: bij bestaande dubbele live-identifiers wordt de unique index overgeslagen (alleen een
+  waarschuwing, geen non-unique index die de latere unique-upgrade stil zou blokkeren); na dedup + herstart
+  wordt hij schoon aangemaakt. Alles idempotent en in `try/catch`. Live geverifieerd: unique index kwam
+  schoon op ~24k bestaande snapshots = geen dubbele live-identifiers. Zie CGM.md → "MongoDB-indexen".
+
 ### Gewijzigd
 
 - **Cijfer-correcties in Statistiek/History/Inzichten + forecast losgekoppeld van de weergave-toggle.**

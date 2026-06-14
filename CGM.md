@@ -224,6 +224,21 @@ INFLUXDB_PORT=8086
 
 De sync-service biedt op poort 8787 `POST /sync` om dezelfde LibreView-sync handmatig te starten.
 
+## MongoDB-indexen
+
+`ensureAuxIndexes()` in `scripts/libreview-nightscout-sync.mjs` maakt de niet-Nightscout indexen idempotent aan (in een `try/catch`, zodat index-creatie een deploy nooit breekt). De functie draait **lazy**: pas bij de eerste sync-cyclus die echt een snapshot schrijft (`writePredictionSnapshots`, dus `entries.length > 0`), niet bij container-start. Direct na een herstart toont `getIndexes()` daarom nog niets — wacht ≥1 write-cyclus (~1 min) vóór verificatie.
+
+| Collectie | Index | Doel |
+| --- | --- | --- |
+| `prediction_snapshots` | `{ createdAt: -1 }` | hot path: `getLatestPredictionSnapshot()` doet `find({}).sort({createdAt:-1}).limit(1)` bij elke overlay-refresh — index vervangt een full scan + in-memory sort. |
+| `prediction_snapshots` | `{ entryIdentifier: 1 }` unique + partial (`$type:'string'`) | versnelt de per-cyclus upsert én voorkomt dubbele live-snapshots. Partial sluit legacy/PDF-snapshots met `entryIdentifier: null` uit (anders duplicate-key op de nulls). |
+| `prediction_snapshots` | `{ outcomeEvaluated: 1 }` | filter in `train-risk-model`/`summarize-days` (de `$ne:true`-query in `evaluate-predictions` kan een index niet benutten). |
+| `user_feedback` | `{ createdAt: -1 }` | de `{ createdAt: { $gte: … } }`-ranges in de AI-review/stats-paden. |
+| `cgm_events` | `{ eventAt: -1 }` | event-/notes-feed. |
+| `helper_reminders` | `{ key: 1 }`, `{ createdAt: 1 }` | reminder-lookup. |
+
+Bestaan er bij het aanmaken al dubbele live-`entryIdentifier`'s, dan wordt de unique index overgeslagen (alleen een waarschuwing, géén divergerende non-unique index die de latere unique-upgrade stil zou blokkeren). Na dedup + herstart van de sync wordt hij vanzelf schoon aangemaakt. `reactive_hypo_episodes`, `episode_vectors` en de `ai_*`-collecties krijgen hun indexen in hun eigen builder-scripts (`build-reactive-hypo-episodes.mjs`, `lib/ai-review-core.mjs`).
+
 ## xDrip + InfluxDB
 
 InfluxDB is optioneel en staat los van de Nightscout/MongoDB-flow. xDrip kan metingen naar InfluxDB schrijven voor tijdreeksopslag of Grafana, maar de overlay en predictie-scripts lezen daar niet uit.
