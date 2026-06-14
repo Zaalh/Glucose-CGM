@@ -5,10 +5,14 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ## [Unreleased]
 
-> **Live gedeployed (2026-06-04)** op de Nightscout-stack (iMac). `libreview-sync`
-> herstart op commit `f280478`; verse `prediction_snapshots` bevatten de nieuwe
-> `mealOnset`/`minutesSinceTrough`/`riseFromTroughMmol`-features. Meal-onset draait in
-> V2 (shadow); de actieve V1-alarmen blijven ongemoeid tot de M6-gate slaagt.
+> **Live gedeployed (2026-06-14)** op commit `2a3481f`. `episode_vectors` herbouwd
+> (566 vectoren mét curve), `hypo:backtest` + `hypo:tune` op verse data → **V2 is voor
+> het eerst AUTO-GEACTIVEERD**: de M6-gate slaagt op out-of-sample (test recall 1.0 vs
+> V1 0.867, **0 gemiste hypo's** vs 6, precision 0.234 vs 0.212). `libreview-sync`
+> herstart; verse `prediction_snapshots` tonen `model=reactive-hypo-v2`, `shadowTuned=true`.
+> Tuned params: `likely=7`/`urgent=8`, `safeNadirDamping`, `patternRecencyDays=7`.
+>
+> _Eerder (2026-06-04, commit `f280478`): meal-onset/`riseFromTrough`-features in V2-shadow._
 
 ### Toegevoegd
 
@@ -40,8 +44,9 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   (`sqrt(sum/dims)`) i.p.v. `sqrt(sum)`, zodat een extra dimensie de drempel niet
   opblaast; `SIM_MAX_DIST` = 0.866 (= 1.5/√3) reproduceert exact het oude 3-dimensie-gedrag.
   Oudere `episode_vectors` zonder de nieuwe velden vallen niet weg (gegate dimensies).
-  **Nodig na deploy:** `npm run vectors:build` (verse `riseRate15m` in de vectoren) +
-  `npm run hypo:backtest` om `SIM_MAX_DIST` te herijken vóór bredere uitrol.
+  **Gedeployed 2026-06-14:** vectoren herbouwd en `hypo:backtest`/`hypo:tune` gedraaid; de
+  tuner koos `patternRecencyDays=7` en V2 haalde de activatiegate. `SIM_MAX_DIST=0.866`
+  bleef ongewijzigd (nog niet als tuner-parameter; zie Gefixt voor de openstaande her-ijking).
 - **Automatische episode-build in de sync-loop** — de `libreview-sync` `--loop`-modus
   herbouwt `reactive_hypo_episodes` nu vanzelf elke `EPISODES_BUILD_INTERVAL_MINUTES`
   (default 15, in de compose-`environment`; 0 = uit). Voorheen liep de collectie achter
@@ -131,8 +136,11 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   permanent op 0/null en de curve-bijdrage aan de patroonscore deed live én in de backtest
   niets. Dit is een vorm van training-serving skew: de curve-feature was bij serving stil
   afwezig. Projectie aangevuld met `vector: 1`; een sanity-check bevestigt dat de curve-match
-  nu vuurt (0 → 8 matches op identieke vormen). **Nodig na deploy:** `npm run hypo:backtest`
-  /`hypo:tune` opnieuw draaien, want de patroonscore verandert nu de V2-uitkomst.
+  nu vuurt (0 → 8 matches op identieke vormen). **Gevalideerd op echte data (2026-06-14):**
+  na herbouw draaide de backtest over 21 727 punten / 87 hypo-onsets; de tuner (grid 288,
+  train 42 / test 45 onsets) activeerde V2 — out-of-sample **test recall 1.0 (0 gemist) vs
+  V1 0.867 (6 gemist)**, precision 0.234 vs 0.212, mediane lead 22.8 min. Openstaand:
+  `SIM_SCALES`/`SIM_MAX_DIST` zijn nog hand-gekozen i.p.v. door de tuner geleerd.
 - **Dubbele, uiteenlopende similarity-match in de sync geconsolideerd** — de sync deed per
   meetpunt twee aparte matches: een losse `findSimilarEpisodes` (alleen piek+daling+timing,
   op de lokale piek) voor de V1-forecast/reden, én `patternFromFeatures` (volledige
