@@ -789,6 +789,10 @@
       '#cgm-hypo-alert.warning{color:#2f1600;border-color:#f59e0b;background:linear-gradient(135deg,#ffe08a 0%,#fb923c 100%)}',
       '#cgm-hypo-alert.hypo,#cgm-hypo-alert.urgent{color:#fff7ed;border-color:#fb7185;background:linear-gradient(135deg,#f59e0b 0%,#e11d48 100%);text-shadow:0 1px 2px rgba(0,0,0,.45)}',
       '#cgm-hypo-alert,#cgm-hypo-alert.ok,#cgm-hypo-alert.watch,#cgm-hypo-alert.warning,#cgm-hypo-alert.hypo,#cgm-hypo-alert.urgent{color:#111!important;text-shadow:none!important}',
+      '#cgm-meal-badge{position:absolute!important;z-index:10001!important;display:none;align-items:center;gap:5px;border:1px solid #f59e0b;border-radius:7px;padding:4px 9px;font-family:Arial,Helvetica,sans-serif;font-weight:900;font-size:12px;line-height:1;color:#2f1600;background:linear-gradient(135deg,#fde68a 0%,#fbbf24 100%);box-shadow:0 1px 6px rgba(0,0,0,.35);white-space:nowrap;pointer-events:none}',
+      '#cgm-meal-badge .meal-ic{font-size:14px}',
+      '#cgm-meal-badge .meal-time{font-family:monospace;font-weight:900;opacity:.9}',
+      '@media(max-width:700px){#cgm-meal-badge{font-size:11px;padding:3px 7px}#cgm-meal-badge .meal-ic{font-size:12px}}',
       '#cgm-point-rate-tooltip{position:absolute!important;z-index:10001!important;display:none;min-width:178px;border:1px solid rgba(255,255,255,.22);border-radius:5px;background:rgba(0,0,0,.86);color:#f3f4f6;font-family:Arial,Helvetica,sans-serif;padding:7px 8px;box-shadow:0 2px 12px rgba(0,0,0,.55);pointer-events:none}',
       '#cgm-point-rate-tooltip .pt-head{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:8px;font-size:12px;font-weight:900;line-height:1.15;margin-bottom:4px}',
       '#cgm-point-rate-tooltip .pt-head .pt-bg{text-align:left}',
@@ -1248,6 +1252,86 @@
     panel.setAttribute('aria-label', 'Glucose statistieken laatste 24 uur');
     document.body.appendChild(panel);
     return panel;
+  }
+
+  function ensureMealBadge() {
+    var existing = document.getElementById('cgm-meal-badge');
+    if (existing) return existing;
+
+    var badge = document.createElement('div');
+    badge.id = 'cgm-meal-badge';
+    badge.setAttribute('aria-label', 'Maaltijddetectie');
+    document.body.appendChild(badge);
+    return badge;
+  }
+
+  // Client-side spiegel van de server-side meal-onset detector
+  // (scripts/lib/hypo-features.mjs, stap 8): een maaltijdpiek is begonnen als de
+  // glucose >=0.8 mmol stijgt in 15 min, vanaf een lokale bodem (laatste 60 min) die
+  // >=15 min geleden lag, en nog steeds stijgt. minutesSinceTrough ~ tijd sinds maaltijd.
+  var MEAL_TROUGH_WINDOW_MS = 60 * 60000;
+  var MEAL_ONSET_RISE_MMOL = 0.8;
+  var MEAL_ONSET_MIN_TROUGH_AGE = 15;
+  function detectMealOnset(readings) {
+    if (!readings || readings.length < 2) return null;
+    var latest = readings[0];
+    var latestTime = readingTime(latest);
+    var currentMmol = mmol(Number(latest.sgv));
+    if (!Number.isFinite(latestTime) || !Number.isFinite(currentMmol)) return null;
+
+    var prev15 = findBaseline(readings, latestTime, 15);
+    if (!prev15) return null;
+    var delta15m = currentMmol - mmol(Number(prev15.sgv));
+
+    // Lokale bodem in de afgelopen 60 min.
+    var trough = null;
+    var troughMmol = Infinity;
+    for (var i = 0; i < readings.length; i++) {
+      var t = readingTime(readings[i]);
+      if (!Number.isFinite(t) || t > latestTime || t < latestTime - MEAL_TROUGH_WINDOW_MS) continue;
+      var v = mmol(Number(readings[i].sgv));
+      if (Number.isFinite(v) && v < troughMmol) { troughMmol = v; trough = readings[i]; }
+    }
+    if (!trough) return null;
+    var minutesSinceTrough = (latestTime - readingTime(trough)) / 60000;
+    var riseFromTrough = currentMmol - troughMmol;
+
+    var prev10 = findBaseline(readings, latestTime, 10);
+    var rising = prev10 ? currentMmol - mmol(Number(prev10.sgv)) > 0 : delta15m > 0;
+
+    var active =
+      Number.isFinite(delta15m) && delta15m >= MEAL_ONSET_RISE_MMOL &&
+      minutesSinceTrough >= MEAL_ONSET_MIN_TROUGH_AGE &&
+      riseFromTrough >= MEAL_ONSET_RISE_MMOL &&
+      rising;
+    if (!active) return null;
+    return { minutesSinceMeal: Math.round(minutesSinceTrough) };
+  }
+
+  function renderMealBadge(readings) {
+    var badge = ensureMealBadge();
+    var meal = detectMealOnset(readings);
+    if (!meal) {
+      badge.style.display = 'none';
+      return;
+    }
+    badge.innerHTML =
+      '<span class="meal-ic">🍽️</span>' +
+      '<span class="meal-label">Maaltijd</span>' +
+      '<span class="meal-time">· ' + meal.minutesSinceMeal + 'm</span>';
+    badge.style.display = 'flex';
+    positionMealBadge();
+  }
+
+  function positionMealBadge() {
+    var badge = document.getElementById('cgm-meal-badge');
+    if (!badge || badge.style.display === 'none') return;
+    var chart = document.querySelector('#chartContainer');
+    if (!chart) return;
+    var rect = chart.getBoundingClientRect();
+    var badgeWidth = badge.getBoundingClientRect().width || 110;
+    badge.style.top = Math.max(0, Math.round(rect.top + window.scrollY + 8)) + 'px';
+    badge.style.left = Math.round(rect.right + window.scrollX - badgeWidth - 10) + 'px';
   }
 
   function ensureMobileDock(chart) {
@@ -3277,6 +3361,7 @@
     if (window.innerWidth > 700) {
       statsPanel.style.top = Math.max(0, Math.round(chartBottom + 8)) + 'px';
     }
+    positionMealBadge();
   }
 
   function renderStatsPanel(stats) {
@@ -3873,6 +3958,7 @@
         currentHypoRisk = normalizeHypoRisk(currentHypoRisk, finalMmol, finalRate);
         renderStatsPanel(calculateStats(readings));
         render(rows);
+        renderMealBadge(readings);
         observeChartChanges();
         scheduleEstimatedGlucoseLine(0);
         window.setTimeout(scheduleEstimatedGlucoseLine, 500);

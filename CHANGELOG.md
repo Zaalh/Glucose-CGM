@@ -32,6 +32,16 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   wordt hij schoon aangemaakt. Alles idempotent en in `try/catch`. Live geverifieerd: unique index kwam
   schoon op ~24k bestaande snapshots = geen dubbele live-identifiers. Zie CGM.md → "MongoDB-indexen".
 
+### Toegevoegd
+
+- **Visueel maaltijd-badge rechtsboven in de grafiek** (`nightscout-overlay/rate-overlay.js`).
+  De meal-onset-detectie leefde tot nu toe alleen server-side (`scripts/lib/hypo-features.mjs` stap 8 →
+  `mealOnset`, door `reactive-hypo-detector.mjs` gebruikt als watch-floor). De overlay spiegelt die logica
+  nu client-side (`detectMealOnset`): glucose ≥0,8 mmol stijging in 15 min, vanaf een lokale bodem (laatste
+  60 min) die ≥15 min geleden lag, en nog stijgend. Zolang dat actief is verschijnt rechtsboven in
+  `#chartContainer` een badge **"🍽️ Maaltijd · Xm"** met X = minuten sinds de bodem (≈ tijd sinds maaltijd).
+  Geen extra API-call: berekend uit de readings die de overlay al heeft. Cache-buster → `meal-badge-20260614d`.
+
 ### Gewijzigd
 
 - **Cijfer-correcties in Statistiek/History/Inzichten + forecast losgekoppeld van de weergave-toggle.**
