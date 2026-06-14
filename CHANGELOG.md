@@ -71,6 +71,11 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
     daling inzet. De episode vervalt pas bij terugkeer richting baseline of na 180 minuten. In het AI-paneel →
     Instellingen staan nu **Export/Import**-knoppen voor `cgm-meal-calibration-v1`, met schema-validatie,
     numerieke filtering en sample-capping. Cache-buster → `meal-memory-export-20260614i`.
+  - **Glucose-volatiliteit in Stats/AI.** De 24u stats tonen nu een **Volatiliteit score** op basis van de snelste
+    recente sample-beweging. De AI-tab krijgt een sectie **Glucose-volatiliteit · snelle sprongen** met snelste
+    stijging/daling en de grootste recente piek→dal sprongen uit de episode-database. Formulering blijft
+    patroon-gebaseerd en wijst op CGM-lag/vingerprikbevestiging bij snelle dalingen. Cache-buster →
+    `volatility-impact-20260614j`.
 
 ### Gewijzigd
 

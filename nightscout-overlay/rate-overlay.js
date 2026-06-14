@@ -694,6 +694,7 @@
     var missingIntervals = 0;
     var fastestRise = null;
     var fastestDrop = null;
+    var impactEvents = [];
     var nightValues = [];
 
     entries.forEach(function (entry, index) {
@@ -722,9 +723,18 @@
       var rate = (value - mmol(Number(previous.sgv))) / minutes;
       if (fastestRise === null || rate > fastestRise) fastestRise = rate;
       if (fastestDrop === null || rate < fastestDrop) fastestDrop = rate;
+      var absRate = Math.abs(rate);
+      var absDelta = Math.abs(value - mmol(Number(previous.sgv)));
+      if (absRate >= 0.12 || absDelta >= 1.2) {
+        impactEvents.push({ at: time, from: mmol(Number(previous.sgv)), to: value, delta: value - mmol(Number(previous.sgv)), minutes: minutes, rate: rate });
+      }
     });
 
     var lastHypoMinutes = lastHypoTime ? Math.round((latestTime - lastHypoTime) / 60000) : null;
+    var fastestAbs = Math.max(Math.abs(fastestRise || 0), Math.abs(fastestDrop || 0));
+    var impactScore = Math.max(0, Math.min(100, Math.round(fastestAbs / 0.35 * 100)));
+    var impactLevel = impactScore >= 80 ? 'urgent' : (impactScore >= 55 ? 'high' : (impactScore >= 30 ? 'watch' : 'low'));
+    impactEvents = impactEvents.slice().sort(function (a, b) { return Math.abs(b.rate) - Math.abs(a.rate); }).slice(0, 5);
 
     return {
       lowPct: Math.round(lowCount / count * 100),
@@ -742,6 +752,9 @@
       hypoEvents: hypoEvents,
       fastestRise: fastestRise,
       fastestDrop: fastestDrop,
+      impactScore: impactScore,
+      impactLevel: impactLevel,
+      impactEvents: impactEvents,
       lastHypoMinutes: lastHypoMinutes,
       missingIntervals: missingIntervals,
       nightMin: nightValues.length ? Math.min.apply(null, nightValues) : null
@@ -2989,6 +3002,48 @@
 
   function aiNum(v, unit) { return (v === null || v === undefined) ? '–' : (v + (unit || '')); }
 
+  function renderVolatilityImpact(stats, episodes) {
+    var rows = [];
+    (episodes || []).forEach(function (e) {
+      var drop = Number(e.dropFromPeakMmol);
+      var min = Number(e.minutesPeakToNadir);
+      if (!Number.isFinite(drop) || !Number.isFinite(min) || min <= 0) return;
+      var rate = drop / min;
+      rows.push({
+        at: e.nadirAt || e.peakAt,
+        from: e.peakMmol,
+        to: e.nadirMmol,
+        drop: drop,
+        minutes: min,
+        rate: rate,
+        outcome: e.outcome || '',
+        severity: e.severity || ''
+      });
+    });
+    rows = rows.sort(function (a, b) { return b.drop - a.drop; }).slice(0, 6);
+    var fastestDrop = stats && Number.isFinite(Number(stats.fastestDrop)) ? Math.abs(Number(stats.fastestDrop)) : null;
+    var score = fastestDrop === null ? null : Math.max(0, Math.min(100, Math.round(fastestDrop / 0.35 * 100)));
+    var level = score === null ? '' : (score >= 80 ? 'hoog' : (score >= 55 ? 'verhoogd' : (score >= 30 ? 'let op' : 'rustig')));
+    var h = ['<div class="ai-sec">Glucose-volatiliteit · snelle sprongen</div>'];
+    h.push('<div class="ai-cards">');
+    h.push(aiCard('Impactscore 24u', score === null ? '–' : score + '/100', score >= 55 ? 'low' : ''));
+    h.push(aiCard('Snelste stijging', stats && stats.fastestRise != null ? signed(stats.fastestRise, 3) + '/min' : '–', 'high'));
+    h.push(aiCard('Snelste daling', stats && stats.fastestDrop != null ? signed(stats.fastestDrop, 3) + '/min' : '–', 'low'));
+    h.push('</div>');
+    h.push('<div class="ai-fine">Interpretatie: dit is een snelheid/volatiliteitssignaal, geen diagnose. Bij snelle dalingen kan CGM achterlopen; bevestig lage waarden bij klachten met vingerprik.</div>');
+    if (level) h.push('<div class="ai-fine">Huidige volatiliteitsklasse: ' + escapeHtml(level) + ' · score is gebaseerd op de snelste 24u-samplebeweging.</div>');
+    if (rows.length) {
+      h.push('<div class="ai-sec">Grootste recente piek→dal sprongen</div>');
+      rows.forEach(function (r) {
+        var line = aiTime(r.at) + ': ' + aiNum(r.from, '') + ' → ' + aiNum(r.to, '') + ' mmol/L' +
+          ' (-' + r.drop.toFixed(1) + ' in ' + Math.round(r.minutes) + 'm, ' + r.rate.toFixed(3) + '/min)' +
+          (r.outcome ? ' · ' + r.outcome : '') + (r.severity ? ' · ' + r.severity : '');
+        h.push('<div class="ai-fine">' + escapeHtml(line) + '</div>');
+      });
+    }
+    return h.join('');
+  }
+
   function renderAiStats(stats, episodes, day, evaluation, episodeMeta) {
     var box = document.getElementById('cgm-ai-stats');
     if (!box) return;
@@ -3012,6 +3067,7 @@
     h.push('</div>');
     h.push('<div class="ai-fine">GMI ' + aiNum(stats.gmi, '%') + ' · mediaan ' + aiNum(stats.median, '') + ' (IQR ' + aiNum(stats.p25, '') + '–' + aiNum(stats.p75, '') + ') · very-low &lt;3.0: ' + aiNum(stats.veryLow, '%') + ' · very-high &gt;13.9: ' + aiNum(stats.veryHigh, '%') + ' · min ' + aiNum(stats.min, '') + ' · max ' + aiNum(stats.max, '') + '</div>');
     h.push(renderStatsFreshness(stats));
+    h.push(renderVolatilityImpact(stats, episodes));
     if (stats.reactive) h.push(renderReactiveHypoSummary(stats.reactive));
     if (stats.highToLowContext) h.push(renderHighToLowContext(stats.highToLowContext));
     h.push(renderReactiveHypoInfo());
@@ -3900,6 +3956,7 @@
       '<div class="stat low"><span class="stat-label">Onder 3.0</span><span class="stat-value">', stats.urgentLowPct, '%</span></div>',
       '<div class="stat low"><span class="stat-label">Hypo events</span><span class="stat-value">', stats.hypoEvents, '</span></div>',
       '<div class="stat"><span class="stat-label">Laatste hypo</span><span class="stat-value">', stats.lastHypoMinutes === null ? 'geen' : stats.lastHypoMinutes + 'm', '</span></div>',
+      '<div class="stat ', stats.impactLevel === 'urgent' || stats.impactLevel === 'high' ? 'low' : (stats.impactLevel === 'watch' ? 'high' : ''), '"><span class="stat-label">Volatiliteit score</span><span class="stat-value">', stats.impactScore, '/100</span></div>',
       '<div class="stat high"><span class="stat-label">Snelste stijging</span><span class="stat-value">', stats.fastestRise === null ? '--' : signed(stats.fastestRise, 3) + '/min', '</span></div>',
       '<div class="stat low"><span class="stat-label">Snelste daling</span><span class="stat-value">', stats.fastestDrop === null ? '--' : signed(stats.fastestDrop, 3) + '/min', '</span></div>',
       '<div class="stat"><span class="stat-label">Gemiste gaten</span><span class="stat-value">', stats.missingIntervals, '</span></div>',
