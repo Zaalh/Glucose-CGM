@@ -2046,7 +2046,8 @@ async function getAiPatterns() {
     const worstHour = (stats.perHour || []).filter((p) => p.n >= 10).sort((a, b) => b.lowPct - a.lowPct)[0] || null
     const worstDay = (stats.perWeekday || []).filter((p) => p.n >= 30).sort((a, b) => b.lowPct - a.lowPct)[0] || null
     const cards = []
-    cards.push({ key: 'week', title: 'Deze week vs vorige', body: `TIR ${stats.trend.recentTir ?? '–'}% (was ${stats.trend.prevTir ?? '–'}%, Δ ${stats.trend.tirDelta ?? '–'}) · laag ${stats.trend.recentLowPct ?? '–'}% (was ${stats.trend.prevLowPct ?? '–'}%)` })
+    const trendDays = stats.trend.prevDays ?? 14
+    cards.push({ key: 'week', title: `Laatste ${trendDays}d vs vorige ${trendDays}d`, body: `TIR ${stats.trend.recentTir ?? '–'}% (was ${stats.trend.prevTir ?? '–'}%, Δ ${stats.trend.tirDelta ?? '–'}) · laag ${stats.trend.recentLowPct ?? '–'}% (was ${stats.trend.prevLowPct ?? '–'}%)` })
     if (stats.reactive) {
       const r = stats.reactive
       cards.push({
