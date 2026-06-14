@@ -99,7 +99,15 @@ function timeOfDayBucket(dateMs) {
 }
 
 function episodeSeverity(nadirMmol, timeBelow39, areaBelow39, qualityFlags) {
-  if (qualityFlags.includes('single_point_low') || qualityFlags.includes('possible_compression_low')) return 'uncertain'
+  // Hypo-niveaus volgens ADA/EASD/International Hypoglycaemia Study Group:
+  //  - Level 1 (3.0–3.9): alert/laag · Level 2 (<3.0): klinisch significant.
+  // Een Level 2-nadir (<3.0) is "clinically important independent of symptom
+  // severity/duration" — dus NIET wegzetten als 'uncertain' alleen omdat het een
+  // korte single-point dip was (past bij zeldzame, snelle reactieve hypo's).
+  // Compressie-lows blijven wél onzeker: dat zijn mechanische sensor-artefacten,
+  // en CGM is per richtlijn onbetrouwbaar bij lage waarden.
+  if (qualityFlags.includes('possible_compression_low')) return 'uncertain'
+  if (qualityFlags.includes('single_point_low') && nadirMmol >= VERY_LOW_THRESHOLD_MMOL) return 'uncertain'
   if (nadirMmol < VERY_LOW_THRESHOLD_MMOL || timeBelow39 >= 30 || areaBelow39 >= 12) return 'severe'
   if (nadirMmol < LOW_THRESHOLD_MMOL || timeBelow39 >= 10 || areaBelow39 >= 4) return 'relevant'
   return 'mild'
