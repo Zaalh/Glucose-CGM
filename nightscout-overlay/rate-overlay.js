@@ -2693,18 +2693,37 @@
   }
 
   // Drempel-lows: elke dip onder 3.9 (zoals Libre / de gekleurde puntjes op de lijn),
-  // los van de reactieve piek→daling-detectie. Geen uitklap-curve: het zijn ruwe runs,
-  // geen reactieve episodes met peakAt-anchor.
+  // los van de reactieve piek→daling-detectie. Uitklapbaar (.ai-item) met een inline
+  // metrics-detail uit de eigen velden — geen peakAt-anchor/curve-fetch nodig: deze runs
+  // staan niet in de reactieve_hypo_episodes-store.
+  function thresholdLowBand(nadirMmol) {
+    var v = Number(nadirMmol);
+    if (v < 3.0) return 'Zeer laag (<3.0)';
+    if (v < 3.5) return 'Laag (3.0–3.5)';
+    return 'Mild laag (3.5–3.9)';
+  }
   function renderTodayThresholdLows(title, list) {
     if (!list || !list.length) return '';
-    var h = ['<div class="ai-sec">' + escapeHtml(title + ' (' + list.length + ')') + '</div>'];
-    list.slice(0, 10).forEach(function (e) {
+    var h = ['<div class="ai-sec">' + escapeHtml(title + ' (' + list.length + ') · tik voor detail') + '</div>'];
+    list.slice(0, 12).forEach(function (e) {
       var meta = [];
       if (e.durationMinutes != null) meta.push('<3.9 ' + e.durationMinutes + 'm');
       if (e.pointCount != null) meta.push(e.pointCount + ' pt');
       if (e.areaBelow3_9 != null) meta.push('burden ' + e.areaBelow3_9);
-      h.push('<div class="ai-ep"><div class="ai-ep-head">' +
-        escapeHtml(aiTime(e.nadirAt) + ' · dal ' + aiNum(e.nadirMmol, '') + ' mmol' + (meta.length ? ' · ' + meta.join(' · ') : '')) +
+      var head = aiTime(e.nadirAt) + ' · dal ' + aiNum(e.nadirMmol, '') + ' mmol' + (meta.length ? ' · ' + meta.join(' · ') : '');
+      var grid = aiMetricGrid([
+        ['Nadir', aiNum(e.nadirMmol, '') + ' mmol', 'low'],
+        ['Duur <3.9', aiNum(e.durationMinutes, ' min'), ''],
+        ['Metingen', aiNum(e.pointCount, ''), ''],
+        ['Hypo-belasting', aiNum(e.areaBelow3_9, ' mmol·min'), 'low'],
+        ['Start', aiHM(e.startAt), ''],
+        ['Eind', aiHM(e.endAt), '']
+      ]);
+      h.push('<div class="ai-ep ai-item">' +
+        '<div class="ai-ep-head ai-item-head"><span class="ai-chev">▸</span>' + escapeHtml(head) + '</div>' +
+        '<div class="ai-detail">' +
+          '<div class="ai-rev-head">' + escapeHtml(thresholdLowBand(e.nadirMmol) + ' · ' + aiTime(e.nadirAt)) + '</div>' +
+          grid +
         '</div></div>');
     });
     return h.join('');

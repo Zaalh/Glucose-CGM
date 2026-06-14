@@ -31,7 +31,9 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   - Overlay: twee kaarten ("Lows <3.9" drempel + "Daal-episodes" reactief), een sectie
     "Lows < 3.9 vandaag (alle)", en dezelfde sectie in de meerdaagse dagdetail. De reactieve
     secties heten nu expliciet "Reactieve lows … (piek→daling)" zodat de twee niet meer dezelfde
-    naam delen.
+    naam delen. De drempel-lows zijn **uitklapbaar** (tik = inline metrics-detail: nadir, duur
+    <3.9, aantal metingen, hypo-belasting, start/eind) — gerenderd uit de feed-velden zelf, dus
+    zonder extra endpoint of `reactive_hypo_episodes`-anchor.
 - **Stats & AI-overlay uitgebreid met app-stijl analyses** — de bestaande tabs zijn verrijkt
   zodat de overlay dezelfde informatie toont als een gepolijste CGM-app, zonder nieuwe
   native shell:
