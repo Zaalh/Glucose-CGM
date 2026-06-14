@@ -1492,7 +1492,11 @@
     if (!box) return;
     if (!reports.length) { box.innerHTML = '<div class="ai-empty">Nog geen rapporten. Klik "Genereer dagrapport".</div>'; return; }
     var h = [];
-    reports.forEach(function (rep) {
+    // Nieuwste rapport bovenaan: sorteer op createdAt aflopend (kopie, bron blijft intact).
+    var sorted = reports.slice().sort(function (a, b) {
+      return (new Date(b.createdAt).getTime() || 0) - (new Date(a.createdAt).getTime() || 0);
+    });
+    sorted.forEach(function (rep) {
       var meta = (rep.createdAt ? new Date(rep.createdAt).toLocaleString() : '') + ' · ' + (rep.type || '') + (rep.model ? ' · ' + rep.model : '');
       var body = escapeHtml(rep.body || '').replace(/\n/g, '<br>');
       var statsLine = rep.stats ? '<div class="ai-d-meta">TIR ' + aiNum(rep.stats.tir, '%') + ' · CV ' + aiNum(rep.stats.cv, '%') +
@@ -2210,7 +2214,11 @@
     if (!box) return;
     if (!history.length) { box.innerHTML = '<div class="ai-empty">Geen dagen met data.</div>'; return; }
     var h = ['<div class="ai-sec">Dag-voor-dag (klik voor detail)</div>'];
-    history.forEach(function (d) {
+    // Nieuwste dag bovenaan: sorteer op datum aflopend (kopie, bron blijft intact).
+    var sorted = history.slice().sort(function (a, b) {
+      return (new Date(b.date).getTime() || 0) - (new Date(a.date).getTime() || 0);
+    });
+    sorted.forEach(function (d) {
       var sev = d.lowCount > 0 || (d.tbr || 0) >= 4 ? 'low' : (d.highCount > 2 ? 'high' : 'ok');
       var lvl = d.sourceLevel && d.sourceLevel !== 'goed' ? ' · dekking ' + d.coverage + '%' : '';
       var parts = [
@@ -2284,6 +2292,10 @@
     var highs = (feed.events || []).filter(function (e) { return e.type === 'high_episode'; });
     if (highs.length) {
       h.push('<div class="ai-sec">High-episode' + (highs.length > 1 ? 's (' + highs.length + ')' : '') + ' · tik voor analyse</div>');
+      // Nieuwste bovenaan: sorteer op tijdstip aflopend (kopie, bron blijft intact).
+      highs = highs.slice().sort(function (a, b) {
+        return (new Date(b.at).getTime() || 0) - (new Date(a.at).getTime() || 0);
+      });
       highs.forEach(function (hi) {
         var head = aiTime(hi.at) + ' · piek ' + aiNum(hi.mmol, ' mmol/L');
         h.push(aiExploreItem('high', hi.peakAt, '↑ High', head, hi.detail || ''));
@@ -2292,6 +2304,10 @@
     h.push('<div class="ai-sec">Glucose-events</div>');
     var evs = feed.events || [];
     if (!evs.length) { h.push('<div class="ai-empty">Geen events op deze dag.</div>'); return h.join(''); }
+    // Nieuwste bovenaan: sorteer op tijdstip aflopend (kopie, bron blijft intact).
+    evs = evs.slice().sort(function (a, b) {
+      return (new Date(b.at).getTime() || 0) - (new Date(a.at).getTime() || 0);
+    });
     h.push('<div class="ai-evfeed">');
     evs.forEach(function (e) {
       h.push('<div class="ai-ev ' + e.type + '">' +
@@ -2308,7 +2324,11 @@
   function renderDayEpisodeGroup(title, list) {
     if (!list || !list.length) return '';
     var h = ['<div class="ai-sec">' + escapeHtml(title + ' (' + list.length + ')') + '</div>'];
-    list.forEach(function (e) {
+    // Nieuwste bovenaan: sorteer op peakAt aflopend (kopie, laat de bron-volgorde intact).
+    var sorted = list.slice().sort(function (a, b) {
+      return (new Date(b.peakAt).getTime() || 0) - (new Date(a.peakAt).getTime() || 0);
+    });
+    sorted.forEach(function (e) {
       var head = aiTime(e.peakAt) + ' · ' + aiNum(e.peakMmol, '') + '→' + aiNum(e.nadirMmol, '') + ' mmol' +
         (e.outcome ? ' · ' + e.outcome : '');
       h.push('<div class="ai-ep ai-item" data-ep-kind="low" data-ep-peak="' + escapeHtml(e.peakAt || '') + '">' +
@@ -2490,7 +2510,10 @@
   // Freshness (nieuwste CGM/episode/build) staat al in renderStatsFreshness;
   // hier alleen de records zelf, om dubbele weergave te voorkomen.
   function renderRecentEpisodes(episodes) {
-    var recent = (episodes || []).slice(0, 8);
+    // Nieuwste bovenaan: sorteer op nadir/piek aflopend (kopie) en pak dan de eerste 8.
+    var recent = (episodes || []).slice().sort(function (a, b) {
+      return (new Date(b.nadirAt || b.peakAt).getTime() || 0) - (new Date(a.nadirAt || a.peakAt).getTime() || 0);
+    }).slice(0, 8);
     var h = ['<div class="ai-sec">Laatste episode-records</div>'];
     if (!recent.length) {
       h.push('<div class="ai-empty">Geen episode-records in dit venster.</div>');
@@ -2705,7 +2728,11 @@
   function renderTodayThresholdLows(title, list) {
     if (!list || !list.length) return '';
     var h = ['<div class="ai-sec">' + escapeHtml(title + ' (' + list.length + ') · tik voor detail') + '</div>'];
-    list.slice(0, 12).forEach(function (e) {
+    // Nieuwste bovenaan: sorteer op nadirAt aflopend (kopie, laat de bron-volgorde intact).
+    var sorted = list.slice().sort(function (a, b) {
+      return (new Date(b.nadirAt).getTime() || 0) - (new Date(a.nadirAt).getTime() || 0);
+    });
+    sorted.slice(0, 12).forEach(function (e) {
       var meta = [];
       if (e.durationMinutes != null) meta.push('<3.9 ' + e.durationMinutes + 'm');
       if (e.pointCount != null) meta.push(e.pointCount + ' pt');
@@ -2732,7 +2759,11 @@
   function renderTodayEpisodeGroup(title, list) {
     if (!list || !list.length) return '';
     var h = ['<div class="ai-sec">' + escapeHtml(title + ' (' + list.length + ')') + '</div>'];
-    list.slice(0, 5).forEach(function (e) {
+    // Nieuwste bovenaan: sorteer op peakAt aflopend (kopie, laat de bron-volgorde intact).
+    var sorted = list.slice().sort(function (a, b) {
+      return (new Date(b.peakAt).getTime() || 0) - (new Date(a.peakAt).getTime() || 0);
+    });
+    sorted.slice(0, 5).forEach(function (e) {
       var meta = [];
       if (e.outcome) meta.push(e.outcome);
       if (e.severity) meta.push(e.severity);
