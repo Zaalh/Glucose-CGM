@@ -162,7 +162,10 @@ Stand van zaken per mijlpaal:
   en rebound bepalen mee of herstel echt stabiel is. Fixtures in `scripts/fixtures/`.
 - **M3 — episode-builder (af):** `scripts/lib/episode-builder.mjs` +
   `scripts/build-reactive-hypo-episodes.mjs` → collectie `reactive_hypo_episodes`
-  (198 episodes uit 7501 entries).
+  (198 episodes uit 7501 entries). Dit is de **reactieve** low-definitie (piek≥7.5 →
+  daling≥1.0 → nadir) die ML/backtest voedt. Het Stats-dashboard telt daarnáást
+  drempel-lows (elke run <3.9) via `buildThresholdLows` in de sync-server; die helper
+  staat los van deze pijplijn en raakt training/backtest niet (zie `CGM.md`).
 - **M4 — backtest + auto-tuner (af):** `scripts/evaluate-hypo-detector.mjs` (V1 vs V2,
   precision/recall/lead-time, early-warning-only, dichtheidsfilter) +
   `scripts/lib/legacy-risk-v1.mjs`. Auto-tuner `scripts/tune-reactive-hypo-v2.mjs`

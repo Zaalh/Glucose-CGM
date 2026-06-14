@@ -296,7 +296,8 @@ De live setup is geverifieerd met InfluxDB `1.8.10`, Grafana `11.5.2`, datasourc
 - `scripts/run-data-quality-check.mjs`: regressiecheck voor Laag 10 (gaten, dubbele/out-of-order timestamps, stale data).
 - `scripts/lib/reactive-hypo-detector.mjs`: V2 reactieve-hypo detector (`evaluateReactiveHypoRiskV2`), tunebaar via params.
 - `scripts/lib/episode-similarity.mjs`: gedeelde episode-similarity (`findSimilarEpisodes` + `patternFromFeatures`); voedt het `pattern`-object (component 6 / `patternScore`) in live-sync, backtest én tuner identiek.
-- `scripts/lib/episode-builder.mjs` + `scripts/build-reactive-hypo-episodes.mjs`: bouwt `reactive_hypo_episodes`.
+- `scripts/lib/episode-builder.mjs` + `scripts/build-reactive-hypo-episodes.mjs`: bouwt `reactive_hypo_episodes` (de reactieve piek→daling-lows; voedt ML/backtest).
+- `buildThresholdLows(rows)` (pure helper in `scripts/libreview-nightscout-sync.mjs`): telt elke run <3.9 als losse drempel-low (nadir/duur/punten/burden; datagat >30 min splitst), los van de episode-builder en alleen voor het dashboard (`thresholdLows` in de `/ai-review/day`-feed) — voedt geen ML.
 - `scripts/lib/legacy-risk-v1.mjs`: getrouwe V1-port voor de backtest (één-op-één met de sync houden).
 - `scripts/evaluate-hypo-detector.mjs`: backtest V1 vs V2 (precision/recall/lead-time).
 - `scripts/tune-reactive-hypo-v2.mjs` + `scripts/reactive-hypo-v2-state.json`: auto-tuner en getunede V2-parameters.
@@ -355,7 +356,12 @@ hypotheses en vragen. Staat uit tot `.env.ai` (een AI-provider) is gezet.
   vandaar "Stats & AI" i.p.v. enkel "AI". De Statistiek-tab toont o.a. TIR/episodes/
   heatmap, een **reactieve-hypo profiel** en **High→low context** (high→low-koppelingen
   met alle vier de tijdstippen: high-piek, high-einde, start daling, nadir + de
-  deelintervallen). Episode-detail is een gefocuste review (metrics, pattern,
+  deelintervallen). Lows worden langs **twee** assen geteld: **drempel-lows** (elke
+  aaneengesloten run <3.9, datagat >30 min splitst) náást de **reactieve lows**
+  (piek≥7.5 → daling≥1.0 → nadir, via de episode-builder). Beide blijven zichtbaar als
+  losse kaarten/secties; de drempel-lows zijn uitklapbaar met inline metrics (nadir,
+  duur <3.9, aantal metingen, hypo-belasting, start/eind). Episode-detail is een
+  gefocuste review (metrics, pattern,
   vergelijkbare episodes) **zonder eigen curve** — Nightscout toont de grafiek al.
   Een **freshness-regel** waarschuwt alleen als de episode-build áchterloopt op de data
   (`episodesBuiltAt` vs nieuwste meting > 60 min), niet wanneer er simpelweg geen
