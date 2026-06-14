@@ -2255,8 +2255,11 @@
         if (feed && feed.ok) h.push(renderAiGlucoseEvents(feed));
         if (day && day.ok) {
           h.push(renderAiDayReview(day));
+          if (day.thresholdLows && day.thresholdLows.length) {
+            h.push(renderTodayThresholdLows('Lows < 3.9 dagdetail (alle)', day.thresholdLows));
+          }
           if (day.lowEpisodes && day.lowEpisodes.length) {
-            h.push(renderDayEpisodeGroup('Lows dagdetail', day.lowEpisodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol < 3.9; })));
+            h.push(renderDayEpisodeGroup('Reactieve lows dagdetail (piek→daling)', day.lowEpisodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol < 3.9; })));
             h.push(renderDayEpisodeGroup('Near-hypo’s dagdetail', day.lowEpisodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol >= 3.9 && e.nadirMmol < 4.5; })));
             h.push(renderDayEpisodeGroup('Dips dagdetail', day.lowEpisodes.filter(function (e) { return !(e.nadirMmol != null && e.nadirMmol < 4.5); })));
           }
@@ -2653,7 +2656,8 @@
     h.push(aiCard('Vandaag TIR', aiNum(stat.tir, '%'), 'ok'));
     h.push(aiCard('Vandaag laag', aiNum(stat.tbr, '%'), 'low'));
     h.push(aiCard('High episodes', aiNum(day.highEpisodes ? day.highEpisodes.length : null, ''), 'high'));
-    h.push(aiCard('Low episodes', aiNum(day.lowEpisodes ? day.lowEpisodes.length : null, ''), 'low'));
+    h.push(aiCard('Lows <3.9', aiNum(day.thresholdLows ? day.thresholdLows.length : (day.lowEpisodes ? day.lowEpisodes.length : null), ''), 'low'));
+    h.push(aiCard('Daal-episodes', aiNum(day.lowEpisodes ? day.lowEpisodes.length : null, ''), 'low'));
     h.push(aiCard('Burden <3.9', aiNum(notable.hypoBurden3_9, ''), 'low'));
     h.push(aiCard('Datakwaliteit', source.level || '–', source.level === 'goed' ? 'ok' : ''));
     h.push('</div>');
@@ -2671,8 +2675,11 @@
           '<div class="ai-detail"><div class="ai-curve"></div></div></div>');
       });
     }
+    if (day.thresholdLows && day.thresholdLows.length) {
+      h.push(renderTodayThresholdLows('Lows < 3.9 vandaag (alle)', day.thresholdLows));
+    }
     if (day.lowEpisodes && day.lowEpisodes.length) {
-      h.push(renderTodayEpisodeGroup('Low episodes vandaag', day.lowEpisodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol < 3.9; })));
+      h.push(renderTodayEpisodeGroup('Reactieve lows vandaag (piek→daling)', day.lowEpisodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol < 3.9; })));
       h.push(renderTodayEpisodeGroup('Near-hypo’s vandaag', day.lowEpisodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol >= 3.9 && e.nadirMmol < 4.5; })));
       h.push(renderTodayEpisodeGroup('Dips vandaag', day.lowEpisodes.filter(function (e) { return !(e.nadirMmol != null && e.nadirMmol < 4.5); })));
     }
@@ -2682,6 +2689,24 @@
         h.push(renderHighToLowItem(x));
       });
     }
+    return h.join('');
+  }
+
+  // Drempel-lows: elke dip onder 3.9 (zoals Libre / de gekleurde puntjes op de lijn),
+  // los van de reactieve piek→daling-detectie. Geen uitklap-curve: het zijn ruwe runs,
+  // geen reactieve episodes met peakAt-anchor.
+  function renderTodayThresholdLows(title, list) {
+    if (!list || !list.length) return '';
+    var h = ['<div class="ai-sec">' + escapeHtml(title + ' (' + list.length + ')') + '</div>'];
+    list.slice(0, 10).forEach(function (e) {
+      var meta = [];
+      if (e.durationMinutes != null) meta.push('<3.9 ' + e.durationMinutes + 'm');
+      if (e.pointCount != null) meta.push(e.pointCount + ' pt');
+      if (e.areaBelow3_9 != null) meta.push('burden ' + e.areaBelow3_9);
+      h.push('<div class="ai-ep"><div class="ai-ep-head">' +
+        escapeHtml(aiTime(e.nadirAt) + ' · dal ' + aiNum(e.nadirMmol, '') + ' mmol' + (meta.length ? ' · ' + meta.join(' · ') : '')) +
+        '</div></div>');
+    });
     return h.join('');
   }
 

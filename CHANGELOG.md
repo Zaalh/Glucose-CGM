@@ -16,6 +16,22 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Toegevoegd
 
+- **Drempel-lows naast reactieve daal-episodes ("een low is een low")** — de Stats & AI-overlay
+  telde lows alleen via de reactieve piek→daling episode-builder (eist een piek ≥7.5 mmol + daling
+  ≥1.0 mmol vóór de low, en houdt één nadir per daling). Daardoor toonde "Low episodes" er bv. 1
+  terwijl de Libre-app en de gekleurde puntjes op de Nightscout-lijn 3 dips <3.9 lieten zien: lows
+  zonder voorafgaande spike, of meerdere dips binnen dezelfde daling, vielen weg. Nu telt het
+  dashboard óók elke aaneengesloten run onder 3.9 als losse low, **náást** de reactieve episodes —
+  beide blijven zichtbaar.
+  - Nieuwe pure helper `buildThresholdLows(rows)` in `scripts/libreview-nightscout-sync.mjs`
+    (nadir/duur/puntaantal/burden per run; datagat >30 min splitst een run). Staat los van
+    `scripts/lib/episode-builder.mjs`, die ML/backtest voedt en **ongemoeid** blijft.
+  - Dag-feed (`GET /_ai-review/day`) krijgt veld `thresholdLows`; de dag-samenvatting toont nu eerlijk
+    beide: `… · N lows <3.9 · M daal-episodes · …`.
+  - Overlay: twee kaarten ("Lows <3.9" drempel + "Daal-episodes" reactief), een sectie
+    "Lows < 3.9 vandaag (alle)", en dezelfde sectie in de meerdaagse dagdetail. De reactieve
+    secties heten nu expliciet "Reactieve lows … (piek→daling)" zodat de twee niet meer dezelfde
+    naam delen.
 - **Stats & AI-overlay uitgebreid met app-stijl analyses** — de bestaande tabs zijn verrijkt
   zodat de overlay dezelfde informatie toont als een gepolijste CGM-app, zonder nieuwe
   native shell:

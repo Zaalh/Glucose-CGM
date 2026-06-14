@@ -1764,6 +1764,7 @@ async function getAiDayReview(dateKey) {
     }
     const expected = Math.max(1, Math.round((range.to - range.from) / 60000))
     const stats = summarizeEntries(rows, expected)
+    const thresholdLows = buildThresholdLows(rows)
     const burden = lows.reduce((s, e) => s + (Number(e.areaBelow3_9) || 0), 0)
     const worstLow = lows.slice().sort((a, b) => (Number(a.nadirMmol) || 99) - (Number(b.nadirMmol) || 99))[0] || null
     const worstHigh = highEpisodes.slice().sort((a, b) => (Number(b.peakMmol) || 0) - (Number(a.peakMmol) || 0))[0] || null
@@ -1775,7 +1776,8 @@ async function getAiDayReview(dateKey) {
     const summary = [
       `TIR ${stats.tir}%`,
       `laag ${stats.tbr}%`,
-      `${lows.length} low-episodes`,
+      `${thresholdLows.length} lows <3.9`,
+      `${lows.length} daal-episodes`,
       `${highEpisodes.length} high-episodes`,
       `dekking ${stats.coveragePct}%`,
     ].join(' · ')
@@ -1784,6 +1786,7 @@ async function getAiDayReview(dateKey) {
       window: { from: new Date(range.from).toISOString(), to: new Date(range.to).toISOString(), timeZone: tz },
       summary,
       stats,
+      thresholdLows,
       lowEpisodes: lows,
       highEpisodes,
       highToLow,
@@ -1801,6 +1804,52 @@ function longestGapMinutes(rows) {
     longest = Math.max(longest, Math.round((rows[i].date - rows[i - 1].date) / 60000))
   }
   return longest
+}
+
+// Drempel-gebaseerde lows: elke aaneengesloten run onder 3.9 mmol telt als één low,
+// los van of er een reactieve piek aan voorafging. Dit matcht hoe de Libre-app en de
+// gekleurde puntjes op de Nightscout-lijn lows tellen (een low is een low). Staat los
+// van de reactieve piek→daling episode-builder, die ML/backtest voedt en ongemoeid blijft.
+function buildThresholdLows(rows, options = {}) {
+  const thresholdMmol = options.thresholdMmol ?? 3.9
+  const gapMs = (options.gapMinutes ?? 30) * 60000
+  const runs = []
+  let cur = null
+  const flush = () => {
+    if (!cur) return
+    runs.push({
+      startAt: new Date(cur.startDate).toISOString(),
+      nadirAt: new Date(cur.nadirDate).toISOString(),
+      endAt: new Date(cur.lastDate).toISOString(),
+      nadirMmol: round(cur.nadirMmol, 3),
+      durationMinutes: round((cur.lastDate - cur.startDate) / 60000, 1),
+      pointCount: cur.count,
+      areaBelow3_9: round(cur.area, 3),
+    })
+    cur = null
+  }
+  for (const r of rows) {
+    const v = Number(r.sgv) / MGDL_PER_MMOL
+    const t = r.date
+    if (v < thresholdMmol) {
+      // Een datagat groter dan gapMs splitst de run: het is dan een aparte low.
+      if (cur && t - cur.lastDate > gapMs) flush()
+      if (!cur) {
+        cur = { startDate: t, lastDate: t, nadirDate: t, nadirMmol: v, prevMmol: v, count: 0, area: 0 }
+      } else {
+        const dtMin = (t - cur.lastDate) / 60000
+        if (dtMin > 0) cur.area += (((thresholdMmol - cur.prevMmol) + (thresholdMmol - v)) / 2) * dtMin
+      }
+      if (v < cur.nadirMmol) { cur.nadirMmol = v; cur.nadirDate = t }
+      cur.lastDate = t
+      cur.prevMmol = v
+      cur.count += 1
+    } else {
+      flush()
+    }
+  }
+  flush()
+  return runs
 }
 
 function medianIntervalMinutes(rows) {
