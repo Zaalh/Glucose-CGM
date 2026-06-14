@@ -41,44 +41,62 @@ function summarize(rows) {
   const gapsSorted = gaps.slice().sort((a, b) => a - b)
   const medianGap = gapsSorted.length ? gapsSorted[Math.floor(gapsSorted.length / 2)] : null
   const isHighRes = medianGap != null && medianGap <= 5
-  // Alleen opeenvolgende punten binnen ~2× de mediane interval tellen als één helling; zo wordt een
-  // sensorgat nooit als een snelle daling/stijging gelezen. Coarse data behoudt het 30-min gedrag.
-  const maxGapMin = medianGap != null ? Math.max(2.5, medianGap * 2) : 35
-
-  // Bij high-res (1-min) data bevat de ruwe reeks sensor-spikes: losse sprongen van >5 mg/dL/min die
-  // fysiologisch onmogelijk zijn. Despike met dezelfde median-of-3 die het live systeem gebruikt (Laag 9),
-  // zodat de gerapporteerde daal-/stijgsnelheid een echte helling is en geen ruis-uitschieter.
-  const median3 = (a, b, c) => [a, b, c].sort((x, y) => x - y)[1]
-  const rateMmol = rows.map((r, i) => {
-    if (!isHighRes || i === 0 || i === rows.length - 1) return r.mmol
-    return median3(rows[i - 1].mmol, r.mmol, rows[i + 1].mmol)
-  })
-
-  const rates = []
-  for (let i = 1; i < rows.length; i += 1) {
-    const prev = rows[i - 1]
-    const cur = rows[i]
-    const minutes = (cur.date - prev.date) / 60000
-    if (minutes > 0 && minutes <= maxGapMin) {
-      const fromM = rateMmol[i - 1]
-      const toM = rateMmol[i]
-      rates.push({
-        from: prev.dateString,
-        to: cur.dateString,
+  let fastestDrop = null
+  let fastestRise = null
+  if (isHighRes) {
+    // Bij high-res (1-min) data is een sprong tussen twee opeenvolgende samples geen betrouwbare snelheid:
+    // ~9% van de 1-min stappen is niet-fysiologisch (sensor-spikes) en sub-minuut samples blazen de rate op.
+    // Despike eerst met median-of-3 (zelfde filter als het live systeem, Laag 9) en meet daarna de steilste
+    // VOLGEHOUDEN helling over een ~15-min venster — dat is de medisch relevante daalsnelheid voor reactieve hypo.
+    const median3 = (a, b, c) => [a, b, c].sort((x, y) => x - y)[1]
+    const smooth = rows.map((r, i) =>
+      i === 0 || i === rows.length - 1 ? r.mmol : median3(rows[i - 1].mmol, r.mmol, rows[i + 1].mmol))
+    const W = 15
+    let lo = 0
+    for (let i = 0; i < rows.length; i += 1) {
+      while (lo < i && (rows[i].date - rows[lo].date) / 60000 > W + 2) lo += 1
+      const minutes = (rows[i].date - rows[lo].date) / 60000
+      if (minutes < W - 2) continue // venster te kort of een sensorgat → geen betrouwbare helling
+      const rec = {
+        from: rows[lo].dateString,
+        to: rows[i].dateString,
         minutes: round(minutes, 1),
-        fromMmol: round(fromM, 3),
-        toMmol: round(toM, 3),
-        deltaMmol: round(toM - fromM, 3),
-        rateMmolPerMin: round((toM - fromM) / minutes, 4),
-        spikeFiltered: isHighRes,
-      })
+        windowMin: W,
+        fromMmol: round(smooth[lo], 3),
+        toMmol: round(smooth[i], 3),
+        deltaMmol: round(smooth[i] - smooth[lo], 3),
+        rateMmolPerMin: round((smooth[i] - smooth[lo]) / minutes, 4),
+        spikeFiltered: true,
+        resolutionLimited: false,
+      }
+      if (!fastestDrop || rec.rateMmolPerMin < fastestDrop.rateMmolPerMin) fastestDrop = rec
+      if (!fastestRise || rec.rateMmolPerMin > fastestRise.rateMmolPerMin) fastestRise = rec
     }
+  } else {
+    // Coarse data: netto verschil tussen twee opeenvolgende ~30-min samples (geen gemeten helling).
+    // Alleen punten binnen ~2× de mediane interval; zo wordt een sensorgat nooit als snelle daling gelezen.
+    const maxGapMin = medianGap != null ? Math.max(2.5, medianGap * 2) : 35
+    const rates = []
+    for (let i = 1; i < rows.length; i += 1) {
+      const prev = rows[i - 1]
+      const cur = rows[i]
+      const minutes = (cur.date - prev.date) / 60000
+      if (minutes > 0 && minutes <= maxGapMin) {
+        rates.push({
+          from: prev.dateString,
+          to: cur.dateString,
+          minutes: round(minutes, 1),
+          fromMmol: prev.mmol,
+          toMmol: cur.mmol,
+          deltaMmol: round(cur.mmol - prev.mmol, 3),
+          rateMmolPerMin: round((cur.mmol - prev.mmol) / minutes, 4),
+          resolutionLimited: true,
+        })
+      }
+    }
+    fastestDrop = rates.slice().sort((a, b) => a.rateMmolPerMin - b.rateMmolPerMin)[0] || null
+    fastestRise = rates.slice().sort((a, b) => b.rateMmolPerMin - a.rateMmolPerMin)[0] || null
   }
-  // Bij coarse data is dit netto verschil tussen ver-uit-elkaar-liggende samples (geen gemeten helling);
-  // bij high-res data is het wél een echte helling. De vlag stuurt de framing in de prompt/caveats.
-  const annotateRate = (r) => (r ? { ...r, resolutionLimited: !isHighRes } : null)
-  const fastestDrop = annotateRate(rates.slice().sort((a, b) => a.rateMmolPerMin - b.rateMmolPerMin)[0] || null)
-  const fastestRise = annotateRate(rates.slice().sort((a, b) => b.rateMmolPerMin - a.rateMmolPerMin)[0] || null)
   return {
     rows: n,
     medianGapMinutes: medianGap != null ? round(medianGap, 1) : null,
@@ -147,7 +165,7 @@ const caveats = summary.highRes
     `Live high-res export (mediane interval ${resMin} min, ~1-min CGM-data uit MongoDB).`,
     noFabricationCaveat,
     profileCaveat,
-    'fastestDrop/fastestRise zijn bij deze resolutie echte gemeten hellingen (mmol/L/min), berekend op een median-of-3 despikede reeks (zelfde spike-filter als het live systeem) zodat losse sensor-spikes de snelheid niet opblazen.',
+    'fastestDrop/fastestRise zijn de steilste VOLGEHOUDEN helling over een ~15-min venster (windowMin) op een median-of-3 despikede reeks — niet een sprong tussen twee losse samples. Zo blazen sensor-spikes en sub-minuut metingen de daalsnelheid niet op.',
   ]
   : [
     'Deze export is gebaseerd op een lokaal bestand (PDF-historie), niet op live MongoDB.',
@@ -207,14 +225,14 @@ of yardstick. ${summary.highRes
 - Min/mediaan/max: ${summary.min} / ${summary.median} / ${summary.max} mmol/L  |  IQR p25-p75: ${summary.p25}-${summary.p75} mmol/L
 
 ${summary.highRes
-  ? `## Snelste gemeten daling/stijging (mmol/L/min, median-of-3 despiked)
+  ? `## Steilste volgehouden daling/stijging (mmol/L/min over ~15 min)
 
-Bij ~${resMin}-min resolutie zijn dit echte gemeten hellingen — bruikbaar als daalsnelheid. Berekend op een
-median-of-3 despikede reeks (zelfde spike-filter als het live systeem), zodat losse sensor-spikes (~9% van de
-1-min stappen is niet-fysiologisch) de snelheid niet opblazen.
+Bij ~${resMin}-min resolutie is een sprong tussen twee losse samples nog ruis (~9% van de 1-min stappen is
+niet-fysiologisch). Daarom: eerst median-of-3 despiken (zelfde spike-filter als het live systeem), daarna de
+steilste VOLGEHOUDEN helling over een ~15-min venster — dat is de bruikbare daalsnelheid voor reactieve hypo.
 
-- Snelste daling: ${summary.fastestDrop ? `${summary.fastestDrop.rateMmolPerMin} mmol/L/min (${summary.fastestDrop.fromMmol} -> ${summary.fastestDrop.toMmol} in ${summary.fastestDrop.minutes} min, ${summary.fastestDrop.from} t/m ${summary.fastestDrop.to})` : 'n.v.t.'}
-- Snelste stijging: ${summary.fastestRise ? `${summary.fastestRise.rateMmolPerMin} mmol/L/min (${summary.fastestRise.fromMmol} -> ${summary.fastestRise.toMmol} in ${summary.fastestRise.minutes} min, ${summary.fastestRise.from} t/m ${summary.fastestRise.to})` : 'n.v.t.'}`
+- Steilste daling: ${summary.fastestDrop ? `${summary.fastestDrop.rateMmolPerMin} mmol/L/min (${summary.fastestDrop.fromMmol} -> ${summary.fastestDrop.toMmol} over ${summary.fastestDrop.minutes} min, ${summary.fastestDrop.from} t/m ${summary.fastestDrop.to})` : 'n.v.t.'}
+- Steilste stijging: ${summary.fastestRise ? `${summary.fastestRise.rateMmolPerMin} mmol/L/min (${summary.fastestRise.fromMmol} -> ${summary.fastestRise.toMmol} over ${summary.fastestRise.minutes} min, ${summary.fastestRise.from} t/m ${summary.fastestRise.to})` : 'n.v.t.'}`
   : `## Grootste netto-verandering tussen twee samples — RESOLUTIE-GELIMITEERD, geen echte helling
 
 Dit is netto verschil tussen twee ~${resMin}-min punten gedeeld door de tijd. Je mist de echte piek/dal ertussenin;
