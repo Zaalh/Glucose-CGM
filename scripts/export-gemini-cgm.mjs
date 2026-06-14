@@ -45,20 +45,32 @@ function summarize(rows) {
   // sensorgat nooit als een snelle daling/stijging gelezen. Coarse data behoudt het 30-min gedrag.
   const maxGapMin = medianGap != null ? Math.max(2.5, medianGap * 2) : 35
 
+  // Bij high-res (1-min) data bevat de ruwe reeks sensor-spikes: losse sprongen van >5 mg/dL/min die
+  // fysiologisch onmogelijk zijn. Despike met dezelfde median-of-3 die het live systeem gebruikt (Laag 9),
+  // zodat de gerapporteerde daal-/stijgsnelheid een echte helling is en geen ruis-uitschieter.
+  const median3 = (a, b, c) => [a, b, c].sort((x, y) => x - y)[1]
+  const rateMmol = rows.map((r, i) => {
+    if (!isHighRes || i === 0 || i === rows.length - 1) return r.mmol
+    return median3(rows[i - 1].mmol, r.mmol, rows[i + 1].mmol)
+  })
+
   const rates = []
   for (let i = 1; i < rows.length; i += 1) {
     const prev = rows[i - 1]
     const cur = rows[i]
     const minutes = (cur.date - prev.date) / 60000
     if (minutes > 0 && minutes <= maxGapMin) {
+      const fromM = rateMmol[i - 1]
+      const toM = rateMmol[i]
       rates.push({
         from: prev.dateString,
         to: cur.dateString,
         minutes: round(minutes, 1),
-        fromMmol: prev.mmol,
-        toMmol: cur.mmol,
-        deltaMmol: round(cur.mmol - prev.mmol, 3),
-        rateMmolPerMin: round((cur.mmol - prev.mmol) / minutes, 4),
+        fromMmol: round(fromM, 3),
+        toMmol: round(toM, 3),
+        deltaMmol: round(toM - fromM, 3),
+        rateMmolPerMin: round((toM - fromM) / minutes, 4),
+        spikeFiltered: isHighRes,
       })
     }
   }
@@ -135,7 +147,7 @@ const caveats = summary.highRes
     `Live high-res export (mediane interval ${resMin} min, ~1-min CGM-data uit MongoDB).`,
     noFabricationCaveat,
     profileCaveat,
-    'fastestDrop/fastestRise zijn bij deze resolutie WEL echte gemeten hellingen (mmol/L/min) tussen opeenvolgende samples.',
+    'fastestDrop/fastestRise zijn bij deze resolutie echte gemeten hellingen (mmol/L/min), berekend op een median-of-3 despikede reeks (zelfde spike-filter als het live systeem) zodat losse sensor-spikes de snelheid niet opblazen.',
   ]
   : [
     'Deze export is gebaseerd op een lokaal bestand (PDF-historie), niet op live MongoDB.',
@@ -195,9 +207,11 @@ of yardstick. ${summary.highRes
 - Min/mediaan/max: ${summary.min} / ${summary.median} / ${summary.max} mmol/L  |  IQR p25-p75: ${summary.p25}-${summary.p75} mmol/L
 
 ${summary.highRes
-  ? `## Snelste gemeten daling/stijging (mmol/L/min)
+  ? `## Snelste gemeten daling/stijging (mmol/L/min, median-of-3 despiked)
 
-Bij ~${resMin}-min resolutie zijn dit echte gemeten hellingen tussen opeenvolgende samples — bruikbaar als daalsnelheid.
+Bij ~${resMin}-min resolutie zijn dit echte gemeten hellingen — bruikbaar als daalsnelheid. Berekend op een
+median-of-3 despikede reeks (zelfde spike-filter als het live systeem), zodat losse sensor-spikes (~9% van de
+1-min stappen is niet-fysiologisch) de snelheid niet opblazen.
 
 - Snelste daling: ${summary.fastestDrop ? `${summary.fastestDrop.rateMmolPerMin} mmol/L/min (${summary.fastestDrop.fromMmol} -> ${summary.fastestDrop.toMmol} in ${summary.fastestDrop.minutes} min, ${summary.fastestDrop.from} t/m ${summary.fastestDrop.to})` : 'n.v.t.'}
 - Snelste stijging: ${summary.fastestRise ? `${summary.fastestRise.rateMmolPerMin} mmol/L/min (${summary.fastestRise.fromMmol} -> ${summary.fastestRise.toMmol} in ${summary.fastestRise.minutes} min, ${summary.fastestRise.from} t/m ${summary.fastestRise.to})` : 'n.v.t.'}`
