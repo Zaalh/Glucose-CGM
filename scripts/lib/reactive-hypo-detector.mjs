@@ -339,7 +339,7 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
   }
   components.mealOnsetScore = mealOnsetScore
 
-  // 7. Demping voor veilig/stabiel patroon
+  // 9. Demping voor veilig/stabiel patroon
   let dampingScore = 0
   if (current >= 7.0 && steepest > TH.fastFall) dampingScore += 3
   if (blended >= 0) dampingScore += 2

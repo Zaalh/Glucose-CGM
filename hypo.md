@@ -591,6 +591,12 @@ Praktische glucosegrenzen:
 - `< 3.9 mmol/L`: gangbare internationale level-1 hypo grens.
 - `< 3.0 mmol/L`: ernstiger/klinisch significante hypo grens.
 
+> **Let op — alarmgrens (4.0) vs telgrens (3.9):** de detector en het carb-advies
+> alarmeren bewust al op `< 4.0` (0,1 mmol conservatiever), terwijl de statistiek,
+> episode-builder en glucose-events tellen op de klinische `< 3.9`. Een getelde
+> drempel-low `<3.9` matcht daardoor niet altijd 1-op-1 met wat een "onder 4.0"-alarm
+> triggerde — dat is opzet, geen bug.
+
 ## Nieuwe detectie-aanpak
 
 De hypo-detectie moet uit meerdere lagen bestaan.
