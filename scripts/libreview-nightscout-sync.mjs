@@ -1505,7 +1505,10 @@ function inc(map, key) {
 function median(values) {
   const xs = values.filter(Number.isFinite).sort((a, b) => a - b)
   if (!xs.length) return null
-  return round(xs[Math.floor(xs.length / 2)], 1)
+  // Standaard-mediaan: bij even aantal het gemiddelde van de twee middelste waarden
+  // (niet de bovenste van de twee), conform de gangbare statistische definitie.
+  const mid = Math.floor(xs.length / 2)
+  return round(xs.length % 2 ? xs[mid] : (xs[mid - 1] + xs[mid]) / 2, 1)
 }
 
 function summarizeReactiveEpisodes(episodes) {
