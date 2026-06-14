@@ -1545,7 +1545,10 @@ function summarizeReactiveEpisodes(episodes) {
     drops.push(Number(e.dropFromPeakMmol))
     nadirs.push(Number(e.nadirMmol))
     peakToNadir.push(Number(e.minutesPeakToNadir))
-    recoveries.push(Number(e.recoveryMinutes))
+    // Alleen episodes die écht herstelden tellen mee. recoveryMinutes is null als
+    // er binnen de horizon geen herstel was; Number(null) === 0 zou anders door
+    // median()'s Number.isFinite-filter glippen en "0 min herstel" meetellen.
+    if (e.recoveryMinutes != null) recoveries.push(Number(e.recoveryMinutes))
     if (!latestPeakAt || Date.parse(e.peakAt) > Date.parse(latestPeakAt)) latestPeakAt = e.peakAt || latestPeakAt
   }
   const total = episodes.length
@@ -2085,6 +2088,17 @@ async function getCgmEvents(limit) {
   }
 }
 
+// Server-side tijdweergave: forceer de lokale tijdzone. Zonder timeZone-optie pakt
+// toLocaleString de tijdzone van het server-proces (= UTC in de Docker-container),
+// waardoor server-gerenderde tijden 2u afwijken van de client-panelen (CEST). Zie
+// dayKeyInTz/localDayRange die dezelfde LIBREVIEW_TZ gebruiken.
+function fmtLocalNL(value) {
+  if (value == null) return '–'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return '–'
+  return d.toLocaleString('nl-NL', { timeZone: process.env.LIBREVIEW_TZ || 'Europe/Amsterdam' })
+}
+
 // Pattern cards (SmartXdrip §19.5): deterministische Inzichten-kaarten, geen LLM.
 async function getAiPatterns() {
   const [stats, health] = await Promise.all([getAiStats(14), getSourceHealth()])
@@ -2156,14 +2170,14 @@ async function getAiPatterns() {
         cards.push({
           key: 'freshness',
           title: 'Recentheid episodes',
-          body: `Nieuwste CGM ${stats.latestEntryAt ? new Date(stats.latestEntryAt).toLocaleString('nl-NL') : '–'} · nieuwste episode ${r.latestPeakAt ? new Date(r.latestPeakAt).toLocaleString('nl-NL') : '–'}${stats.episodesBuiltAt ? ` · episodes bijgewerkt ${new Date(stats.episodesBuiltAt).toLocaleString('nl-NL')}` : ''}${stale ? ' · build loopt achter: draai episodes:build' : ''}`,
+          body: `Nieuwste CGM ${fmtLocalNL(stats.latestEntryAt)} · nieuwste episode ${fmtLocalNL(r.latestPeakAt)}${stats.episodesBuiltAt ? ` · episodes bijgewerkt ${fmtLocalNL(stats.episodesBuiltAt)}` : ''}${stale ? ' · build loopt achter: draai episodes:build' : ''}`,
         })
       }
     }
     if (recentEpisodes.length) {
       const parts = recentEpisodes.slice(0, 3).map((e) => {
         const kind = Number(e.nadirMmol) < 3.9 ? 'low' : 'dip'
-        return `${new Date(e.nadirAt || e.peakAt).toLocaleString('nl-NL')} ${kind} ${e.nadirMmol} mmol (${e.outcome || '–'})`
+        return `${fmtLocalNL(e.nadirAt || e.peakAt)} ${kind} ${e.nadirMmol} mmol (${e.outcome || '–'})`
       })
       cards.push({ key: 'recent_episodes', title: 'Recente lows/dips', body: parts.join(' · ') })
     }
@@ -2284,7 +2298,9 @@ async function getEvaluation(days) {
       const s = e.severity || 'onbekend'; bySeverity[s] = (bySeverity[s] || 0) + 1
       const b = e.timeOfDayBucket || 'onbekend'; byTimeOfDay[b] = (byTimeOfDay[b] || 0) + 1
     })
-    const recoveries = eps.map((e) => Number(e.recoveryMinutes)).filter(Number.isFinite).sort((a, b) => a - b)
+    // Zie summarizeReactiveEpisodes: nooit-herstelde episodes (recoveryMinutes null)
+    // niet als 0 meetellen — anders lijkt het herstel kunstmatig snel.
+    const recoveries = eps.filter((e) => e.recoveryMinutes != null).map((e) => Number(e.recoveryMinutes)).filter(Number.isFinite).sort((a, b) => a - b)
     const total = eps.length
     const poorQuality = eps.filter((e) => Number(e.qualityScore) < 70).length
     const fingerstick = eps.filter((e) => Array.isArray(e.qualityFlags) && e.qualityFlags.includes('fingerstick_confirmed')).length
@@ -2297,7 +2313,7 @@ async function getEvaluation(days) {
       bySeverity,
       areaBelow3_9: round(eps.reduce((s, e) => s + (Number(e.areaBelow3_9) || 0), 0), 1),
       areaBelow3_0: round(eps.reduce((s, e) => s + (Number(e.areaBelow3_0) || 0), 0), 1),
-      medianRecoveryMin: recoveries.length ? recoveries[Math.floor(recoveries.length / 2)] : null,
+      medianRecoveryMin: median(recoveries),
       pctPoorQuality: total ? round((poorQuality / total) * 100, 0) : 0,
       pctFingerstickConfirmed: total ? round((fingerstick / total) * 100, 0) : 0,
       pctPostprandial: total ? round((postprandial / total) * 100, 0) : 0,
