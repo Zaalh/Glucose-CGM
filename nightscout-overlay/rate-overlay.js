@@ -1289,9 +1289,9 @@
     slowRate: 0.07,
     preDipMmol: 0.40,
     dipToNadirMin: 60,
-    dropWatchRate: 0.05,
-    dropHighRate: 0.09,
-    dropUrgentRate: 0.14,
+    dropWatchRate: 0.07,
+    dropHighRate: 0.12,
+    dropUrgentRate: 0.18,
     typicalRiseMmol: 1.4,
     typicalDropMmol: 1.4,
     typicalUndershootMmol: 0.2,
@@ -1323,14 +1323,17 @@
       var rises = Array.isArray(parsed.rises) ? parsed.rises : [];
       var drops = Array.isArray(parsed.drops) ? parsed.drops : [];
       var undershoots = Array.isArray(parsed.undershoots) ? parsed.undershoots : [];
+      var learnedDropWatch = percentile(dropRates, 0.50);
+      var learnedDropHigh = percentile(dropRates, 0.75);
+      var learnedDropUrgent = percentile(dropRates, 0.90);
       return {
         fastRate: percentile(parsed.riseRates, 0.75),
         slowRate: percentile(parsed.riseRates, 0.25),
         preDipMmol: median(preDips) || MEAL_DEFAULTS.preDipMmol,
         dipToNadirMin: median(peakToNadir) || MEAL_DEFAULTS.dipToNadirMin,
-        dropWatchRate: percentile(dropRates, 0.50) || MEAL_DEFAULTS.dropWatchRate,
-        dropHighRate: percentile(dropRates, 0.75) || MEAL_DEFAULTS.dropHighRate,
-        dropUrgentRate: percentile(dropRates, 0.90) || MEAL_DEFAULTS.dropUrgentRate,
+        dropWatchRate: Math.max(0.04, learnedDropWatch || MEAL_DEFAULTS.dropWatchRate),
+        dropHighRate: Math.max(0.07, learnedDropHigh || MEAL_DEFAULTS.dropHighRate),
+        dropUrgentRate: Math.max(0.10, learnedDropUrgent || MEAL_DEFAULTS.dropUrgentRate),
         typicalRiseMmol: median(rises) || MEAL_DEFAULTS.typicalRiseMmol,
         typicalDropMmol: median(drops) || MEAL_DEFAULTS.typicalDropMmol,
         typicalUndershootMmol: median(undershoots) || MEAL_DEFAULTS.typicalUndershootMmol,
@@ -1447,12 +1450,13 @@
       if (Number.isFinite(meal.riseFromTrough) && meal.riseFromTrough >= cal.typicalRiseMmol) score += 12;
       if (Number.isFinite(meal.effRate) && meal.effRate >= cal.fastRate) score += 12;
     } else if (meal.phase === 'reactive-drop') {
-      score += 55;
+      score += 45;
       if (Number.isFinite(meal.dropRate)) {
         if (meal.dropRate >= cal.dropUrgentRate) score += 25;
         else if (meal.dropRate >= cal.dropHighRate) score += 16;
         else if (meal.dropRate >= cal.dropWatchRate) score += 8;
       }
+      if (Number.isFinite(meal.dropFromPeak) && meal.dropFromPeak >= cal.typicalDropMmol) score += 10;
       if (Number.isFinite(meal.currentMmol) && meal.currentMmol < 4.5) score += 15;
       else if (Number.isFinite(meal.currentMmol) && meal.currentMmol < 5.3) score += 8;
     }
@@ -1479,6 +1483,13 @@
     var latestTime = readingTime(latest);
     var currentMmol = mmol(Number(latest.sgv));
     if (!Number.isFinite(latestTime) || !Number.isFinite(currentMmol)) return null;
+
+    var prev10 = findBaseline(readings, latestTime, 10);
+    var rate10 = null;
+    if (prev10) {
+      var dt = (latestTime - readingTime(prev10)) / 60000;
+      if (dt > 0) rate10 = (currentMmol - mmol(Number(prev10.sgv))) / dt;
+    }
 
     // Fase 'reactive-drop': na een recente maaltijdpiek is de daling begonnen.
     // Dit voorkomt dat een losse daling zonder voorafgaande stijging als maaltijd wordt gelabeld.
@@ -1507,7 +1518,8 @@
           var riseIntoPeak = peakMmol - priorTroughMmol;
           var dropFromPeak = peakMmol - currentMmol;
           var dropRate = minutesSincePeak > 0 ? dropFromPeak / minutesSincePeak : 0;
-          if (riseIntoPeak >= 0.6 && dropFromPeak >= 0.5 && dropRate >= cal.dropWatchRate) {
+          var activelyFalling = rate10 === null || rate10 < -0.02;
+          if (activelyFalling && riseIntoPeak >= 0.6 && dropFromPeak >= 0.7 && dropRate >= cal.dropWatchRate) {
             var dropSpeed = dropRate >= cal.dropUrgentRate ? 'urgent' : (dropRate >= cal.dropHighRate ? 'hoog' : 'let op');
             return {
               phase: 'reactive-drop',
@@ -1536,14 +1548,6 @@
     if (!trough) return null;
     var ageMin = (latestTime - readingTime(trough)) / 60000;
     var riseFromTrough = currentMmol - troughMmol;
-
-    // Korte-termijn snelheid (~10 min) om steile spikes vroeg te pakken.
-    var prev10 = findBaseline(readings, latestTime, 10);
-    var rate10 = null;
-    if (prev10) {
-      var dt = (latestTime - readingTime(prev10)) / 60000;
-      if (dt > 0) rate10 = (currentMmol - mmol(Number(prev10.sgv))) / dt;
-    }
 
     // --- Fase 'rising': bevestigde stijging (prioriteit) ---
     var rising = rate10 !== null ? rate10 > 0 : riseFromTrough >= 0.8;

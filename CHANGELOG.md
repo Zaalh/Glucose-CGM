@@ -63,7 +63,9 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
     combineert de eigen drop-rate-percentielen (p50/p75/p90), pre-dip, stijgsnelheid, piek→dal-patroon en het
     bestaande hypo-risico. Extra kalibratievelden (`dropRates`, `rises`, `drops`, `undershoots`) maken de grenzen
     relatief aan de gebruiker; generieke defaults worden alleen gebruikt totdat genoeg eigen historie beschikbaar is.
-    Cache-buster → `meal-risk-dynamic-20260614g`.
+    De fallback is conservatief en `reactive-drop` vereist een actieve daling op de korte trend, zodat normale
+    post-piek terugkeer bij nieuwe gebruikers niet te snel als hoog risico verschijnt. Cache-buster →
+    `meal-risk-dynamic-20260614h`.
 
 ### Gewijzigd
 
