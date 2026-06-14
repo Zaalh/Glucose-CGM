@@ -324,6 +324,7 @@ De live setup is geverifieerd met InfluxDB `1.8.10`, Grafana `11.5.2`, datasourc
 - `scripts/train-risk-model.mjs`: Training en calibratie van model_state.
 - `scripts/retrain-and-export-model.mjs`: Train + export naar `scripts/risk-model-state.json`.
 - `scripts/risk-model-state.json`: Geëxporteerde, actieve risico-drempels.
+- `scripts/export-gemini-cgm.mjs` (`npm run export:gemini`): Offline export van `cgm_entries.json` (de PDF-historie, **niet** live MongoDB) naar `exports/gemini-cgm/` — `gemini-cgm-export.json` (metadata + exacte samenvatting + alle rijen), `gemini-cgm-readings.csv` (mg/dL + mmol/L) en `GEMINI_PROMPT.md` (kant-en-klare prompt met de berekende cijfers). Pure Node, geen DB. Argumenten: `node scripts/export-gemini-cgm.mjs [input.json] [outDir]`. `exports/` is git-ignored (regenereerbare output). Let op: de bron is grove ~30-min PDF-resolutie; voor live 1-min cijfers is een MongoDB-export nodig.
 - `nightscout-overlay/rate-overlay.js`: De live overlay — hoofdmonitor met waarde, grafiek, voorspelling en hypo-kaart.
 - `nightscout-overlay/nginx.conf` + `nightscout-overlay/app-locations.conf`: Injecteert de overlay en proxyt de sync-endpoints (`/_prediction/latest`, `/_feedback`, `/_overlay/entries`, `/_ai-review/*`).
 

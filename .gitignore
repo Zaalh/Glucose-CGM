@@ -11,3 +11,4 @@ grafana-data/
 nightscout-overlay/certs/
 hypo-tune-reports/
 scripts/reactive-hypo-v2-state.json
+exports/

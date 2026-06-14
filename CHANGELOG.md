@@ -76,6 +76,13 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
     stijging/daling en de grootste recente piek→dal sprongen uit de episode-database. Formulering blijft
     patroon-gebaseerd en wijst op CGM-lag/vingerprikbevestiging bij snelle dalingen. Cache-buster →
     `volatility-impact-20260614j`.
+- **Offline Gemini-export tool** (`scripts/export-gemini-cgm.mjs`, `npm run export:gemini`). Een pure Node-
+  exporter (geen DB) die `cgm_entries.json` omzet naar `exports/gemini-cgm/`: `gemini-cgm-export.json`
+  (metadata + exacte samenvatting + alle rijen), `gemini-cgm-readings.csv` (mg/dL + mmol/L) en
+  `GEMINI_PROMPT.md` (kant-en-klare prompt met de berekende cijfers, zodat een externe LLM niet hoeft te
+  gokken). Berekent mean/SD/CV/GMI, percentielen, TIR/TBR/TAR en de snelste sample-tot-sample stijging/daling.
+  De export documenteert expliciet dat de bron grove ~30-min PDF-historie is (niet live 1-min MongoDB) en
+  waarschuwt tegen verzonnen episodes/diagnoses. `exports/` is git-ignored (regenereerbare output).
 
 ### Gewijzigd
 
