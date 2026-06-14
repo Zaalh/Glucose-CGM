@@ -84,9 +84,6 @@ services:
       - ./nightscout-overlay/certs:/etc/nginx/certs:ro
     ports:
       - "${NIGHTSCOUT_PORT:-1337}:1337"
-      # HTTPS voor de iOS-follower (Zukka/xDrip) + PWA op de telefoon. nginx luistert
-      # intern op 443 (zie nginx.conf); deze publish hoort in git, niet als rsync-drift.
-      - "${NIGHTSCOUT_HTTPS_PORT:-443}:443"
 
   libreview-sync:
     image: node:20-alpine
