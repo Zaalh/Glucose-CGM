@@ -87,6 +87,13 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   (TBR <3.9, very-low <3.0) staan primair, GMI/TIR/TAR alleen als descriptieve context, met de waarschuwing
   dat TBR een ondergrens is door de 30-min resolutie. De grootste sample-tot-sample stijging/daling is gemarkeerd
   als `resolutionLimited` (netto verschil tussen twee 30-min punten, geen gemeten CGM-helling).
+- **Resolutie-bewuste export + live MongoDB-dump.** De exporter detecteert nu de mediane sample-interval en
+  past de framing automatisch aan: bij ~1-min live data zijn de snelheden échte gemeten hellingen
+  (`resolutionLimited: false`, sectie "Snelste gemeten daling/stijging mmol/L/min") en vervalt de
+  "TBR is ondergrens"-caveat; bij grove ~30-min historie blijft de conservatieve framing. Nieuw
+  `scripts/dump-entries-mongo.mjs` (`npm run dump:entries`) dumpt de live `entries`-collectie (default laatste
+  21 dagen) naar een exporter-compatibel `exports/live-entries.json`; `npm run export:gemini:live` doet dump +
+  high-res export in één stap. Draait ín de Docker-container (mongo heeft geen host-poort), dus op de iMac.
 
 ### Gewijzigd
 
