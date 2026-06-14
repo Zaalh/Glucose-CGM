@@ -30,6 +30,7 @@
   var currentPatternCorrection = null;
   var FORECAST_CALIBRATION_KEY = 'cgm-forecast-calibration-v1';
   var MEAL_CALIBRATION_KEY = 'cgm-meal-calibration-v1';
+  var MEAL_EPISODE_KEY = 'cgm-meal-episode-v1';
   var refreshTimer = null;
   var PEAK_DROP_THRESHOLDS = {
     watch: { minDrop: 1.4, minRate: 0.05, maxMinutes: 75 },
@@ -1311,6 +1312,76 @@
     return a[Math.min(a.length - 1, Math.floor(p * a.length))];
   }
 
+  function numericArray(value) {
+    if (!Array.isArray(value)) return [];
+    return value.map(function (v) { return Number(v); })
+      .filter(function (v) { return Number.isFinite(v); })
+      .slice(-MEAL_SAMPLE_CAP);
+  }
+
+  function readJsonStorage(key) {
+    try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (_err) { return null; }
+  }
+
+  function normalizeMealCalibrationPayload(value) {
+    if (!value || typeof value !== 'object') return null;
+    var riseRates = numericArray(value.riseRates);
+    if (!riseRates.length) return null;
+    var lastTroughTime = Number(value.lastTroughTime) || 0;
+    return {
+      schemaVersion: 1,
+      riseRates: riseRates,
+      preDips: numericArray(value.preDips),
+      peakToNadir: numericArray(value.peakToNadir),
+      dropRates: numericArray(value.dropRates),
+      rises: numericArray(value.rises),
+      drops: numericArray(value.drops),
+      undershoots: numericArray(value.undershoots),
+      lastTroughTime: Number.isFinite(lastTroughTime) ? lastTroughTime : 0
+    };
+  }
+
+  function loadMealEpisode() {
+    var episode = readJsonStorage(MEAL_EPISODE_KEY);
+    if (!episode || episode.schemaVersion !== 1) return null;
+    if (!Number.isFinite(Number(episode.expiresAt)) || Date.now() > Number(episode.expiresAt)) return null;
+    ['startedAt', 'troughTime', 'troughMmol', 'peakTime', 'peakMmol', 'baselineMmol', 'lastUpdatedAt', 'expiresAt'].forEach(function (key) {
+      if (episode[key] !== null && episode[key] !== undefined) episode[key] = Number(episode[key]);
+    });
+    if (!Number.isFinite(episode.startedAt) || !Number.isFinite(episode.peakMmol)) return null;
+    return episode;
+  }
+
+  function saveMealEpisode(episode) {
+    try { localStorage.setItem(MEAL_EPISODE_KEY, JSON.stringify(episode)); } catch (_err) {}
+  }
+
+  function clearMealEpisode() {
+    try { localStorage.removeItem(MEAL_EPISODE_KEY); } catch (_err) {}
+  }
+
+  function exportMealState() {
+    return JSON.stringify({
+      schemaVersion: 1,
+      exportedAt: Date.now(),
+      mealCalibration: normalizeMealCalibrationPayload(readJsonStorage(MEAL_CALIBRATION_KEY)),
+      mealEpisode: loadMealEpisode()
+    });
+  }
+
+  function importMealState(raw) {
+    if (!raw || raw.length > 50000) throw new Error('Ongeldige of te grote import.');
+    var parsed = JSON.parse(raw);
+    if (!parsed || parsed.schemaVersion !== 1) throw new Error('Onbekende versie.');
+    var cal = normalizeMealCalibrationPayload(parsed.mealCalibration);
+    if (!cal) throw new Error('Geen geldige maaltijd-kalibratie gevonden.');
+    try { localStorage.setItem(MEAL_CALIBRATION_KEY, JSON.stringify(cal)); } catch (_err) { throw new Error('Kon kalibratie niet opslaan.'); }
+    if (parsed.mealEpisode && parsed.mealEpisode.schemaVersion === 1 && Number(parsed.mealEpisode.expiresAt) > Date.now()) {
+      saveMealEpisode(parsed.mealEpisode);
+    }
+    return cal.riseRates.length;
+  }
+
   function loadMealCalibration() {
     try {
       var parsed = JSON.parse(localStorage.getItem(MEAL_CALIBRATION_KEY) || 'null');
@@ -1443,6 +1514,9 @@
     if (meal.phase === 'dip') {
       score += 18;
       if (Number.isFinite(meal.preDipMmol) && meal.preDipMmol >= cal.preDipMmol * 1.5) score += 12;
+    } else if (meal.phase === 'plateau') {
+      score += 22;
+      if (Number.isFinite(meal.peakMmol) && Number.isFinite(meal.currentMmol) && meal.peakMmol - meal.currentMmol < 0.4) score += 6;
     } else if (meal.phase === 'rising') {
       score += 25;
       if (meal.speed === 'snel') score += 18;
@@ -1476,6 +1550,95 @@
     return { score: score, level: classifyMealRisk(score) };
   }
 
+  function updateMealEpisodeMemory(readings, detectedMeal, cal, latestTime, currentMmol) {
+    var existing = loadMealEpisode();
+    if (existing && Number.isFinite(existing.baselineMmol) && currentMmol <= existing.baselineMmol + 0.3) {
+      clearMealEpisode();
+      existing = null;
+    }
+
+    if (detectedMeal && detectedMeal.phase === 'rising') {
+      var episode = existing || {
+        schemaVersion: 1,
+        phase: 'rising',
+        startedAt: latestTime,
+        troughTime: latestTime - (detectedMeal.minutesSinceMeal || 0) * 60000,
+        troughMmol: currentMmol - (detectedMeal.riseFromTrough || 0),
+        baselineMmol: currentMmol - (detectedMeal.riseFromTrough || 0)
+      };
+      episode.phase = detectedMeal.speed === 'snel' ? 'rising' : (detectedMeal.riseFromTrough >= cal.typicalRiseMmol ? 'rising' : episode.phase);
+      episode.lastUpdatedAt = latestTime;
+      episode.peakMmol = Math.max(Number(episode.peakMmol) || currentMmol, currentMmol);
+      if (episode.peakMmol <= currentMmol) episode.peakTime = latestTime;
+      episode.troughTime = episode.troughTime || (latestTime - (detectedMeal.minutesSinceMeal || 0) * 60000);
+      episode.troughMmol = Number.isFinite(episode.troughMmol) ? Math.min(episode.troughMmol, currentMmol - (detectedMeal.riseFromTrough || 0)) : currentMmol;
+      episode.baselineMmol = Number.isFinite(episode.baselineMmol) ? episode.baselineMmol : episode.troughMmol;
+      episode.expiresAt = latestTime + 180 * 60000;
+      saveMealEpisode(episode);
+      return episode;
+    }
+
+    if (!existing) return null;
+    existing.lastUpdatedAt = latestTime;
+    if (currentMmol > existing.peakMmol) {
+      existing.peakMmol = currentMmol;
+      existing.peakTime = latestTime;
+      existing.phase = 'rising';
+      existing.expiresAt = latestTime + 180 * 60000;
+      saveMealEpisode(existing);
+      return existing;
+    }
+
+    var minutesSincePeak = (latestTime - existing.peakTime) / 60000;
+    var dropFromPeak = existing.peakMmol - currentMmol;
+    var rate10 = null;
+    var prev10 = findBaseline(readings, latestTime, 10);
+    if (prev10) {
+      var dt = (latestTime - readingTime(prev10)) / 60000;
+      if (dt > 0) rate10 = (currentMmol - mmol(Number(prev10.sgv))) / dt;
+    }
+    if (minutesSincePeak >= 10 && dropFromPeak < 0.7 && Math.abs(rate10 || 0) <= 0.03) existing.phase = 'plateau';
+    if (dropFromPeak >= 0.7 && (rate10 === null || rate10 < -0.02)) existing.phase = 'reactive-drop';
+    if (Date.now() > existing.expiresAt) {
+      clearMealEpisode();
+      return null;
+    }
+    saveMealEpisode(existing);
+    return existing;
+  }
+
+  function mealFromEpisodeMemory(episode, cal, latestTime, currentMmol) {
+    if (!episode || !Number.isFinite(episode.peakTime) || !Number.isFinite(episode.peakMmol)) return null;
+    var minutesSincePeak = (latestTime - episode.peakTime) / 60000;
+    if (!Number.isFinite(minutesSincePeak) || minutesSincePeak < 0 || minutesSincePeak > 180) return null;
+    var dropFromPeak = episode.peakMmol - currentMmol;
+    var dropRate = minutesSincePeak > 0 ? dropFromPeak / minutesSincePeak : 0;
+    if (episode.phase === 'reactive-drop' && dropFromPeak >= 0.7 && dropRate >= cal.dropWatchRate) {
+      return {
+        phase: 'reactive-drop',
+        speed: dropRate >= cal.dropUrgentRate ? 'urgent' : (dropRate >= cal.dropHighRate ? 'hoog' : 'let op'),
+        minutesSincePeak: Math.round(minutesSincePeak),
+        dropRate: dropRate,
+        dropFromPeak: dropFromPeak,
+        peakMmol: episode.peakMmol,
+        currentMmol: currentMmol,
+        expectedDipAt: episode.peakTime + cal.dipToNadirMin * 60000,
+        fromMemory: true
+      };
+    }
+    if ((episode.phase === 'plateau' || episode.phase === 'rising') && dropFromPeak < 0.7 && currentMmol > (episode.baselineMmol || 0) + 0.6) {
+      return {
+        phase: 'plateau',
+        speed: 'plateau',
+        minutesSincePeak: Math.round(minutesSincePeak),
+        peakMmol: episode.peakMmol,
+        currentMmol: currentMmol,
+        expectedDipAt: episode.peakTime + cal.dipToNadirMin * 60000
+      };
+    }
+    return null;
+  }
+
   function detectMealState(readings) {
     if (!readings || readings.length < 2) return null;
     var cal = loadMealCalibration();
@@ -1483,6 +1646,10 @@
     var latestTime = readingTime(latest);
     var currentMmol = mmol(Number(latest.sgv));
     if (!Number.isFinite(latestTime) || !Number.isFinite(currentMmol)) return null;
+    function finalizeMealState(meal) {
+      var episode = updateMealEpisodeMemory(readings, meal, cal, latestTime, currentMmol);
+      return meal || mealFromEpisodeMemory(episode, cal, latestTime, currentMmol);
+    }
 
     var prev10 = findBaseline(readings, latestTime, 10);
     var rate10 = null;
@@ -1521,7 +1688,7 @@
           var activelyFalling = rate10 === null || rate10 < -0.02;
           if (activelyFalling && riseIntoPeak >= 0.6 && dropFromPeak >= 0.7 && dropRate >= cal.dropWatchRate) {
             var dropSpeed = dropRate >= cal.dropUrgentRate ? 'urgent' : (dropRate >= cal.dropHighRate ? 'hoog' : 'let op');
-            return {
+            return finalizeMealState({
               phase: 'reactive-drop',
               speed: dropSpeed,
               minutesSincePeak: Math.round(minutesSincePeak),
@@ -1530,7 +1697,7 @@
               peakMmol: peakMmol,
               currentMmol: currentMmol,
               expectedDipAt: peakTime + cal.dipToNadirMin * 60000
-            };
+            });
           }
         }
       }
@@ -1559,7 +1726,7 @@
         var avgRate = ageMin > 0 ? riseFromTrough / ageMin : 0;
         var effRate = Math.max(rate10 || 0, avgRate);
         var speed = effRate >= cal.fastRate ? 'snel' : (effRate < cal.slowRate ? 'langzaam' : 'normaal');
-        return {
+        return finalizeMealState({
           phase: 'rising',
           speed: speed,
           minutesSinceMeal: Math.round(ageMin),
@@ -1567,7 +1734,7 @@
           riseFromTrough: riseFromTrough,
           effRate: effRate,
           currentMmol: currentMmol
-        };
+        });
       }
     }
 
@@ -1585,10 +1752,10 @@
       var preDip = (preSum / preN) - troughMmol;
       var bottoming = rate10 === null || (rate10 >= -0.02 && rate10 <= 0.05);
       if (preDip >= cal.preDipMmol && ageMin <= 15 && riseFromTrough < 0.5 && bottoming) {
-        return { phase: 'dip', preDipMmol: preDip, currentMmol: currentMmol };
+        return finalizeMealState({ phase: 'dip', preDipMmol: preDip, currentMmol: currentMmol });
       }
     }
-    return null;
+    return finalizeMealState(null);
   }
 
   function renderMealBadge(readings, hypoRisk, peakSignal) {
@@ -1617,6 +1784,14 @@
         '<span class="meal-label">Reactieve daling ' + meal.speed + '</span>' +
         '<span class="meal-time">· ' + meal.minutesSincePeak + 'm na piek</span>' +
         dropRateTxt + riskTxt;
+    } else if (meal.phase === 'plateau') {
+      badge.className = 'meal-snel' + riskClass;
+      var plateauDipTxt = Number.isFinite(meal.expectedDipAt)
+        ? '<span class="meal-time">· dip mogelijk ~' + formatClock(meal.expectedDipAt) + '</span>' : '';
+      badge.innerHTML =
+        '<span class="meal-ic">🍽️</span>' +
+        '<span class="meal-label">Maaltijd plateau</span>' +
+        '<span class="meal-time">· ' + meal.minutesSincePeak + 'm na piek</span>' + plateauDipTxt + riskTxt;
     } else {
       badge.className = 'meal-' + meal.speed + riskClass;
       var dipTxt = Number.isFinite(meal.expectedDipAt)
@@ -1827,6 +2002,7 @@
     panel.querySelector('#cgm-ai-explore').addEventListener('click', onAiStatsClick);
     panel.querySelector('#cgm-ai-daydetail').addEventListener('click', onAiStatsClick);
     panel.querySelector('#cgm-ai-settings').addEventListener('change', onAiSettingsChange);
+    panel.querySelector('#cgm-ai-settings').addEventListener('click', onAiSettingsClick);
     panel.querySelector('.ai-tabs').addEventListener('click', onAiTabClick);
     renderAiQuickLog();
     renderAiSettings();
@@ -2749,6 +2925,8 @@
     el.innerHTML = '<div class="ai-sec">Instellingen</div>' +
       '<div class="ai-set-row"><label>Statistiek-venster</label><select data-set="statsDays">' + opts([7, 14, 30, 90], s.statsDays) + '</select></div>' +
       '<div class="ai-set-row"><label>History-venster</label><select data-set="historyDays">' + opts([7, 14, 30], s.historyDays) + '</select></div>' +
+      '<div class="ai-set-row"><label>Maaltijd-kalibratie</label><span><button type="button" class="ai-rev-btn" data-meal-cal="export">Export</button> <button type="button" class="ai-rev-btn" data-meal-cal="import">Import</button></span></div>' +
+      '<div id="cgm-meal-cal-status" class="ai-fine"></div>' +
       '<div class="ai-fine">Doelbereik: laag 3.9 · zeer laag 3.0 · hoog 10.0 · zeer hoog 13.9 mmol/L (vast; detector ongemoeid).</div>';
   }
   function onAiSettingsChange(event) {
@@ -2759,6 +2937,33 @@
     try { localStorage.setItem(AI_SETTINGS_KEY, JSON.stringify(s)); } catch (e) {}
     aiStatsLoaded = false; aiHistoryLoaded = false;
     loadAiStats(true); loadAiHistory(true);
+  }
+
+  function onAiSettingsClick(event) {
+    var btn = event.target && event.target.closest ? event.target.closest('[data-meal-cal]') : null;
+    if (!btn) return;
+    var status = document.getElementById('cgm-meal-cal-status');
+    function setStatus(text) { if (status) status.textContent = text; }
+    try {
+      if (btn.getAttribute('data-meal-cal') === 'export') {
+        var payload = exportMealState();
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(payload).then(function () { setStatus('Kalibratie gekopieerd.'); })
+            .catch(function () { window.prompt('Kopieer maaltijd-kalibratie:', payload); setStatus('Export klaar.'); });
+        } else {
+          window.prompt('Kopieer maaltijd-kalibratie:', payload);
+          setStatus('Export klaar.');
+        }
+      } else {
+        var raw = window.prompt('Plak maaltijd-kalibratie JSON:');
+        if (!raw) return;
+        var samples = importMealState(raw);
+        setStatus('Import gelukt · ' + samples + ' samples.');
+        scheduleRefresh(0, true);
+      }
+    } catch (err) {
+      setStatus('Import/export fout: ' + (err && err.message ? err.message : err));
+    }
   }
 
   // --- Statistiek-tab (A + B): deterministisch, puur Mongo-reads, geen LLM/quota.

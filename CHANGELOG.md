@@ -66,6 +66,11 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
     De fallback is conservatief en `reactive-drop` vereist een actieve daling op de korte trend, zodat normale
     post-piek terugkeer bij nieuwe gebruikers niet te snel als hoog risico verschijnt. Cache-buster →
     `meal-risk-dynamic-20260614h`.
+  - **Episode-memory + portable kalibratie.** De overlay onthoudt nu een lopende maaltijdpiek in
+    `cgm-meal-episode-v1`, zodat een zware stijging tijdens een plateau niet wordt vergeten voordat de reactieve
+    daling inzet. De episode vervalt pas bij terugkeer richting baseline of na 180 minuten. In het AI-paneel →
+    Instellingen staan nu **Export/Import**-knoppen voor `cgm-meal-calibration-v1`, met schema-validatie,
+    numerieke filtering en sample-capping. Cache-buster → `meal-memory-export-20260614i`.
 
 ### Gewijzigd
 
