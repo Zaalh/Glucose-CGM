@@ -145,6 +145,24 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Gefixt
 
+- **Dubbele daal-episodes met identieke piek (`reactive_hypo_episodes`)** — de overlay toonde
+  bv. drie "dips vandaag" met exact dezelfde `peakAt` (02:02:09) en piek, maar oplopend-diepere
+  nadirs. Oorzaak: de upsert-sleutel was `peakAt|nadirAt`. De piek is het stabiele anker van een
+  daling, maar de nadir verschuift dieper/later zolang de daling nog loopt. Elke herhaalde
+  build-run (live elke ~60s) berekende voor dezelfde piek een andere nadir → nieuwe sleutel →
+  een extra document i.p.v. een update. Eén echte daling werd zo opgesplitst over meerdere docs,
+  waardoor de werkelijke diepte versplinterde (het 02:02-geval was eigenlijk één **hypo** met
+  nadir 3.885 mmol, verstopt als drie `safe_drop`-dips). Fix: `episodeKey` ankert nu op `peakAt`
+  alleen (`scripts/build-reactive-hypo-episodes.mjs`) — binnen één run is een piek uniek per
+  episode (de builder springt na elke nadir door), en latere runs updaten hetzelfde document.
+  - Nieuw eenmalig migratiescript `scripts/dedup-reactive-hypo-episodes.mjs` (`npm run episodes:dedup`,
+    dry-run by default, `--apply` om te schrijven): collapse't dubbele peakAt-groepen (diepste nadir
+    blijft, feedback wordt gemerged) **én** normaliseert álle oude `peakAt|nadirAt`-sleutels naar het
+    nieuwe formaat, zodat `dedup → build` idempotent is.
+  - **Gevalideerd op de live-DB (2026-06-14):** 284 → 272 episodes, 0 resterende duplicaten, stabiel
+    na ≥1 sync-cyclus. Operationele les: een datamigratie op een collectie die de live `libreview-sync`-
+    loop óók schrijft is zinloos tot de container herstart is (Node hot-reload't de bind-mount niet) —
+    eerst `compose restart libreview-sync`, dán opruimen.
 - **Outcome-evaluatie was stil dood sinds de libreview-overstap — `snapshots:evaluate` deed
   niets** — `evaluate-predictions.mjs` koppelt elke `prediction_snapshot` aan zijn `entry` om
   achteraf de werkelijke uitkomst (laagste mmol binnen 30/60/120/180 min → true/false

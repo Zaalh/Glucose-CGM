@@ -882,6 +882,16 @@ Voorstel voor MongoDB collection `reactive_hypo_episodes`:
 }
 ```
 
+**Upsert-sleutel = `peakAt` (niet `peakAt|nadirAt`).** De piek is het stabiele anker van een
+daling; de nadir verschuift dieper/later zolang de daling nog loopt. Met `nadirAt` in de sleutel
+kreeg elke herhaalde build-run (live elke ~60s) voor dezelfde piek een andere sleutel en schreef
+een extra document weg — één daling versplinterde over meerdere docs met identieke `peakAt`
+(zichtbaar als dubbele "dips" in de overlay). Binnen één build-run is een piek sowieso uniek per
+episode: de builder springt na elke nadir door (`i = nadirIdx + 1`). Een eenmalige opruiming staat
+in `scripts/dedup-reactive-hypo-episodes.mjs` (`npm run episodes:dedup`); let op dat je de
+`libreview-sync`-container herstart vóór de migratie, anders schrijft de oude-code-loop de
+duplicaten meteen terug.
+
 ## Similarity model
 
 De huidige similarity gebruikt vooral piek, drop en timing. V2 moet dit
