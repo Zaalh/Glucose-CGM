@@ -372,6 +372,7 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
   try {
     client = new MongoClient(config.mongoUri)
     await client.connect()
+    await ensureAuxIndexes(client.db())
     const collection = client.db().collection('prediction_snapshots')
 
     for (const snapshot of snapshots) {
@@ -2578,6 +2579,43 @@ async function ensureAuxIndexes(db) {
     await db.collection('cgm_events').createIndex({ eventAt: -1 })
     await db.collection('helper_reminders').createIndex({ key: 1 })
     await db.collection('helper_reminders').createIndex({ createdAt: 1 })
+
+    // prediction_snapshots is de hot-path collectie: getLatestPredictionSnapshot()
+    // doet find({}).sort({createdAt:-1}).limit(1) bij elke overlay-refresh, en de
+    // sync-upsert filtert per cyclus op entryIdentifier. Zonder deze indexen zijn
+    // dat collection scans + in-memory sorts die met de tijd verslechteren.
+    const snaps = db.collection('prediction_snapshots')
+    await snaps.createIndex({ createdAt: -1 })
+    await snaps.createIndex({ outcomeEvaluated: 1 })
+
+    // entryIdentifier-index: partial+unique zodat de constraint alleen geldt voor
+    // live-snapshots (string), niet voor legacy/PDF-snapshots met entryIdentifier:null
+    // (anders duplicate-key op de nulls). Bestaan er nú al dubbele live-identifiers,
+    // dan zou de unique create falen -> we slaan de index dan over en alarmeren,
+    // zodat hij na dedup + herstart schoon kan worden aangemaakt (zie else-tak).
+    const dupes = await snaps.aggregate([
+      { $match: { entryIdentifier: { $type: 'string' } } },
+      { $group: { _id: '$entryIdentifier', n: { $sum: 1 } } },
+      { $match: { n: { $gt: 1 } } },
+      { $limit: 1 },
+    ]).toArray()
+    if (dupes.length === 0) {
+      await snaps.createIndex(
+        { entryIdentifier: 1 },
+        { unique: true, partialFilterExpression: { entryIdentifier: { $type: 'string' } } }
+      )
+    } else {
+      // Bewust GEEN non-unique fallback-index: die zou later botsen met de unique
+      // create (IndexOptionsConflict, stil opgeslokt) waardoor de unique index na
+      // dedup nooit alsnog gebouwd wordt. Alleen alarmeren; de unique partial index
+      // wordt na dedup + herstart van de sync vanzelf schoon aangemaakt (de guard
+      // hieronder draait de ensure maar één keer per proces).
+      console.warn('[libreview-sync] prediction_snapshots: dubbele entryIdentifier(s) gevonden — unique index uitgesteld tot na dedup + herstart')
+    }
+
+    // user_feedback wordt met { createdAt: { $gte: ... } }-ranges bevraagd.
+    await db.collection('user_feedback').createIndex({ createdAt: -1 })
+
     auxIndexesEnsured = true
   } catch { /* index-creatie mag deploy nooit breken */ }
 }
