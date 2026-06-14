@@ -15,12 +15,9 @@
 var LOOKBACK_DAYS = typeof LOOKBACK_DAYS !== 'undefined' ? LOOKBACK_DAYS : 21
 var sinceMs = LOOKBACK_DAYS > 0 ? Date.now() - LOOKBACK_DAYS * 86400000 : 0
 
-var rows = db.entries
-  .find(
-    { type: 'sgv', date: { $gte: sinceMs } },
-    { _id: 0, type: 1, sgv: 1, date: 1, dateString: 1, direction: 1, device: 1, identifier: 1 },
-  )
-  .sort({ date: 1 })
-  .toArray()
+// Hele chain op één regel: de legacy mongo-shell verwerkt gepipete stdin regel-voor-regel,
+// dus een chain die op een nieuwe regel met `.` begint breekt ("expected expression, got '.'").
+var proj = { _id: 0, type: 1, sgv: 1, date: 1, dateString: 1, direction: 1, device: 1, identifier: 1 }
+var rows = db.entries.find({ type: 'sgv', date: { $gte: sinceMs } }, proj).sort({ date: 1 }).toArray()
 
 print(JSON.stringify(rows))
