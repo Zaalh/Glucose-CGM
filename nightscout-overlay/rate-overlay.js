@@ -796,6 +796,10 @@
       '#cgm-meal-badge.meal-snel{border-color:#fb7185;background:linear-gradient(135deg,#fecaca 0%,#fb7185 100%)}',
       '#cgm-meal-badge.meal-langzaam{border-color:#fcd34d;background:linear-gradient(135deg,#fef9c3 0%,#fde047 100%)}',
       '#cgm-meal-badge.meal-dip{border-color:#93c5fd;background:linear-gradient(135deg,#e0f2fe 0%,#bae6fd 100%);color:#0c3a5b;font-weight:800;opacity:.92}',
+      '#cgm-meal-badge.meal-reactive-drop{border-color:#ef4444;background:linear-gradient(135deg,#fee2e2 0%,#ef4444 100%);color:#fff}',
+      '#cgm-meal-badge.meal-risk-watch{box-shadow:0 0 0 2px rgba(251,191,36,.38),0 1px 6px rgba(0,0,0,.35)}',
+      '#cgm-meal-badge.meal-risk-high{box-shadow:0 0 0 2px rgba(249,115,22,.48),0 1px 8px rgba(0,0,0,.45)}',
+      '#cgm-meal-badge.meal-risk-urgent{box-shadow:0 0 0 2px rgba(220,38,38,.58),0 1px 10px rgba(0,0,0,.55)}',
       '@media(max-width:700px){#cgm-meal-badge{font-size:11px;padding:3px 7px}#cgm-meal-badge .meal-ic{font-size:12px}}',
       '#cgm-point-rate-tooltip{position:absolute!important;z-index:10001!important;display:none;min-width:178px;border:1px solid rgba(255,255,255,.22);border-radius:5px;background:rgba(0,0,0,.86);color:#f3f4f6;font-family:Arial,Helvetica,sans-serif;padding:7px 8px;box-shadow:0 2px 12px rgba(0,0,0,.55);pointer-events:none}',
       '#cgm-point-rate-tooltip .pt-head{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:8px;font-size:12px;font-weight:900;line-height:1.15;margin-bottom:4px}',
@@ -1280,7 +1284,19 @@
   // gebruikers. Niets is hardcoded op één persoon → drop-in voor anderen.
   var MEAL_TROUGH_WINDOW_MS = 60 * 60000;
   // Generieke defaults zolang er te weinig eigen data is (samples < MEAL_MIN_SAMPLES).
-  var MEAL_DEFAULTS = { fastRate: 0.13, slowRate: 0.07, preDipMmol: 0.40, dipToNadirMin: 60, samples: 0 };
+  var MEAL_DEFAULTS = {
+    fastRate: 0.13,
+    slowRate: 0.07,
+    preDipMmol: 0.40,
+    dipToNadirMin: 60,
+    dropWatchRate: 0.05,
+    dropHighRate: 0.09,
+    dropUrgentRate: 0.14,
+    typicalRiseMmol: 1.4,
+    typicalDropMmol: 1.4,
+    typicalUndershootMmol: 0.2,
+    samples: 0
+  };
   var MEAL_MIN_SAMPLES = 12;
   var MEAL_SAMPLE_CAP = 200;
 
@@ -1303,11 +1319,21 @@
       }
       var preDips = Array.isArray(parsed.preDips) ? parsed.preDips : [];
       var peakToNadir = Array.isArray(parsed.peakToNadir) ? parsed.peakToNadir : [];
+      var dropRates = Array.isArray(parsed.dropRates) ? parsed.dropRates : [];
+      var rises = Array.isArray(parsed.rises) ? parsed.rises : [];
+      var drops = Array.isArray(parsed.drops) ? parsed.drops : [];
+      var undershoots = Array.isArray(parsed.undershoots) ? parsed.undershoots : [];
       return {
         fastRate: percentile(parsed.riseRates, 0.75),
         slowRate: percentile(parsed.riseRates, 0.25),
         preDipMmol: median(preDips) || MEAL_DEFAULTS.preDipMmol,
         dipToNadirMin: median(peakToNadir) || MEAL_DEFAULTS.dipToNadirMin,
+        dropWatchRate: percentile(dropRates, 0.50) || MEAL_DEFAULTS.dropWatchRate,
+        dropHighRate: percentile(dropRates, 0.75) || MEAL_DEFAULTS.dropHighRate,
+        dropUrgentRate: percentile(dropRates, 0.90) || MEAL_DEFAULTS.dropUrgentRate,
+        typicalRiseMmol: median(rises) || MEAL_DEFAULTS.typicalRiseMmol,
+        typicalDropMmol: median(drops) || MEAL_DEFAULTS.typicalDropMmol,
+        typicalUndershootMmol: median(undershoots) || MEAL_DEFAULTS.typicalUndershootMmol,
         samples: parsed.riseRates.length
       };
     } catch (_err) {
@@ -1332,6 +1358,10 @@
     if (!store || !Array.isArray(store.riseRates)) store = { riseRates: [], preDips: [], peakToNadir: [], lastTroughTime: 0 };
     if (!Array.isArray(store.preDips)) store.preDips = [];
     if (!Array.isArray(store.peakToNadir)) store.peakToNadir = [];
+    if (!Array.isArray(store.dropRates)) store.dropRates = [];
+    if (!Array.isArray(store.rises)) store.rises = [];
+    if (!Array.isArray(store.drops)) store.drops = [];
+    if (!Array.isArray(store.undershoots)) store.undershoots = [];
     var lastTrough = store.lastTroughTime || 0;
     var maxTrough = lastTrough;
 
@@ -1370,8 +1400,16 @@
       }
 
       store.riseRates.push(riseMmol / riseMin);
+      store.rises.push(riseMmol);
       if (preN > 0) store.preDips.push((preSum / preN) - tMmol);
-      if (nadirTime > peakTime) store.peakToNadir.push((nadirTime - peakTime) / 60000);
+      if (nadirTime > peakTime) {
+        var dropMin = (nadirTime - peakTime) / 60000;
+        var dropMmol = peakMmol - nadirMmol;
+        store.peakToNadir.push(dropMin);
+        if (dropMmol > 0 && dropMin > 0) store.dropRates.push(dropMmol / dropMin);
+        if (dropMmol > 0) store.drops.push(dropMmol);
+        store.undershoots.push(tMmol - nadirMmol);
+      }
       if (tT > maxTrough) maxTrough = tT;
       i = peakIdx; // spring door naar ná de piek
     }
@@ -1380,8 +1418,58 @@
     store.riseRates = cap(store.riseRates);
     store.preDips = cap(store.preDips);
     store.peakToNadir = cap(store.peakToNadir);
+    store.dropRates = cap(store.dropRates);
+    store.rises = cap(store.rises);
+    store.drops = cap(store.drops);
+    store.undershoots = cap(store.undershoots);
     store.lastTroughTime = maxTrough;
     try { localStorage.setItem(MEAL_CALIBRATION_KEY, JSON.stringify(store)); } catch (_err2) {}
+  }
+
+  function classifyMealRisk(score) {
+    if (score >= 80) return 'urgent';
+    if (score >= 60) return 'high';
+    if (score >= 35) return 'watch';
+    return 'low';
+  }
+
+  function scoreReactiveMealRisk(meal, cal, hypoRisk, peakSignal) {
+    if (!meal) return null;
+    var score = 0;
+
+    if (meal.phase === 'dip') {
+      score += 18;
+      if (Number.isFinite(meal.preDipMmol) && meal.preDipMmol >= cal.preDipMmol * 1.5) score += 12;
+    } else if (meal.phase === 'rising') {
+      score += 25;
+      if (meal.speed === 'snel') score += 18;
+      else if (meal.speed === 'normaal') score += 10;
+      if (Number.isFinite(meal.riseFromTrough) && meal.riseFromTrough >= cal.typicalRiseMmol) score += 12;
+      if (Number.isFinite(meal.effRate) && meal.effRate >= cal.fastRate) score += 12;
+    } else if (meal.phase === 'reactive-drop') {
+      score += 55;
+      if (Number.isFinite(meal.dropRate)) {
+        if (meal.dropRate >= cal.dropUrgentRate) score += 25;
+        else if (meal.dropRate >= cal.dropHighRate) score += 16;
+        else if (meal.dropRate >= cal.dropWatchRate) score += 8;
+      }
+      if (Number.isFinite(meal.currentMmol) && meal.currentMmol < 4.5) score += 15;
+      else if (Number.isFinite(meal.currentMmol) && meal.currentMmol < 5.3) score += 8;
+    }
+
+    if (peakSignal) {
+      if (peakSignal.severity === 'urgent') score += 18;
+      else if (peakSignal.severity === 'high') score += 12;
+      else if (peakSignal.severity === 'watch') score += 7;
+    }
+    if (hypoRisk) {
+      if (hypoRisk.css === 'urgent' || hypoRisk.css === 'hypo') score += 25;
+      else if (hypoRisk.css === 'warning') score += 16;
+      else if (hypoRisk.css === 'watch') score += 8;
+    }
+
+    score = Math.max(0, Math.min(100, Math.round(score)));
+    return { score: score, level: classifyMealRisk(score) };
   }
 
   function detectMealState(readings) {
@@ -1391,6 +1479,50 @@
     var latestTime = readingTime(latest);
     var currentMmol = mmol(Number(latest.sgv));
     if (!Number.isFinite(latestTime) || !Number.isFinite(currentMmol)) return null;
+
+    // Fase 'reactive-drop': na een recente maaltijdpiek is de daling begonnen.
+    // Dit voorkomt dat een losse daling zonder voorafgaande stijging als maaltijd wordt gelabeld.
+    var recent = readings.filter(function (entry) {
+      var time = readingTime(entry);
+      var value = mmol(Number(entry.sgv));
+      return Number.isFinite(time) && Number.isFinite(value) && time <= latestTime && time >= latestTime - 150 * 60000;
+    });
+    if (recent.length >= 4) {
+      var peak = recent.reduce(function (best, entry) {
+        return Number(entry.sgv) > Number(best.sgv) ? entry : best;
+      }, recent[0]);
+      var peakTime = readingTime(peak);
+      var peakMmol = mmol(Number(peak.sgv));
+      var minutesSincePeak = (latestTime - peakTime) / 60000;
+      if (Number.isFinite(peakTime) && Number.isFinite(peakMmol) && minutesSincePeak >= 5 && minutesSincePeak <= cal.dipToNadirMin + 45) {
+        var beforePeak = recent.filter(function (entry) {
+          var time = readingTime(entry);
+          return Number.isFinite(time) && time < peakTime && time >= peakTime - 90 * 60000;
+        });
+        if (beforePeak.length >= 2) {
+          var priorTrough = beforePeak.reduce(function (lowest, entry) {
+            return Number(entry.sgv) < Number(lowest.sgv) ? entry : lowest;
+          }, beforePeak[0]);
+          var priorTroughMmol = mmol(Number(priorTrough.sgv));
+          var riseIntoPeak = peakMmol - priorTroughMmol;
+          var dropFromPeak = peakMmol - currentMmol;
+          var dropRate = minutesSincePeak > 0 ? dropFromPeak / minutesSincePeak : 0;
+          if (riseIntoPeak >= 0.6 && dropFromPeak >= 0.5 && dropRate >= cal.dropWatchRate) {
+            var dropSpeed = dropRate >= cal.dropUrgentRate ? 'urgent' : (dropRate >= cal.dropHighRate ? 'hoog' : 'let op');
+            return {
+              phase: 'reactive-drop',
+              speed: dropSpeed,
+              minutesSincePeak: Math.round(minutesSincePeak),
+              dropRate: dropRate,
+              dropFromPeak: dropFromPeak,
+              peakMmol: peakMmol,
+              currentMmol: currentMmol,
+              expectedDipAt: peakTime + cal.dipToNadirMin * 60000
+            };
+          }
+        }
+      }
+    }
 
     // Lokale bodem (laagste meting) in de afgelopen 60 min — het vermoedelijke startpunt.
     var trough = null;
@@ -1427,7 +1559,10 @@
           phase: 'rising',
           speed: speed,
           minutesSinceMeal: Math.round(ageMin),
-          expectedDipAt: latestTime + cal.dipToNadirMin * 60000
+          expectedDipAt: latestTime + cal.dipToNadirMin * 60000,
+          riseFromTrough: riseFromTrough,
+          effRate: effRate,
+          currentMmol: currentMmol
         };
       }
     }
@@ -1446,32 +1581,46 @@
       var preDip = (preSum / preN) - troughMmol;
       var bottoming = rate10 === null || (rate10 >= -0.02 && rate10 <= 0.05);
       if (preDip >= cal.preDipMmol && ageMin <= 15 && riseFromTrough < 0.5 && bottoming) {
-        return { phase: 'dip' };
+        return { phase: 'dip', preDipMmol: preDip, currentMmol: currentMmol };
       }
     }
     return null;
   }
 
-  function renderMealBadge(readings) {
+  function renderMealBadge(readings, hypoRisk, peakSignal) {
     var badge = ensureMealBadge();
     var meal = detectMealState(readings);
     if (!meal) {
       badge.style.display = 'none';
       return;
     }
+    var cal = loadMealCalibration();
+    var risk = scoreReactiveMealRisk(meal, cal, hypoRisk, peakSignal);
+    var riskClass = risk && risk.level !== 'low' ? ' meal-risk-' + risk.level : '';
+    var riskTxt = risk && risk.level !== 'low'
+      ? '<span class="meal-time">· risico ' + (risk.level === 'watch' ? 'let op' : risk.level) + '</span>' : '';
     if (meal.phase === 'dip') {
-      badge.className = 'meal-dip';
+      badge.className = 'meal-dip' + riskClass;
       badge.innerHTML =
         '<span class="meal-ic">🍽</span>' +
-        '<span class="meal-label">Dip — mogelijk maaltijd</span>';
+        '<span class="meal-label">Dip — mogelijk maaltijd</span>' + riskTxt;
+    } else if (meal.phase === 'reactive-drop') {
+      badge.className = 'meal-reactive-drop' + riskClass;
+      var dropRateTxt = Number.isFinite(meal.dropRate)
+        ? '<span class="meal-time">· ' + meal.dropRate.toFixed(2) + '/min</span>' : '';
+      badge.innerHTML =
+        '<span class="meal-ic">↘</span>' +
+        '<span class="meal-label">Reactieve daling ' + meal.speed + '</span>' +
+        '<span class="meal-time">· ' + meal.minutesSincePeak + 'm na piek</span>' +
+        dropRateTxt + riskTxt;
     } else {
-      badge.className = 'meal-' + meal.speed;
+      badge.className = 'meal-' + meal.speed + riskClass;
       var dipTxt = Number.isFinite(meal.expectedDipAt)
         ? '<span class="meal-time">· dip ~' + formatClock(meal.expectedDipAt) + '</span>' : '';
       badge.innerHTML =
         '<span class="meal-ic">🍽️</span>' +
         '<span class="meal-label">Maaltijd ' + meal.speed + '</span>' +
-        '<span class="meal-time">· ' + meal.minutesSinceMeal + 'm</span>' + dipTxt;
+        '<span class="meal-time">· ' + meal.minutesSinceMeal + 'm</span>' + dipTxt + riskTxt;
     }
     badge.style.display = 'flex';
     positionMealBadge();
@@ -4113,7 +4262,7 @@
         currentHypoRisk = normalizeHypoRisk(currentHypoRisk, finalMmol, finalRate);
         renderStatsPanel(calculateStats(readings));
         render(rows);
-        renderMealBadge(readings);
+        renderMealBadge(readings, currentHypoRisk, peakSignal);
         observeChartChanges();
         scheduleEstimatedGlucoseLine(0);
         window.setTimeout(scheduleEstimatedGlucoseLine, 500);

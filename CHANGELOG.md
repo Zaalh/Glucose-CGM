@@ -58,6 +58,12 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
     snel/langzaam-grenzen (p75/p25 stijgsnelheid), pre-dip-grootte en piek→dal-tijd worden per browser uit de eigen
     historie geleerd, met generieke defaults voor nieuwe gebruikers (samples < 12). Geen drempel meer hardcoded op
     één persoon → drop-in bruikbaar voor anderen. Cache-buster → `meal-predip-20260614f`.
+  - **Reactieve-daling risicoscore, dynamisch per gebruiker.** De maaltijd-badge kent nu een derde fase
+    **"↘ Reactieve daling \<let op|hoog|urgent\>"** zodra een daling volgt op een recente maaltijdpiek. De score
+    combineert de eigen drop-rate-percentielen (p50/p75/p90), pre-dip, stijgsnelheid, piek→dal-patroon en het
+    bestaande hypo-risico. Extra kalibratievelden (`dropRates`, `rises`, `drops`, `undershoots`) maken de grenzen
+    relatief aan de gebruiker; generieke defaults worden alleen gebruikt totdat genoeg eigen historie beschikbaar is.
+    Cache-buster → `meal-risk-dynamic-20260614g`.
 
 ### Gewijzigd
 
