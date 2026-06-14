@@ -83,6 +83,10 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   gokken). Berekent mean/SD/CV/GMI, percentielen, TIR/TBR/TAR en de snelste sample-tot-sample stijging/daling.
   De export documenteert expliciet dat de bron grove ~30-min PDF-historie is (niet live 1-min MongoDB) en
   waarschuwt tegen verzonnen episodes/diagnoses. `exports/` is git-ignored (regenereerbare output).
+  De prompt is afgestemd op het profiel (reactieve hypoglykemie zonder diabetes): de below-range/hypo-cijfers
+  (TBR <3.9, very-low <3.0) staan primair, GMI/TIR/TAR alleen als descriptieve context, met de waarschuwing
+  dat TBR een ondergrens is door de 30-min resolutie. De grootste sample-tot-sample stijging/daling is gemarkeerd
+  als `resolutionLimited` (netto verschil tussen twee 30-min punten, geen gemeten CGM-helling).
 
 ### Gewijzigd
 

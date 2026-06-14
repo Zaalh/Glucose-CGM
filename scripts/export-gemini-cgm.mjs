@@ -47,8 +47,12 @@ function summarize(rows) {
       })
     }
   }
-  const fastestDrop = rates.slice().sort((a, b) => a.rateMmolPerMin - b.rateMmolPerMin)[0] || null
-  const fastestRise = rates.slice().sort((a, b) => b.rateMmolPerMin - a.rateMmolPerMin)[0] || null
+  // LET OP: dit is netto verandering tussen twee samples gedeeld door de tijd, GEEN gemeten helling.
+  // Bij ~30-min sampling mis je de echte piek/dal ertussenin, dus de werkelijke snelheid kan hoger
+  // of lager liggen. Markeer expliciet zodat een externe LLM dit niet als klinische daalsnelheid leest.
+  const annotateRate = (r) => (r ? { ...r, resolutionLimited: true } : null)
+  const fastestDrop = annotateRate(rates.slice().sort((a, b) => a.rateMmolPerMin - b.rateMmolPerMin)[0] || null)
+  const fastestRise = annotateRate(rates.slice().sort((a, b) => b.rateMmolPerMin - a.rateMmolPerMin)[0] || null)
   return {
     rows: n,
     from: rows[0]?.dateString ?? null,
@@ -119,6 +123,9 @@ const json = {
     'Deze export is gebaseerd op het lokale cgm_entries.json bestand, niet op live MongoDB.',
     'De bron lijkt uit PDF-uurmin/max historie te komen; resolutie is meestal 30 minuten, niet ruwe 1-min LibreView data.',
     'Gebruik alleen deze cijfers; verzin geen extra episodes, diagnoses of vergelijkingswaarden.',
+    'Profiel: reactieve hypoglykemie zonder diabetes/insuline. GMI/TIR/TAR zijn diabetes-management-maatstaven en hier alleen descriptief; de medisch relevante metrics zijn de below-range/hypo-cijfers (TBR <3.9, very-low <3.0).',
+    'Door de 30-min resolutie worden korte hypo-dips gemist: TBR is een ONDERGRENS, de werkelijke below-range tijd kan hoger liggen.',
+    'fastestDrop/fastestRise zijn netto verandering tussen twee 30-min samples (resolutionLimited), GEEN gemeten CGM-helling; gebruik ze niet als klinische daalsnelheid.',
   ],
   summary,
   rows,
@@ -132,23 +139,38 @@ Bron: \`${inputPath}\`
 Exporttijd: ${json.exportedAt}
 Eenheden: Nightscout \`sgv\` in mg/dL; \`glucose_mmol_l = sgv / ${MGDL_PER_MMOL}\`.
 
-## Exacte samenvatting
+## Context van het profiel
 
-- Aantal metingen: ${summary.rows}
-- Periode UTC: ${summary.from} t/m ${summary.to}
-- Gemiddelde: ${summary.mean} mmol/L
-- SD: ${summary.sd} mmol/L
-- CV: ${summary.cvPct}%
+Reactieve hypoglykemie zónder diabetes/insuline. De **primaire vraag is de below-range/hypo-kant**, niet
+diabetes-controle. GMI/TIR/TAR staan hieronder alleen als descriptieve context; gebruik ze niet als doel
+of yardstick. De data is grove ~30-min historie, dus korte hypo-dips kunnen gemist zijn: TBR is een
+**ondergrens**.
+
+## Primair — below-range / hypo (mmol/L)
+
+- TBR <3.9: ${summary.tbrPct}%  (ondergrens door 30-min resolutie)
+- Very low <3.0: ${summary.veryLowPct}%
+- Min: ${summary.min} mmol/L
+
+## Descriptieve context (diabetes-maatstaven, niet de yardstick hier)
+
 - GMI: ${summary.gmiPct}%
 - TIR 3.9-10.0: ${summary.tirPct}%
-- TBR <3.9: ${summary.tbrPct}%
-- Very low <3.0: ${summary.veryLowPct}%
-- TAR >10.0: ${summary.tarPct}%
-- Very high >13.9: ${summary.veryHighPct}%
-- Min/mediaan/max: ${summary.min} / ${summary.median} / ${summary.max} mmol/L
-- IQR p25-p75: ${summary.p25}-${summary.p75} mmol/L
-- Snelste gemeten daling tussen opeenvolgende punten: ${summary.fastestDrop ? `${summary.fastestDrop.rateMmolPerMin} mmol/L/min (${summary.fastestDrop.fromMmol} -> ${summary.fastestDrop.toMmol}, ${summary.fastestDrop.from} t/m ${summary.fastestDrop.to})` : 'n.v.t.'}
-- Snelste gemeten stijging tussen opeenvolgende punten: ${summary.fastestRise ? `${summary.fastestRise.rateMmolPerMin} mmol/L/min (${summary.fastestRise.fromMmol} -> ${summary.fastestRise.toMmol}, ${summary.fastestRise.from} t/m ${summary.fastestRise.to})` : 'n.v.t.'}
+- TAR >10.0: ${summary.tarPct}%  |  Very high >13.9: ${summary.veryHighPct}%
+
+## Algemeen & variabiliteit
+
+- Aantal metingen: ${summary.rows}  |  Periode UTC: ${summary.from} t/m ${summary.to}
+- Gemiddelde: ${summary.mean} mmol/L  |  SD: ${summary.sd} mmol/L  |  CV: ${summary.cvPct}%
+- Min/mediaan/max: ${summary.min} / ${summary.median} / ${summary.max} mmol/L  |  IQR p25-p75: ${summary.p25}-${summary.p75} mmol/L
+
+## Grootste netto-verandering tussen twee samples — RESOLUTIE-GELIMITEERD, geen echte helling
+
+Dit is netto verschil tussen twee 30-min punten gedeeld door de tijd. Je mist de echte piek/dal ertussenin;
+gebruik dit NIET als klinische daalsnelheid.
+
+- Grootste netto daling: ${summary.fastestDrop ? `${summary.fastestDrop.deltaMmol} mmol over ${summary.fastestDrop.minutes} min (${summary.fastestDrop.fromMmol} -> ${summary.fastestDrop.toMmol}, ${summary.fastestDrop.from} t/m ${summary.fastestDrop.to})` : 'n.v.t.'}
+- Grootste netto stijging: ${summary.fastestRise ? `${summary.fastestRise.deltaMmol} mmol over ${summary.fastestRise.minutes} min (${summary.fastestRise.fromMmol} -> ${summary.fastestRise.toMmol}, ${summary.fastestRise.from} t/m ${summary.fastestRise.to})` : 'n.v.t.'}
 
 ## Bestanden
 
