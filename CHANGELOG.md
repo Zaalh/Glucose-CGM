@@ -145,6 +145,26 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Gefixt
 
+- **Outcome-evaluatie was stil dood sinds de libreview-overstap — `snapshots:evaluate` deed
+  niets** — `evaluate-predictions.mjs` koppelt elke `prediction_snapshot` aan zijn `entry` om
+  achteraf de werkelijke uitkomst (laagste mmol binnen 30/60/120/180 min → true/false
+  positive/negative) te bepalen. De join ging op `snap.entryId` (ObjectId), maar dat veld
+  bestaat alléén op de oude PDF-import-snapshots. De **live libreview-pijplijn**
+  (`libreview-nightscout-sync.mjs`) schrijft snapshots met uitsluitend `entryIdentifier`
+  (string) en géén `entryId` — net zoals de hele overlay/sync snapshots↔entries al op
+  `identifier` joint. Gevolg: sinds de bron eind mei van PDF naar LibreView omsloeg, deed
+  élke `snapshots:evaluate`-run stil `updated: 0` (de `if (!entry) continue` sloeg alles over
+  zónder te tellen). 19.9k snapshots bleven `outcomeEvaluated:false`; `train-risk-model`
+  (leest `outcomeEvaluated:true`) en de FP/missed-tellingen in `summarize-days` liepen
+  daardoor op verouderde data. Dit is dezelfde klasse als de curve-vector-skew hieronder:
+  een join/feature die bij serving stil verdween. Fix: de evaluator joint nu op `entryId`
+  én valt terug op `entryIdentifier ↔ entries.identifier`, en telt voortaan een `unlinked`
+  zodat een toekomstige mismatch niet opnieuw onzichtbaar wegloopt. **Gevalideerd op echte
+  data (2026-06-14):** 19.916 snapshots geëvalueerd, `unlinked: 0`; backlog viel terug van
+  ~19.9k naar 4 (alleen de meest recente, waarvan het 30-min-uitkomstvenster nog niet
+  voorbij is). Tegelijk de twee bijbehorende batch-collections bijgewerkt die sinds 29 mei
+  achterliepen: `entry_features` (4.052 → 23.999) via `features:build` en `daily_summaries`
+  (48 → 64 dagen) via `summaries:build`.
 - **Curve-vector werd nooit geladen — curve-match was stil dood** — `build-episode-vectors.mjs`
   slaat per episode een genormaliseerde curve op in het top-level veld `vector`, en
   `findCurveMatches` (component 6 / `patternScore` +2) leest dat veld. Beide

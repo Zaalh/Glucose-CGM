@@ -640,7 +640,7 @@ Maak scripts:
 - `scripts/analyze-patterns.mjs`: scan alle entries en vul `pattern_events`.
 - `scripts/build-entry-features.mjs`: bereken `entry_features` vanuit alle bestaande Nightscout entries.
 - `scripts/build-episode-vectors.mjs`: maak vectors voor alle episodes.
-- `scripts/evaluate-predictions.mjs`: vul uitkomsten van oude `prediction_snapshots`.
+- `scripts/evaluate-predictions.mjs`: vul uitkomsten van oude `prediction_snapshots`. Koppelt snapshot↔entry op `entryId` (oude PDF-import) **of** op `entryIdentifier ↔ entries.identifier` (live libreview-snapshots, die geen `entryId` dragen); telt `unlinked` voor niet-koppelbare snapshots.
 - `scripts/train-risk-model.mjs`: bereken nieuwe gewichten en schrijf `model_state`.
 - `scripts/backfill-prediction-snapshots.mjs`: simuleer historische voorspellingen op oude data voor snellere training.
 - `scripts/summarize-days.mjs`: vul `daily_summaries`.

@@ -2,17 +2,23 @@ var MS_PER_MIN = 60000
 var MGDL_PER_MMOL = 18.0182
 function mmol(entry) { return Number(entry.sgv) / MGDL_PER_MMOL }
 
-var entries = db.entries.find({ type: 'sgv' }, { _id: 1, date: 1, sgv: 1 }).sort({ date: 1 }).toArray()
+var entries = db.entries.find({ type: 'sgv' }, { _id: 1, identifier: 1, date: 1, sgv: 1 }).sort({ date: 1 }).toArray()
 var byId = {}
-for (var i = 0; i < entries.length; i += 1) byId[String(entries[i]._id)] = entries[i]
+var byIdentifier = {}
+for (var i = 0; i < entries.length; i += 1) {
+  byId[String(entries[i]._id)] = entries[i]
+  if (entries[i].identifier) byIdentifier[entries[i].identifier] = entries[i]
+}
 
 var snaps = db.prediction_snapshots.find({ outcomeEvaluated: { $ne: true } }).toArray()
 var updated = 0
+var unlinked = 0
 
 for (var s = 0; s < snaps.length; s += 1) {
   var snap = snaps[s]
-  var entry = byId[String(snap.entryId)]
-  if (!entry) continue
+  // Live (libreview) snapshots carry only entryIdentifier; legacy (PDF) snapshots carry entryId (ObjectId).
+  var entry = (snap.entryId != null ? byId[String(snap.entryId)] : null) || byIdentifier[snap.entryIdentifier]
+  if (!entry) { unlinked += 1; continue }
 
   var t30 = entry.date + 30 * MS_PER_MIN
   var t60 = entry.date + 60 * MS_PER_MIN
@@ -57,4 +63,4 @@ for (var s = 0; s < snaps.length; s += 1) {
   updated += 1
 }
 
-printjson({ snapshotsScanned: snaps.length, updated: updated, collection: 'prediction_snapshots' })
+printjson({ snapshotsScanned: snaps.length, updated: updated, unlinked: unlinked, collection: 'prediction_snapshots' })
