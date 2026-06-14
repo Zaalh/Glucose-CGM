@@ -34,13 +34,20 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Toegevoegd
 
-- **Visueel maaltijd-badge rechtsboven in de grafiek** (`nightscout-overlay/rate-overlay.js`).
+- **Visueel maaltijd-badge rechtsboven in de grafiek, met dynamische herkenning** (`nightscout-overlay/rate-overlay.js`).
   De meal-onset-detectie leefde tot nu toe alleen server-side (`scripts/lib/hypo-features.mjs` stap 8 →
-  `mealOnset`, door `reactive-hypo-detector.mjs` gebruikt als watch-floor). De overlay spiegelt die logica
-  nu client-side (`detectMealOnset`): glucose ≥0,8 mmol stijging in 15 min, vanaf een lokale bodem (laatste
-  60 min) die ≥15 min geleden lag, en nog stijgend. Zolang dat actief is verschijnt rechtsboven in
-  `#chartContainer` een badge **"🍽️ Maaltijd · Xm"** met X = minuten sinds de bodem (≈ tijd sinds maaltijd).
-  Geen extra API-call: berekend uit de readings die de overlay al heeft. Cache-buster → `meal-badge-20260614d`.
+  `mealOnset`, door `reactive-hypo-detector.mjs` gebruikt als watch-floor). De overlay detecteert het nu
+  client-side (`detectMealOnset`) en toont rechtsboven in `#chartContainer` een badge
+  **"🍽️ Maaltijd <snel|normaal|langzaam> · Xm"** (X = minuten sinds de bodem ≈ tijd sinds maaltijd).
+  - **Dynamisch i.p.v. één vaste drempel.** Een analyse van de eigen 216 episode-stijgingen liet een
+    spreiding van ~16× zien (p5 0,054 → p95 0,237 mmol/L/min). De oude vaste 0,8 mmol/15 min-drempel lag op
+    het p5 en miste de traagste ~5% (sluipende drifts die 45-60 min later alsnog een reactieve daling geven),
+    en vuurde onnodig laat op steile spikes. Nu een **multi-tijdschaal OR-gate**, maximaal-vroeg afgesteld:
+    *snel* (rate10 ≥0,10 + ≥0,5 mmol vanaf bodem, al na ~5 min), *normaal* (≥0,6 mmol in ~10 min),
+    *langzaam* (≥0,9 mmol over ≥25 min). 0,5 mmol-vloer + "nog stijgend" weren ruis.
+  - **Snelheidsklasse** volgt de eigen kwartielen (>0,16 snel / <0,09 langzaam / ertussen normaal); badge
+    krijgt een kleur-accent (snel = rood, langzaam = geel) náást het tekst-label.
+  - Geen extra API-call: berekend uit de readings die de overlay al heeft. Cache-buster → `meal-dynamic-20260614e`.
 
 ### Gewijzigd
 

@@ -792,6 +792,8 @@
       '#cgm-meal-badge{position:absolute!important;z-index:10001!important;display:none;align-items:center;gap:5px;border:1px solid #f59e0b;border-radius:7px;padding:4px 9px;font-family:Arial,Helvetica,sans-serif;font-weight:900;font-size:12px;line-height:1;color:#2f1600;background:linear-gradient(135deg,#fde68a 0%,#fbbf24 100%);box-shadow:0 1px 6px rgba(0,0,0,.35);white-space:nowrap;pointer-events:none}',
       '#cgm-meal-badge .meal-ic{font-size:14px}',
       '#cgm-meal-badge .meal-time{font-family:monospace;font-weight:900;opacity:.9}',
+      '#cgm-meal-badge.meal-snel{border-color:#fb7185;background:linear-gradient(135deg,#fecaca 0%,#fb7185 100%)}',
+      '#cgm-meal-badge.meal-langzaam{border-color:#fcd34d;background:linear-gradient(135deg,#fef9c3 0%,#fde047 100%)}',
       '@media(max-width:700px){#cgm-meal-badge{font-size:11px;padding:3px 7px}#cgm-meal-badge .meal-ic{font-size:12px}}',
       '#cgm-point-rate-tooltip{position:absolute!important;z-index:10001!important;display:none;min-width:178px;border:1px solid rgba(255,255,255,.22);border-radius:5px;background:rgba(0,0,0,.86);color:#f3f4f6;font-family:Arial,Helvetica,sans-serif;padding:7px 8px;box-shadow:0 2px 12px rgba(0,0,0,.55);pointer-events:none}',
       '#cgm-point-rate-tooltip .pt-head{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:8px;font-size:12px;font-weight:900;line-height:1.15;margin-bottom:4px}',
@@ -1265,13 +1267,19 @@
     return badge;
   }
 
-  // Client-side spiegel van de server-side meal-onset detector
-  // (scripts/lib/hypo-features.mjs, stap 8): een maaltijdpiek is begonnen als de
-  // glucose >=0.8 mmol stijgt in 15 min, vanaf een lokale bodem (laatste 60 min) die
-  // >=15 min geleden lag, en nog steeds stijgt. minutesSinceTrough ~ tijd sinds maaltijd.
+  // Dynamische maaltijd-onset herkenning. I.p.v. één vaste drempel (die alleen
+  // ~normale stijgingen ving en de traagste ~5% miste, gekalibreerd op de eigen
+  // 216 episode-stijgingen) herkent dit op MEERDERE tijdschalen, maximaal-vroeg
+  // afgesteld zodat er zo veel mogelijk lead-time vóór de reactieve daling is:
+  //   - snel:     steile spike → al na ~5 min bevestigen
+  //   - normaal:  matige stijging vanaf de bodem (≈0,6 mmol in ~10 min)
+  //   - langzaam: sluipende drift die pas over een langer venster genoeg oploopt
+  // De bodem (laagste meting in 60 min) is het vermoedelijke startpunt; minutesSince
+  // ~ tijd sinds de maaltijd begon te werken. Snelheidsklassen volgen de eigen
+  // kwartielen (mmol/L/min): >0,16 = snel (p75), <0,09 = langzaam (~p25), ertussen normaal.
   var MEAL_TROUGH_WINDOW_MS = 60 * 60000;
-  var MEAL_ONSET_RISE_MMOL = 0.8;
-  var MEAL_ONSET_MIN_TROUGH_AGE = 15;
+  var MEAL_RATE_FAST = 0.16;
+  var MEAL_RATE_SLOW = 0.09;
   function detectMealOnset(readings) {
     if (!readings || readings.length < 2) return null;
     var latest = readings[0];
@@ -1279,11 +1287,7 @@
     var currentMmol = mmol(Number(latest.sgv));
     if (!Number.isFinite(latestTime) || !Number.isFinite(currentMmol)) return null;
 
-    var prev15 = findBaseline(readings, latestTime, 15);
-    if (!prev15) return null;
-    var delta15m = currentMmol - mmol(Number(prev15.sgv));
-
-    // Lokale bodem in de afgelopen 60 min.
+    // Lokale bodem (laagste meting) in de afgelopen 60 min — het vermoedelijke startpunt.
     var trough = null;
     var troughMmol = Infinity;
     for (var i = 0; i < readings.length; i++) {
@@ -1293,19 +1297,32 @@
       if (Number.isFinite(v) && v < troughMmol) { troughMmol = v; trough = readings[i]; }
     }
     if (!trough) return null;
-    var minutesSinceTrough = (latestTime - readingTime(trough)) / 60000;
+    var ageMin = (latestTime - readingTime(trough)) / 60000;
     var riseFromTrough = currentMmol - troughMmol;
+    if (riseFromTrough <= 0) return null;
 
+    // Korte-termijn snelheid (~10 min) om steile spikes vroeg te pakken.
     var prev10 = findBaseline(readings, latestTime, 10);
-    var rising = prev10 ? currentMmol - mmol(Number(prev10.sgv)) > 0 : delta15m > 0;
+    var rate10 = null;
+    if (prev10) {
+      var dt = (latestTime - readingTime(prev10)) / 60000;
+      if (dt > 0) rate10 = (currentMmol - mmol(Number(prev10.sgv))) / dt;
+    }
+    var rising = rate10 !== null ? rate10 > 0 : riseFromTrough >= 0.8;
+    if (!rising) return null;
 
-    var active =
-      Number.isFinite(delta15m) && delta15m >= MEAL_ONSET_RISE_MMOL &&
-      minutesSinceTrough >= MEAL_ONSET_MIN_TROUGH_AGE &&
-      riseFromTrough >= MEAL_ONSET_RISE_MMOL &&
-      rising;
-    if (!active) return null;
-    return { minutesSinceMeal: Math.round(minutesSinceTrough) };
+    // Multi-tijdschaal OR-gate (maximaal-vroeg). De 0,5 mmol-vloer weert ruis.
+    var fast = rate10 !== null && rate10 >= 0.10 && riseFromTrough >= 0.5 && ageMin >= 5;
+    var medium = riseFromTrough >= 0.6 && ageMin >= 10;
+    var slow = riseFromTrough >= 0.9 && ageMin >= 25;
+    if (!(fast || medium || slow)) return null;
+
+    // Klasse op de snelste van (recente snelheid, gemiddelde vanaf de bodem).
+    var avgRate = ageMin > 0 ? riseFromTrough / ageMin : 0;
+    var effRate = Math.max(rate10 || 0, avgRate);
+    var speed = effRate >= MEAL_RATE_FAST ? 'snel' : (effRate < MEAL_RATE_SLOW ? 'langzaam' : 'normaal');
+
+    return { minutesSinceMeal: Math.round(ageMin), speed: speed };
   }
 
   function renderMealBadge(readings) {
@@ -1315,9 +1332,10 @@
       badge.style.display = 'none';
       return;
     }
+    badge.className = 'meal-' + meal.speed;
     badge.innerHTML =
       '<span class="meal-ic">🍽️</span>' +
-      '<span class="meal-label">Maaltijd</span>' +
+      '<span class="meal-label">Maaltijd ' + meal.speed + '</span>' +
       '<span class="meal-time">· ' + meal.minutesSinceMeal + 'm</span>';
     badge.style.display = 'flex';
     positionMealBadge();
