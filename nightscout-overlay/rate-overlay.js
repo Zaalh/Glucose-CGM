@@ -804,7 +804,7 @@
       '#cgm-hypo-alert.warning{color:#2f1600;border-color:#f59e0b;background:linear-gradient(135deg,#ffe08a 0%,#fb923c 100%)}',
       '#cgm-hypo-alert.hypo,#cgm-hypo-alert.urgent{color:#fff7ed;border-color:#fb7185;background:linear-gradient(135deg,#f59e0b 0%,#e11d48 100%);text-shadow:0 1px 2px rgba(0,0,0,.45)}',
       '#cgm-hypo-alert,#cgm-hypo-alert.ok,#cgm-hypo-alert.watch,#cgm-hypo-alert.warning,#cgm-hypo-alert.hypo,#cgm-hypo-alert.urgent{color:#111!important;text-shadow:none!important}',
-      '#cgm-meal-badge{position:absolute!important;z-index:10001!important;display:none;flex-direction:column;align-items:center;justify-content:center;gap:3px;text-align:center;width:88px;min-height:88px;box-sizing:border-box;border:1px solid #f59e0b;border-radius:9px;padding:8px 7px;font-family:Arial,Helvetica,sans-serif;font-weight:900;font-size:11px;line-height:1.15;color:#2f1600;background:linear-gradient(135deg,#fde68a 0%,#fbbf24 100%);box-shadow:0 1px 8px rgba(0,0,0,.5);white-space:normal;pointer-events:none}',
+      '#cgm-meal-badge{position:absolute!important;z-index:10001!important;display:none;flex-direction:column;align-items:center;justify-content:center;gap:3px;text-align:center;width:120px;min-height:72px;box-sizing:border-box;border:1px solid #f59e0b;border-radius:9px;padding:8px 7px;font-family:Arial,Helvetica,sans-serif;font-weight:900;font-size:11px;line-height:1.15;color:#2f1600;background:linear-gradient(135deg,#fde68a 0%,#fbbf24 100%);box-shadow:0 1px 8px rgba(0,0,0,.5);white-space:normal;pointer-events:none}',
       '#cgm-meal-badge .meal-ic{font-size:22px;line-height:1}',
       '#cgm-meal-badge .meal-time{font-family:monospace;font-weight:900;opacity:.9}',
       '#cgm-meal-badge.meal-snel{border-color:#fb7185;background:linear-gradient(135deg,#fecaca 0%,#fb7185 100%)}',
@@ -814,7 +814,7 @@
       '#cgm-meal-badge.meal-risk-watch{box-shadow:0 0 0 2px rgba(251,191,36,.38),0 1px 6px rgba(0,0,0,.35)}',
       '#cgm-meal-badge.meal-risk-high{box-shadow:0 0 0 2px rgba(249,115,22,.48),0 1px 8px rgba(0,0,0,.45)}',
       '#cgm-meal-badge.meal-risk-urgent{box-shadow:0 0 0 2px rgba(220,38,38,.58),0 1px 10px rgba(0,0,0,.55)}',
-      '@media(max-width:700px){#cgm-meal-badge{width:74px;min-height:74px;font-size:10px;padding:6px 5px}#cgm-meal-badge .meal-ic{font-size:18px}}',
+      '@media(max-width:700px){#cgm-meal-badge{width:100px;min-height:64px;font-size:10px;padding:6px 5px}#cgm-meal-badge .meal-ic{font-size:18px}}',
       '#cgm-point-rate-tooltip{position:absolute!important;z-index:10001!important;display:none;min-width:178px;border:1px solid rgba(255,255,255,.22);border-radius:5px;background:rgba(0,0,0,.86);color:#f3f4f6;font-family:Arial,Helvetica,sans-serif;padding:7px 8px;box-shadow:0 2px 12px rgba(0,0,0,.55);pointer-events:none}',
       '#cgm-point-rate-tooltip .pt-head{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:8px;font-size:12px;font-weight:900;line-height:1.15;margin-bottom:4px}',
       '#cgm-point-rate-tooltip .pt-head .pt-bg{text-align:left}',
@@ -1821,11 +1821,13 @@
   function positionMealBadge() {
     var badge = document.getElementById('cgm-meal-badge');
     if (!badge || badge.style.display === 'none') return;
-    var chart = document.querySelector('#chartContainer');
-    if (!chart) return;
-    var rect = chart.getBoundingClientRect();
-    badge.style.top = Math.max(0, Math.round(rect.top + window.scrollY + 8)) + 'px';
-    badge.style.left = Math.max(0, Math.round(rect.left + window.scrollX + 8)) + 'px';
+    // Anker bij voorkeur aan de klok (#currentTime): helemaal bovenin, links ervóór.
+    var clock = document.getElementById('currentTime');
+    var anchor = clock || document.querySelector('#chartContainer');
+    if (!anchor) return;
+    var rect = anchor.getBoundingClientRect();
+    badge.style.top = Math.max(0, Math.round(rect.top + window.scrollY)) + 'px';
+    badge.style.left = Math.max(0, Math.round(window.scrollX + 8)) + 'px';
   }
 
   function ensureMobileDock(chart) {
