@@ -1821,13 +1821,21 @@
   function positionMealBadge() {
     var badge = document.getElementById('cgm-meal-badge');
     if (!badge || badge.style.display === 'none') return;
-    // Anker bij voorkeur aan de klok (#currentTime): helemaal bovenin, links ervóór.
+    // Anker rechts naast de klok (#currentTime), verticaal gecentreerd t.o.v. de klok.
     var clock = document.getElementById('currentTime');
-    var anchor = clock || document.querySelector('#chartContainer');
-    if (!anchor) return;
-    var rect = anchor.getBoundingClientRect();
-    badge.style.top = Math.max(0, Math.round(rect.top + window.scrollY)) + 'px';
-    badge.style.left = Math.max(0, Math.round(window.scrollX + 8)) + 'px';
+    if (clock) {
+      var rect = clock.getBoundingClientRect();
+      var bh = badge.getBoundingClientRect().height || 72;
+      var top = rect.top + window.scrollY + Math.max(0, (rect.height - bh) / 2);
+      badge.style.top = Math.max(0, Math.round(top)) + 'px';
+      badge.style.left = Math.round(rect.right + window.scrollX + 16) + 'px';
+      return;
+    }
+    var chart = document.querySelector('#chartContainer');
+    if (!chart) return;
+    var crect = chart.getBoundingClientRect();
+    badge.style.top = Math.max(0, Math.round(crect.top + window.scrollY + 8)) + 'px';
+    badge.style.left = Math.max(0, Math.round(crect.left + window.scrollX + 8)) + 'px';
   }
 
   function ensureMobileDock(chart) {
