@@ -88,12 +88,15 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   dat TBR een ondergrens is door de 30-min resolutie. De grootste sample-tot-sample stijging/daling is gemarkeerd
   als `resolutionLimited` (netto verschil tussen twee 30-min punten, geen gemeten CGM-helling).
 - **Resolutie-bewuste export + live MongoDB-dump.** De exporter detecteert nu de mediane sample-interval en
-  past de framing automatisch aan: bij ~1-min live data zijn de snelheden échte gemeten hellingen
-  (`resolutionLimited: false`, sectie "Snelste gemeten daling/stijging mmol/L/min") en vervalt de
-  "TBR is ondergrens"-caveat; bij grove ~30-min historie blijft de conservatieve framing. Nieuw
+  past de framing automatisch aan. Bij grove ~30-min historie blijft de conservatieve framing
+  (`resolutionLimited: true`). Bij ~1-min live data vervalt de "TBR is ondergrens"-caveat en rapporteert de
+  export de **steilste volgehouden helling over een ~15-min venster** (`windowMin: 15`, `resolutionLimited: false`)
+  op een **median-of-3 despikede reeks** (zelfde spike-filter als het live systeem) — nodig omdat ~9% van de ruwe
+  1-min stappen niet-fysiologisch is (sensor-spikes) en een losse-sample-rate daardoor onbruikbaar is. Nieuw
   `scripts/dump-entries-mongo.mjs` (`npm run dump:entries`) dumpt de live `entries`-collectie (default laatste
   21 dagen) naar een exporter-compatibel `exports/live-entries.json`; `npm run export:gemini:live` doet dump +
-  high-res export in één stap. Draait ín de Docker-container (mongo heeft geen host-poort), dus op de iMac.
+  high-res export in één stap. Draait ín de Docker-container (mongo heeft geen host-poort), dus op de iMac
+  (geverifieerd op 22.7k 1-min rijen: steilste 15-min daling ~0.40 mmol/L/min, een reactieve-hypo crash 9.7→3.3).
 
 ### Gewijzigd
 
