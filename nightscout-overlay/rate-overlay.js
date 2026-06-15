@@ -1780,27 +1780,29 @@
     return finalizeMealState(null);
   }
 
-  // Debug kan tijdelijk op true om de positie live af te stellen; normaal uit.
-  var MEAL_BADGE_DEBUG = false;
+  // Testmodus: toon het vak altijd, maar zonder fake maaltijdstatus.
+  var MEAL_BADGE_ALWAYS_VISIBLE = true;
 
   function renderMealBadge(readings, hypoRisk, peakSignal) {
     var badge = ensureMealBadge();
     var meal = detectMealState(readings);
-    var debug = false;
-    if (!meal && MEAL_BADGE_DEBUG) {
-      // Dummy met de uitgebreidste fase (reactive-drop) zodat de volle layout zichtbaar is.
-      debug = true;
-      meal = {
-        phase: 'reactive-drop', speed: 'hoog', minutesSincePeak: 18, dropRate: 0.085,
-        dropFromPeak: 1.6, peakMmol: 7.8, currentMmol: 6.2, expectedDipAt: Date.now() + 25 * 60000
-      };
-    }
     if (!meal) {
-      badge.style.display = 'none';
+      if (!MEAL_BADGE_ALWAYS_VISIBLE) {
+        badge.style.display = 'none';
+        return;
+      }
+      badge.className = 'meal-dip';
+      badge.innerHTML = [
+        '<span class="meal-ic">🍽</span>',
+        '<span class="meal-label">Geen maaltijd</span>',
+        '<span class="meal-time">detector actief</span>'
+      ].join('');
+      badge.style.display = 'flex';
+      positionMealBadge();
       return;
     }
     var cal = loadMealCalibration();
-    var risk = debug ? { score: 0.62, level: 'high' } : scoreReactiveMealRisk(meal, cal, hypoRisk, peakSignal);
+    var risk = scoreReactiveMealRisk(meal, cal, hypoRisk, peakSignal);
     var riskClass = risk && risk.level !== 'low' ? ' meal-risk-' + risk.level : '';
 
     function L(cls, txt) { return '<span class="' + cls + '">' + txt + '</span>'; }
@@ -1845,7 +1847,6 @@
     }
 
     if (riskLevelTxt) rows.push(L('meal-time', 'risico ' + riskLevelTxt + (riskScore ? ' ' + riskScore : '')));
-    if (debug) rows.push(L('meal-time', '(debug)'));
 
     badge.innerHTML = rows.join('');
     badge.style.display = 'flex';
