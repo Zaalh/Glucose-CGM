@@ -2143,6 +2143,27 @@ De detector is pas "goed" als hij dit kan:
 - handmatig feedback verwerken;
 - na tuning aantoonbaar beter zijn dan alleen de actuele glucosewaarde.
 
+## Rebound-forecast: herstel ná de dip voorspellen (2026-06-15, shadow-first)
+
+Naast *waarschuwen vóór* een daling is de vraag wat er ná de nadir gebeurt. Onderzoek op de
+eigen `reactive_hypo_episodes` liet zien dat dit herstel **zeer voorspelbaar** is:
+
+- De rebound-piek correleert **niet** met dip-diepte, drop of dalingssnelheid (alle |r|<0,2);
+  counter-regulatie brengt je telkens terug naar een persoonlijk **set-point (~7,3 mmol)**.
+- Eén vaste, empirische herstelcurve (mediaan + p10–p90 band, 0–90 min na de nadir) voorspelt
+  daardoor al nauwkeurig — geen zwaar per-episode model nodig.
+
+Gebouwd als **shadow-first** tooling die niets live raakt (offline profiel + evaluator):
+
+- `scripts/lib/rebound-profile.mjs` — pure gedeelde kern (train/serve-pariteit), eist complete
+  kern-horizonten `[0,15,30,45,60]` per curve zodat de mediaan-curve monotoon blijft.
+- `npm run rebound:profile` → `scripts/rebound-recovery-profile.json`; `npm run rebound:eval` →
+  out-of-sample evaluatie + band-kalibratie. Beide met `--self-test`.
+- **Out-of-sample geverifieerd** (12 dagen live 1-min data, 67 curves): MAE +15/30/45/60 =
+  0,77 / 1,05 / 1,28 / 1,22 mmol, verslaat set-point- én plat@nadir-baseline op elke horizon.
+- **Caveats**: ~8% schiet door ≥10 mmol → als band tonen; band onderdekt nog iets OOS (67% bij
+  n=40 train) → meer episodes nodig vóór serve-time `reboundForecast` en een UI-band (V2-draaiboek).
+
 ## Korte conclusie
 
 De huidige detectie is een goede V1. Voor reactieve hypoglykemie willen we naar

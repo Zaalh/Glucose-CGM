@@ -305,6 +305,19 @@ npm run hypo:patterns -- --days 28  # uur-van-de-dag + weekdag + episode-patrone
 Rapporten over jouw eigen data: (near-)hypo's, time-in-range, snelste daling, V1 vs V2,
 en de riskantste uren/weekdagen — zodat je zoveel mogelijk patronen vindt.
 
+```bash
+npm run rebound:profile   # genereert scripts/rebound-recovery-profile.json
+npm run rebound:eval      # out-of-sample evaluatie van de rebound-forecast
+```
+
+Rebound-forecast (shadow-first, raakt niets live aan): na een reactieve dip is het herstel
+zeer voorspelbaar — de rebound-piek gaat dip-diepte-onafhankelijk naar een persoonlijk
+set-point (~7.3 mmol). `rebound:profile` leert daaruit een vaste herstelcurve met band
+(p10–p90 per horizon, 0–90 min na de nadir); `rebound:eval` toetst die out-of-sample
+(temporele split) tegen twee baselines en bewaakt de band-kalibratie. Gedeelde, pure kern
+in `scripts/lib/rebound-profile.mjs` (train/serve-pariteit). Pas een UI-band tonen zodra de
+evaluator over genoeg episodes stabiel blijft.
+
 ### Automatisch leren (dagelijks)
 
 `scripts/daily-hypo-tune.sh` draait via launchd (`deploy/com.glucosecgm.hypotune.plist`,

@@ -34,6 +34,21 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Toegevoegd
 
+- **Rebound-forecast (shadow-first): voorspelt het herstel ná een reactieve dip** (`scripts/lib/rebound-profile.mjs`,
+  `scripts/build-rebound-profile.mjs`, `scripts/evaluate-rebound-forecast.mjs`). Onderzoek op de eigen episodes
+  toonde dat de rebound-piek **niet** met de dip-diepte/drop/dalingssnelheid correleert (alle |r|<0,2): counter-regulatie
+  brengt je telkens terug naar een persoonlijk **set-point (~7,3 mmol)**. De forecast is daarom een vaste empirische
+  herstelcurve (mediaan + p10–p90 band, 0–90 min na de nadir), verankerd op de bevestigde nadir — geen zwaar
+  per-episode model.
+  - **Out-of-sample geverifieerd** op 12 dagen live 1-min data (temporele split, 67 curves): MAE +15/30/45/60 =
+    **0,77 / 1,05 / 1,28 / 1,22 mmol**, verslaat beide baselines (set-point én plat@nadir) op elke horizon, geen overfit.
+  - **Train/serve-pariteit**: één gedeelde pure kern voor de generator én de evaluator. Eist complete kern-horizonten
+    `[0,15,30,45,60]` per curve, anders wordt elke horizon over een scheve subset berekend (gaf een niet-monotone dip op +60m).
+  - **Eerlijke caveats meegeleverd**: ~8% van de rebounds schiet door ≥10 mmol → tonen als band, niet één lijn. De band
+    onderdekt nog iets out-of-sample (67% binnen p10–p90 bij n=40 train) → meer episodes nodig vóór een UI-band; dat is
+    exact wat `npm run rebound:eval` bewaakt. Nacht-stratum (n<12) wordt onderdrukt.
+  - **Raakt niets live aan**: alleen lezen + een profiel-artefact wegschrijven. `npm run rebound:profile` / `rebound:eval`
+    (libre-container), beide met `--self-test`. Serve-time `reboundForecast` + UI-band volgen pas later (V2-draaiboek).
 - **Visueel maaltijd-badge rechtsboven in de grafiek, met dynamische herkenning** (`nightscout-overlay/rate-overlay.js`).
   De meal-onset-detectie leefde tot nu toe alleen server-side (`scripts/lib/hypo-features.mjs` stap 8 →
   `mealOnset`, door `reactive-hypo-detector.mjs` gebruikt als watch-floor). De overlay detecteert het nu
