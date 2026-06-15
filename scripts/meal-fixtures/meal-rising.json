@@ -1,0 +1,17 @@
+{
+  "name": "meal-rising",
+  "description": "Bevestigde maaltijdstijging vanaf een lokale bodem: duidelijke rise over 30 minuten.",
+  "expect": { "phase": "rising" },
+  "readings": [
+    { "minutesAgo": 45, "mmol": 5.4 },
+    { "minutesAgo": 40, "mmol": 5.3 },
+    { "minutesAgo": 35, "mmol": 5.2 },
+    { "minutesAgo": 30, "mmol": 5.2 },
+    { "minutesAgo": 25, "mmol": 5.5 },
+    { "minutesAgo": 20, "mmol": 6.1 },
+    { "minutesAgo": 15, "mmol": 6.9 },
+    { "minutesAgo": 10, "mmol": 7.6 },
+    { "minutesAgo": 5, "mmol": 8.1 },
+    { "minutesAgo": 0, "mmol": 8.6 }
+  ]
+}

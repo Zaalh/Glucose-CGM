@@ -1,0 +1,22 @@
+{
+  "name": "meal-reactive-drop-from-memory",
+  "description": "Geen volledige pre-peak context in de huidige readings, maar bestaande episode-memory moet reactive-drop herkennen.",
+  "expect": { "phase": "reactive-drop", "fromMemory": true },
+  "initialEpisode": {
+    "schemaVersion": 1,
+    "phase": "reactive-drop",
+    "startedAt": 1780312800000,
+    "troughTime": 1780312800000,
+    "troughMmol": 5.2,
+    "baselineMmol": 5.2,
+    "peakTime": 1780314000000,
+    "peakMmol": 8.8,
+    "lastUpdatedAt": 1780313400000,
+    "expiresAt": 1780324200000
+  },
+  "readings": [
+    { "minutesAgo": 10, "mmol": 7.4 },
+    { "minutesAgo": 5, "mmol": 7.0 },
+    { "minutesAgo": 0, "mmol": 6.8 }
+  ]
+}

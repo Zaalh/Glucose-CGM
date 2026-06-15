@@ -1,0 +1,23 @@
+{
+  "name": "meal-reactive-drop",
+  "description": "Na een maaltijdpiek is de glucose actief aan het dalen; moet als reactive-drop detecteren.",
+  "expect": { "phase": "reactive-drop", "speed": "let op" },
+  "readings": [
+    { "minutesAgo": 75, "mmol": 5.2 },
+    { "minutesAgo": 70, "mmol": 5.3 },
+    { "minutesAgo": 65, "mmol": 5.6 },
+    { "minutesAgo": 60, "mmol": 6.3 },
+    { "minutesAgo": 55, "mmol": 7.1 },
+    { "minutesAgo": 50, "mmol": 8.0 },
+    { "minutesAgo": 45, "mmol": 8.8 },
+    { "minutesAgo": 40, "mmol": 9.1 },
+    { "minutesAgo": 35, "mmol": 8.8 },
+    { "minutesAgo": 30, "mmol": 8.4 },
+    { "minutesAgo": 25, "mmol": 8.0 },
+    { "minutesAgo": 20, "mmol": 7.6 },
+    { "minutesAgo": 15, "mmol": 7.2 },
+    { "minutesAgo": 10, "mmol": 6.8 },
+    { "minutesAgo": 5, "mmol": 6.4 },
+    { "minutesAgo": 0, "mmol": 6.1 }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "not-meal-late-after-old-peak",
+  "description": "Daling veel te laat na oude piek; buiten het postprandiale detectievenster geen maaltijdstatus.",
+  "expect": { "phase": null },
+  "readings": [
+    { "minutesAgo": 150, "mmol": 5.5 },
+    { "minutesAgo": 140, "mmol": 7.0 },
+    { "minutesAgo": 130, "mmol": 8.4 },
+    { "minutesAgo": 120, "mmol": 8.8 },
+    { "minutesAgo": 90, "mmol": 8.1 },
+    { "minutesAgo": 60, "mmol": 7.5 },
+    { "minutesAgo": 30, "mmol": 7.0 },
+    { "minutesAgo": 10, "mmol": 6.6 },
+    { "minutesAgo": 0, "mmol": 6.4 }
+  ]
+}

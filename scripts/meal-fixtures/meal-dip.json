@@ -1,0 +1,17 @@
+{
+  "name": "meal-dip",
+  "description": "Tentatieve cephale pre-dip: recente bodem met duidelijk hoger niveau 20-35 minuten eerder en nog geen echte stijging.",
+  "expect": { "phase": "dip" },
+  "readings": [
+    { "minutesAgo": 45, "mmol": 6.1 },
+    { "minutesAgo": 40, "mmol": 6.0 },
+    { "minutesAgo": 35, "mmol": 6.0 },
+    { "minutesAgo": 30, "mmol": 5.9 },
+    { "minutesAgo": 25, "mmol": 5.8 },
+    { "minutesAgo": 20, "mmol": 5.7 },
+    { "minutesAgo": 15, "mmol": 5.4 },
+    { "minutesAgo": 10, "mmol": 5.3 },
+    { "minutesAgo": 5, "mmol": 5.3 },
+    { "minutesAgo": 0, "mmol": 5.4 }
+  ]
+}

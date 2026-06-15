@@ -1,0 +1,19 @@
+{
+  "name": "not-meal-correction-drop",
+  "description": "Actieve daling vanaf hoog niveau zonder voorafgaande stijging binnen context; mag niet als maaltijd-reactive-drop tellen.",
+  "expect": { "phase": null },
+  "readings": [
+    { "minutesAgo": 55, "mmol": 9.1 },
+    { "minutesAgo": 50, "mmol": 9.0 },
+    { "minutesAgo": 45, "mmol": 8.9 },
+    { "minutesAgo": 40, "mmol": 8.7 },
+    { "minutesAgo": 35, "mmol": 8.4 },
+    { "minutesAgo": 30, "mmol": 8.1 },
+    { "minutesAgo": 25, "mmol": 7.8 },
+    { "minutesAgo": 20, "mmol": 7.4 },
+    { "minutesAgo": 15, "mmol": 7.0 },
+    { "minutesAgo": 10, "mmol": 6.7 },
+    { "minutesAgo": 5, "mmol": 6.4 },
+    { "minutesAgo": 0, "mmol": 6.1 }
+  ]
+}

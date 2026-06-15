@@ -13,6 +13,8 @@ const SIM_SCALES = { peakMmol: 4, dropFromPeakMmol: 3, minutesSincePeak: 30, ris
 // exact het oude 3-dimensie-gedrag (sqrt(sum) <= 1.5). Mogelijk herijken via backtest.
 const SIM_MAX_DIST = 0.866
 const SIM_K = 8
+const MEAL_RISE_MAX_DIST = 0.9
+const MEAL_DROP_MAX_DIST = 0.9
 const MS_PER_DAY = 86_400_000
 const CURVE_MIN_POINTS = 8
 const CURVE_MIN_SIMILARITY = 0.8
@@ -240,5 +242,106 @@ export function patternFromFeatures(features, vectors, options = {}) {
     curveHypoRatio: curve ? round(curve.hypoRatio, 3) : null,
     curveSimilarity: curve ? round(curve.avgSimilarity, 3) : null,
     ...(wday || {}),
+  }
+}
+
+function classifyPatternRisk(hypoRatio, weightedDrop, options = {}) {
+  if (options.maxRisk === 'watch' && (hypoRatio >= 0.35 || weightedDrop >= 1.8)) return 'watch'
+  if (hypoRatio >= 0.6 || weightedDrop >= 2.6) return 'high'
+  if (hypoRatio >= 0.35 || weightedDrop >= 1.8) return 'watch'
+  return 'low'
+}
+
+function patternSummary(scored, minCount, options = {}) {
+  if (scored.length < minCount) return null
+  scored.sort((a, b) => a.dist - b.dist)
+  const top = scored.slice(0, SIM_K)
+  let wsum = 0
+  let wdrop = 0
+  let whypo = 0
+  let hypoCount = 0
+  for (const s of top) {
+    const w = (1 / (1 + s.dist)) * s.recencyWeight
+    wsum += w
+    wdrop += w * (Number.isFinite(s.drop) ? s.drop : 0)
+    if (s.outcome === 'hypo' || s.outcome === 'near_hypo') {
+      hypoCount += 1
+      whypo += w
+    }
+  }
+  const weightedDrop = wsum > 0 ? wdrop / wsum : 0
+  const hypoRatio = wsum > 0 ? whypo / wsum : top.length ? hypoCount / top.length : 0
+  return {
+    similarEpisodeCount: top.length,
+    similarHypoCount: hypoCount,
+    similarHypoRatio: round(hypoRatio, 3),
+    weightedDrop: round(weightedDrop, 3),
+    patternRisk: classifyPatternRisk(hypoRatio, weightedDrop, options),
+  }
+}
+
+// Maaltijd-detector vectorlaag: gebruikt episode_vectors als extra risicosignaal
+// voor een al gedetecteerde maaltijdstatus. Deze functie bepaalt bewust geen phase.
+export function mealPatternFromState(meal, vectors, options = {}) {
+  if (!meal || !vectors || !vectors.length) return null
+  if (!['rising', 'plateau', 'reactive-drop'].includes(meal.phase)) return null
+
+  const currentMs = Number.isFinite(options.currentMs) ? options.currentMs : null
+  const recencyDays = Number.isFinite(options.recencyDays) ? options.recencyDays : null
+  const scored = []
+
+  for (const v of vectors) {
+    const vectorMs = vectorTimeMs(v)
+    if (currentMs !== null && vectorMs !== null && vectorMs > currentMs) continue
+    const f = v.featureVector
+    if (!f) continue
+
+    if (meal.phase === 'reactive-drop') {
+      if (!Number.isFinite(f.peakMmol) || !Number.isFinite(f.dropFromPeakMmol)) continue
+      if (!Number.isFinite(meal.peakMmol) || !Number.isFinite(meal.dropFromPeak)) continue
+      let sum = sq((f.peakMmol - meal.peakMmol) / SIM_SCALES.peakMmol)
+      let dims = 1
+      sum += sq((f.dropFromPeakMmol - meal.dropFromPeak) / SIM_SCALES.dropFromPeakMmol)
+      dims += 1
+      if (Number.isFinite(f.minutesPeakToEnd) && Number.isFinite(meal.minutesSincePeak)) {
+        sum += sq((f.minutesPeakToEnd - meal.minutesSincePeak) / SIM_SCALES.minutesSincePeak)
+        dims += 1
+      }
+      const dist = Math.sqrt(sum / dims)
+      if (dist <= MEAL_DROP_MAX_DIST) {
+        scored.push({
+          dist,
+          drop: f.dropFromPeakMmol,
+          outcome: v.outcome,
+          recencyWeight: recencyWeight(vectorMs, currentMs, recencyDays),
+        })
+      }
+      continue
+    }
+
+    const riseRate = Number.isFinite(meal.effRate) ? meal.effRate : null
+    const riseFromBaseline = Number.isFinite(meal.riseFromTrough) ? meal.riseFromTrough : null
+    if (!Number.isFinite(f.riseRate15m) || !Number.isFinite(f.riseFromBaseline)) continue
+    if (!Number.isFinite(riseRate) || !Number.isFinite(riseFromBaseline)) continue
+
+    let sum = sq((f.riseRate15m - riseRate) / SIM_SCALES.riseRate15m)
+    sum += sq((f.riseFromBaseline - riseFromBaseline) / SIM_SCALES.riseFromBaseline)
+    const dist = Math.sqrt(sum / 2)
+    if (dist <= MEAL_RISE_MAX_DIST) {
+      scored.push({
+        dist,
+        drop: f.dropFromPeakMmol,
+        outcome: v.outcome,
+        recencyWeight: recencyWeight(vectorMs, currentMs, recencyDays),
+      })
+    }
+  }
+
+  const minCount = meal.phase === 'reactive-drop' ? 3 : 4
+  const summary = patternSummary(scored, minCount, { maxRisk: meal.phase === 'reactive-drop' ? null : 'watch' })
+  if (!summary) return null
+  return {
+    ...summary,
+    patternKind: meal.phase === 'reactive-drop' ? 'post-peak-drop' : 'rise-onset',
   }
 }

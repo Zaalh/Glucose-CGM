@@ -1,0 +1,17 @@
+{
+  "name": "not-meal-stable-high",
+  "description": "Stabiel hoog zonder recente maaltijdstijging of actieve daling; mag geen maaltijdlabel geven.",
+  "expect": { "phase": null },
+  "readings": [
+    { "minutesAgo": 45, "mmol": 8.2 },
+    { "minutesAgo": 40, "mmol": 8.2 },
+    { "minutesAgo": 35, "mmol": 8.1 },
+    { "minutesAgo": 30, "mmol": 8.1 },
+    { "minutesAgo": 25, "mmol": 8.2 },
+    { "minutesAgo": 20, "mmol": 8.2 },
+    { "minutesAgo": 15, "mmol": 8.1 },
+    { "minutesAgo": 10, "mmol": 8.1 },
+    { "minutesAgo": 5, "mmol": 8.2 },
+    { "minutesAgo": 0, "mmol": 8.2 }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "name": "not-meal-sensor-spike",
+  "description": "Een korte laatste-meetpunt spike vanaf stabiel niveau; dit documenteert het huidige risico op chatty gedrag.",
+  "expect": { "phase": null },
+  "readings": [
+    { "minutesAgo": 35, "mmol": 5.6 },
+    { "minutesAgo": 30, "mmol": 5.6 },
+    { "minutesAgo": 25, "mmol": 5.5 },
+    { "minutesAgo": 20, "mmol": 5.6 },
+    { "minutesAgo": 15, "mmol": 5.5 },
+    { "minutesAgo": 10, "mmol": 5.6 },
+    { "minutesAgo": 5, "mmol": 5.6 },
+    { "minutesAgo": 0, "mmol": 6.3 }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "not-meal-small-rise",
+  "description": "Kleine ruis/stijging vanaf bodem; moet onder maaltijd-drempel blijven.",
+  "expect": { "phase": null },
+  "readings": [
+    { "minutesAgo": 45, "mmol": 5.9 },
+    { "minutesAgo": 40, "mmol": 5.8 },
+    { "minutesAgo": 35, "mmol": 5.7 },
+    { "minutesAgo": 30, "mmol": 5.7 },
+    { "minutesAgo": 25, "mmol": 5.8 },
+    { "minutesAgo": 20, "mmol": 5.8 },
+    { "minutesAgo": 15, "mmol": 5.9 },
+    { "minutesAgo": 10, "mmol": 6.0 },
+    { "minutesAgo": 5, "mmol": 6.1 },
+    { "minutesAgo": 0, "mmol": 6.2 }
+  ]
+}

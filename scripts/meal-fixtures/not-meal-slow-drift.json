@@ -1,0 +1,20 @@
+{
+  "name": "not-meal-slow-drift",
+  "description": "Langzame drift over een uur zonder duidelijke postprandiale versnelling; moet niet chatty als maaltijd worden gelabeld.",
+  "expect": { "phase": null },
+  "readings": [
+    { "minutesAgo": 60, "mmol": 5.6 },
+    { "minutesAgo": 55, "mmol": 5.7 },
+    { "minutesAgo": 50, "mmol": 5.7 },
+    { "minutesAgo": 45, "mmol": 5.8 },
+    { "minutesAgo": 40, "mmol": 5.8 },
+    { "minutesAgo": 35, "mmol": 5.9 },
+    { "minutesAgo": 30, "mmol": 5.9 },
+    { "minutesAgo": 25, "mmol": 6.0 },
+    { "minutesAgo": 20, "mmol": 6.0 },
+    { "minutesAgo": 15, "mmol": 6.1 },
+    { "minutesAgo": 10, "mmol": 6.1 },
+    { "minutesAgo": 5, "mmol": 6.2 },
+    { "minutesAgo": 0, "mmol": 6.2 }
+  ]
+}

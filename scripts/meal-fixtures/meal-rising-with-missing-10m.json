@@ -1,0 +1,13 @@
+{
+  "name": "meal-rising-with-missing-10m",
+  "description": "Maaltijdstijging met ontbrekende 10-minuten baseline; moet via rise-from-trough alsnog rising worden.",
+  "expect": { "phase": "rising" },
+  "readings": [
+    { "minutesAgo": 55, "mmol": 5.4 },
+    { "minutesAgo": 45, "mmol": 5.2 },
+    { "minutesAgo": 35, "mmol": 5.3 },
+    { "minutesAgo": 25, "mmol": 5.8 },
+    { "minutesAgo": 18, "mmol": 6.4 },
+    { "minutesAgo": 0, "mmol": 7.0 }
+  ]
+}

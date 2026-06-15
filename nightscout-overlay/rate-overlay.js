@@ -1728,13 +1728,21 @@
     if (!trough) return null;
     var ageMin = (latestTime - readingTime(trough)) / 60000;
     var riseFromTrough = currentMmol - troughMmol;
+    var afterTrough = readings.filter(function (entry) {
+      var time = readingTime(entry);
+      return Number.isFinite(time) && time > readingTime(trough) && time <= latestTime;
+    });
+    var sustainedRisePoints = afterTrough.filter(function (entry) {
+      return mmol(Number(entry.sgv)) >= troughMmol + 0.45;
+    }).length;
+    var sustainedRise = sustainedRisePoints >= 2;
 
     // --- Fase 'rising': bevestigde stijging (prioriteit) ---
     var rising = rate10 !== null ? rate10 > 0 : riseFromTrough >= 0.8;
     if (rising && riseFromTrough > 0) {
-      var fastGate = rate10 !== null && rate10 >= cal.slowRate && riseFromTrough >= 0.5 && ageMin >= 5;
-      var medium = riseFromTrough >= 0.6 && ageMin >= 10;
-      var slow = riseFromTrough >= 0.9 && ageMin >= 25;
+      var fastGate = rate10 !== null && rate10 >= cal.slowRate && riseFromTrough >= 0.5 && ageMin >= 5 && sustainedRise;
+      var medium = riseFromTrough >= 0.6 && ageMin >= 10 && sustainedRise && (rate10 === null || rate10 >= 0.04 || riseFromTrough >= 1.2);
+      var slow = riseFromTrough >= 0.9 && ageMin >= 25 && sustainedRise;
       if (fastGate || medium || slow) {
         var avgRate = ageMin > 0 ? riseFromTrough / ageMin : 0;
         var effRate = Math.max(rate10 || 0, avgRate);
@@ -1746,6 +1754,7 @@
           expectedDipAt: latestTime + cal.dipToNadirMin * 60000,
           riseFromTrough: riseFromTrough,
           effRate: effRate,
+          sustainedRisePoints: sustainedRisePoints,
           currentMmol: currentMmol
         });
       }
