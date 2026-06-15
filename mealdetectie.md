@@ -136,6 +136,30 @@ npm run meal:check
 
 `meal:check` is de hoofdcheck en draait syntax, fixtures, vectorcheck en parity.
 
+## Deploy-notitie
+
+De live overlay wordt door nginx uit `nightscout-overlay/rate-overlay.js` geserveerd via een bind mount in de
+`nightscout-ui` container. Na een wijziging aan dit bestand is alleen `docker compose up -d nightscout-ui`
+niet altijd genoeg: Docker kan de bestaande container laten staan, waardoor nginx nog het oude overlay-bestand ziet.
+
+Gebruik daarom bij overlay-wijzigingen:
+
+```sh
+docker compose -f docker-compose.nightscout.yml up -d --force-recreate nightscout-ui
+```
+
+Controleer daarna op de host:
+
+```sh
+wc -c nightscout-overlay/rate-overlay.js
+docker compose -f docker-compose.nightscout.yml exec -T nightscout-ui \
+  sh -lc 'wc -c /etc/nginx/overlay/rate-overlay.js'
+curl -s 'http://localhost:1337/_rate-overlay.js?v=volatility-impact-20260614j' | wc -c
+```
+
+De byte-counts moeten overeenkomen. Als de browser geen overlay toont maar de logs wel `GET /_rate-overlay.js`
+met `200` tonen, controleer eerst deze byte-counts en force-recreate de `nightscout-ui` container.
+
 ## Bekende beperkingen
 
 - De live overlay en `scripts/lib/meal-detector.mjs` bevatten nog dubbele kernlogica.
@@ -159,4 +183,3 @@ npm run meal:check
 5. Publiceer eventueel samengevatte vector-output naar de overlay, bijvoorbeeld als extra veld bij risk/prediction data.
 6. Laat `scoreReactiveMealRisk()` vector-patterns gebruiken als scorebijsturing, niet als phase-beslissing.
 7. Vervang uiteindelijk dubbele overlay/shared logica door een build- of injectiestap, zodat `scripts/lib/meal-detector.mjs` echt de enige bron wordt.
-

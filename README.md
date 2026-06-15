@@ -40,6 +40,13 @@ Lokale CGM-monitor voor LibreView/LibreLink data met Nightscout en MongoDB. De N
 
 Open daarna de UI met overlay op `http://localhost:1337`.
 
+Bij wijzigingen aan `nightscout-overlay/rate-overlay.js`: recreate de nginx-overlay container expliciet, anders kan
+de bestaande container nog het oude bind-mount bestand serveren:
+
+```bash
+docker compose -f docker-compose.nightscout.yml up -d --force-recreate nightscout-ui
+```
+
 ## Belangrijke Commands
 
 ```bash

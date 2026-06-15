@@ -34,6 +34,11 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Toegevoegd
 
+- **Maaltijddetectie regressiesuite + deploy-runbook** (`mealdetectie.md`, `scripts/meal-fixtures/`,
+  `scripts/run-meal-fixtures.mjs`, `scripts/check-meal-overlay-parity.mjs`). De live rising-gate is strakker
+  tegen sensor-spikes/langzame drift en wordt bewaakt tegen drift tussen overlay en shared testmodule. Nieuwe
+  deploy-notitie: na overlay-wijzigingen `nightscout-ui` met `--force-recreate` opnieuw maken, anders kan nginx
+  het oude bind-mount bestand blijven serveren.
 - **Rebound-forecast (shadow-first): voorspelt het herstel ná een reactieve dip** (`scripts/lib/rebound-profile.mjs`,
   `scripts/build-rebound-profile.mjs`, `scripts/evaluate-rebound-forecast.mjs`). Onderzoek op de eigen episodes
   toonde dat de rebound-piek **niet** met de dip-diepte/drop/dalingssnelheid correleert (alle |r|<0,2): counter-regulatie
