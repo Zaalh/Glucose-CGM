@@ -1771,10 +1771,24 @@
     return finalizeMealState(null);
   }
 
+  // TEMP DEBUG: forceer het maaltijd-vak altijd zichtbaar (dummy-status) zodat
+  // de positie live afgesteld kan worden. Zet op false om weer normaal te gedragen.
+  var MEAL_BADGE_DEBUG = true;
+
   function renderMealBadge(readings, hypoRisk, peakSignal) {
     var badge = ensureMealBadge();
     var meal = detectMealState(readings);
     if (!meal) {
+      if (MEAL_BADGE_DEBUG) {
+        badge.className = 'meal-langzaam';
+        badge.innerHTML =
+          '<span class="meal-ic">🍽️</span>' +
+          '<span class="meal-label">Maaltijd langzaam</span>' +
+          '<span class="meal-time">· 12m (debug)</span>';
+        badge.style.display = 'flex';
+        positionMealBadge();
+        return;
+      }
       badge.style.display = 'none';
       return;
     }
@@ -1821,21 +1835,28 @@
   function positionMealBadge() {
     var badge = document.getElementById('cgm-meal-badge');
     if (!badge || badge.style.display === 'none') return;
-    // Anker rechts naast de klok (#currentTime), verticaal gecentreerd t.o.v. de klok.
+    // In de ruimte tussen de klok en het hypo-vak, net links vóór het hypo-vak.
+    // (De bounding-box van #currentTime is breder dan de zichtbare tijd, dus
+    // anker op de linkerrand van het hypo-vak i.p.v. op de klok-rechterrand.)
     var clock = document.getElementById('currentTime');
-    if (clock) {
-      var rect = clock.getBoundingClientRect();
-      var bh = badge.getBoundingClientRect().height || 72;
-      var top = rect.top + window.scrollY + Math.max(0, (rect.height - bh) / 2);
+    var hypo = document.getElementById('cgm-hypo-alert');
+    var bw = badge.getBoundingClientRect().width || 120;
+    var bh = badge.getBoundingClientRect().height || 72;
+    if (clock && hypo) {
+      var crect = clock.getBoundingClientRect();
+      var hrect = hypo.getBoundingClientRect();
+      var top = crect.top + window.scrollY + Math.max(0, (crect.height - bh) / 2);
+      // net links van het hypo-vak, maar niet vóór de linkerrand van de klok
+      var left = Math.max(crect.left + window.scrollX, hrect.left + window.scrollX - bw - 14);
       badge.style.top = Math.max(0, Math.round(top)) + 'px';
-      badge.style.left = Math.round(rect.right + window.scrollX + 16) + 'px';
+      badge.style.left = Math.round(left) + 'px';
       return;
     }
     var chart = document.querySelector('#chartContainer');
     if (!chart) return;
-    var crect = chart.getBoundingClientRect();
-    badge.style.top = Math.max(0, Math.round(crect.top + window.scrollY + 8)) + 'px';
-    badge.style.left = Math.max(0, Math.round(crect.left + window.scrollX + 8)) + 'px';
+    var chrect = chart.getBoundingClientRect();
+    badge.style.top = Math.max(0, Math.round(chrect.top + window.scrollY + 8)) + 'px';
+    badge.style.left = Math.max(0, Math.round(chrect.left + window.scrollX + 8)) + 'px';
   }
 
   function ensureMobileDock(chart) {
