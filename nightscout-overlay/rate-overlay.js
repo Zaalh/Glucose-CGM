@@ -1783,6 +1783,41 @@
   // Testmodus: toon het vak altijd, maar zonder fake maaltijdstatus.
   var MEAL_BADGE_ALWAYS_VISIBLE = true;
 
+  // Spiegelt de getrapte rising-poort uit detectMealState() zodat de idle-reden
+  // altijd verklaart waaróm er (nog) geen maaltijd vuurt. Eén bron van waarheid:
+  // dezelfde fast/medium/slow-voorwaarden, dezelfde drempels.
+  function mealGateReason(rate10, riseFromTrough, ageMin, sustainedRisePoints, cal) {
+    if (rate10 !== null && rate10 < -0.02) return 'daling — geen reactieve drop';
+    var rising = rate10 !== null ? rate10 > 0 : riseFromTrough >= 0.8;
+    if (!(rising && riseFromTrough > 0)) return 'nog geen stijging';
+    if (sustainedRisePoints < 2) return 'geen sustained rise';
+    function unmet(conds) {
+      return conds.filter(function (c) { return !c.ok; }).map(function (c) { return c.msg; });
+    }
+    var gates = [
+      unmet([
+        { ok: rate10 !== null && rate10 >= cal.slowRate, msg: 'sneller stijgen' },
+        { ok: riseFromTrough >= 0.5, msg: '≥0.5 mmol' },
+        { ok: ageMin >= 5, msg: '≥5m' }
+      ]),
+      unmet([
+        { ok: riseFromTrough >= 0.6, msg: '≥0.6 mmol' },
+        { ok: ageMin >= 10, msg: '≥10m' },
+        { ok: rate10 === null || rate10 >= 0.04 || riseFromTrough >= 1.2, msg: 'meer momentum' }
+      ]),
+      unmet([
+        { ok: riseFromTrough >= 0.9, msg: '≥0.9 mmol' },
+        { ok: ageMin >= 25, msg: '≥25m' }
+      ])
+    ];
+    var best = gates[0];
+    for (var i = 1; i < gates.length; i++) {
+      if (gates[i].length < best.length) best = gates[i];
+    }
+    if (!best.length) return 'maaltijd-poort open';
+    return 'mist: ' + best.join(' + ');
+  }
+
   function mealIdleContext(readings) {
     if (!readings || !readings.length) {
       return {
@@ -1836,10 +1871,7 @@
         return Number.isFinite(time) && time > readingTime(trough) && time <= latestTime &&
           mmol(Number(entry.sgv)) >= troughMmol + 0.45;
       }).length;
-      if (sustainedRisePoints < 2) reason = 'geen sustained rise';
-      else if (rate10 !== null && rate10 < cal.slowRate) reason = 'stijging te traag';
-      else if (riseFromTrough < 0.6) reason = 'stijging te klein';
-      else if (ageMin < 5) reason = 'nog te vroeg';
+      reason = mealGateReason(rate10, riseFromTrough, ageMin, sustainedRisePoints, cal);
     }
     if (recent.length < 4) reason = 'te weinig recente punten';
 

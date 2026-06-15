@@ -166,9 +166,11 @@ met `200` tonen, controleer eerst deze byte-counts en force-recreate de `nightsc
 - De huidige fixtures zijn synthetisch; echte live episodes moeten nog worden toegevoegd.
 - `MEAL_BADGE_ALWAYS_VISIBLE` kan tijdelijk aan staan voor UI-positionering. Dan blijft het vak zichtbaar met
   `Geen maaltijd` wanneer er geen echte detectie is. Die idle-weergave gebruikt echte CGM-context: huidige waarde,
-  trend/rate, aantal recente punten, leeftijd van de laatste meting, 60m bereik en de belangrijkste blocker
-  (`geen sustained rise`, `stijging te traag`, `stijging te klein`, `nog te vroeg` of `te weinig recente punten`).
-  Echte `dip`/`rising`/`plateau`/`reactive-drop` statussen blijven leidend.
+  trend/rate, aantal recente punten, leeftijd van de laatste meting, 60m bereik en de belangrijkste blocker.
+  Die blocker wordt afgeleid uit dezelfde getrapte rising-poort als `detectMealState` (`mealGateReason()`): bij een
+  daling `daling — geen reactieve drop`, anders `nog geen stijging`, `geen sustained rise`, of de dichtstbijzijnde
+  poort met de ontbrekende voorwaarde (`mist: ≥0.5 mmol + ≥5m`, `mist: meer momentum`, …); `te weinig recente punten`
+  overschrijft alles. Echte `dip`/`rising`/`plateau`/`reactive-drop` statussen blijven leidend.
 - Vectorinformatie is nu offline beschikbaar, maar nog niet live in de overlay gekoppeld.
 - CGM-data heeft sensorlag, ruis en mogelijke compressie-artefacten; de detector moet daarom als heuristiek worden gezien.
 
