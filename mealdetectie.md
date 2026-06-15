@@ -164,14 +164,14 @@ met `200` tonen, controleer eerst deze byte-counts en force-recreate de `nightsc
 
 - De live overlay en `scripts/lib/meal-detector.mjs` bevatten nog dubbele kernlogica.
 - De huidige fixtures zijn synthetisch; echte live episodes moeten nog worden toegevoegd.
-- `MEAL_BADGE_DEBUG` staat nog aan zolang de UI-positionering getest wordt. Daardoor kan de badge zichtbaar zijn zonder echte maaltijd.
+- `MEAL_BADGE_DEBUG` staat standaard uit. Als die tijdelijk aan staat voor UI-positionering, toont de badge een vaste dummy-status en zegt hij niets over echte detectie.
 - Vectorinformatie is nu offline beschikbaar, maar nog niet live in de overlay gekoppeld.
 - CGM-data heeft sensorlag, ruis en mogelijke compressie-artefacten; de detector moet daarom als heuristiek worden gezien.
 
 ## Plan
 
 1. Houd `npm run meal:check` groen bij elke wijziging.
-2. Zet `MEAL_BADGE_DEBUG` uit zodra de badge-positionering klaar is.
+2. Laat `MEAL_BADGE_DEBUG` uit buiten tijdelijke UI-positionering.
 3. Exporteer echte live episodes als fixtures:
    - echte maaltijd-rising;
    - reactive-drop na maaltijd;

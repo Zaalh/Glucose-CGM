@@ -1780,9 +1780,8 @@
     return finalizeMealState(null);
   }
 
-  // TEMP DEBUG: forceer het maaltijd-vak altijd zichtbaar (dummy-status) zodat
-  // de positie live afgesteld kan worden. Zet op false om weer normaal te gedragen.
-  var MEAL_BADGE_DEBUG = true;
+  // Debug kan tijdelijk op true om de positie live af te stellen; normaal uit.
+  var MEAL_BADGE_DEBUG = false;
 
   function renderMealBadge(readings, hypoRisk, peakSignal) {
     var badge = ensureMealBadge();
