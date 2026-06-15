@@ -1847,21 +1847,16 @@
   function positionMealBadge() {
     var badge = document.getElementById('cgm-meal-badge');
     if (!badge || badge.style.display === 'none') return;
-    // In de ruimte tussen de klok en het hypo-vak, net links vóór het hypo-vak.
-    // (De bounding-box van #currentTime is breder dan de zichtbare tijd, dus
-    // anker op de linkerrand van het hypo-vak i.p.v. op de klok-rechterrand.)
+    // Links vóór de klok: anker op de linkerrand van #currentTime, vak ernaast
+    // links, verticaal gecentreerd t.o.v. de klok.
     var clock = document.getElementById('currentTime');
-    var hypo = document.getElementById('cgm-hypo-alert');
-    var bw = badge.getBoundingClientRect().width || 120;
+    var bw = badge.getBoundingClientRect().width || 150;
     var bh = badge.getBoundingClientRect().height || 72;
-    if (clock && hypo) {
+    if (clock) {
       var crect = clock.getBoundingClientRect();
-      var hrect = hypo.getBoundingClientRect();
       var top = crect.top + window.scrollY + Math.max(0, (crect.height - bh) / 2);
-      // net links van het hypo-vak, maar niet vóór de linkerrand van de klok
-      var left = Math.max(crect.left + window.scrollX, hrect.left + window.scrollX - bw - 14);
       badge.style.top = Math.max(0, Math.round(top)) + 'px';
-      badge.style.left = Math.round(left) + 'px';
+      badge.style.left = Math.max(0, Math.round(crect.left + window.scrollX - bw - 12)) + 'px';
       return;
     }
     var chart = document.querySelector('#chartContainer');
