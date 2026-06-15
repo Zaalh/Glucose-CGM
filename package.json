@@ -30,6 +30,8 @@
     "hypo:tune": "docker compose -f docker-compose.nightscout.yml --profile libre run --rm libreview-sync node scripts/tune-reactive-hypo-v2.mjs",
     "hypo:report": "docker compose -f docker-compose.nightscout.yml --profile libre run --rm libreview-sync node scripts/hypo-report.mjs",
     "hypo:patterns": "docker compose -f docker-compose.nightscout.yml --profile libre run --rm libreview-sync node scripts/hypo-patterns.mjs",
+    "rebound:profile": "docker compose -f docker-compose.nightscout.yml --profile libre run --rm libreview-sync node scripts/build-rebound-profile.mjs",
+    "rebound:eval": "docker compose -f docker-compose.nightscout.yml --profile libre run --rm libreview-sync node scripts/evaluate-rebound-forecast.mjs",
     "ai:review": "node --env-file-if-exists=.env.ai scripts/ai-review.mjs",
     "detector:fixtures": "node scripts/run-detector-fixtures.mjs",
     "spike-filter:check": "node scripts/run-spike-filter-check.mjs",
