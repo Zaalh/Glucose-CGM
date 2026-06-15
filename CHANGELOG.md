@@ -71,6 +71,21 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
     daling inzet. De episode vervalt pas bij terugkeer richting baseline of na 180 minuten. In het AI-paneel →
     Instellingen staan nu **Export/Import**-knoppen voor `cgm-meal-calibration-v1`, met schema-validatie,
     numerieke filtering en sample-capping. Cache-buster → `meal-memory-export-20260614i`.
+  - **Maaltijd-vak verplaatst + uitgebreid (vierkant kaartje links vóór de klok).** Het badge stond als smal
+    horizontaal pilletje rechtsboven in de grafiek; het is nu een **gestapeld vierkant kaartje** (icoon boven,
+    detail eronder; afgeronde hoek + schaduw, vorm gelijk aan het hypo-vak) **verankerd aan de linkerrand van de
+    klok** (`#currentTime`), in de zwarte ruimte links ervan, verticaal gecentreerd. De positie wordt herberekend
+    bij elke render, bij window-resize en in de layout-passes na laden; scroll-proof via document-coördinaten.
+    `positionMealBadge` ankert op `clock.left − vakbreedte − 12px` (de bounding-box van `#currentTime` is breder
+    dan de zichtbare tijd, dus ankeren op de klok-rechterrand viel in het hypo-vak). De inhoud toont nu **per fase
+    zo veel mogelijk**: *reactive-drop* → piek→huidig, Δ mmol, daalsnelheid/min, min na piek, dip ~HH:MM, risico
+    (niveau + numerieke score); *rising* → huidige mmol, ↗ stijging, snelheid/min, minuten, dip, risico;
+    *plateau* → piek, min na piek, dip, risico; *dip* → pre-dip + huidige mmol. Vak verbreed naar 150px (mobiel
+    128px) voor de getallen.
+  - **TEMP `MEAL_BADGE_DEBUG`** (`nightscout-overlay/rate-overlay.js`, momenteel `true`): forceert het maaltijd-vak
+    altijd zichtbaar met een dummy reactive-drop-status om de positie/layout live te kunnen afstellen zonder op een
+    echte maaltijd te wachten. **Terugzetten naar `false`** zodra de plaatsing definitief is, zodat het vak weer
+    alleen bij een echte maaltijd-episode verschijnt.
   - **Glucose-volatiliteit in Stats/AI.** De 24u stats tonen nu een **Volatiliteit score** op basis van de snelste
     recente sample-beweging. De AI-tab krijgt een sectie **Glucose-volatiliteit · snelle sprongen** met snelste
     stijging/daling en de grootste recente piek→dal sprongen uit de episode-database. Formulering blijft
