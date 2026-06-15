@@ -21,7 +21,11 @@ Omdat de overlay nu een klassiek browser-script is, wordt de shared module nog n
 npm run meal:parity
 ```
 
-Die controleert dat de kritieke rising-gates in overlay en shared module gelijk blijven.
+Die controleert dat overlay en shared module gelijk blijven. Naast snelle substring-canaries op
+de kritieke gates draait de check een **gedragspariteit**: de overlay-functies worden uit de broncode
+gesneden en in een sandbox naast de shared module gedraaid via sliding replay (minuut-voor-minuut,
+episode-geheugen meegedragen) — inclusief de risico-scoring. Drift in een drempel of in de
+episode-boekhouding laat de check falen.
 
 ## Detectielogica
 
@@ -103,6 +107,33 @@ De output bevat onder andere:
 
 De overlay gebruikt deze vectorlaag nog niet live, omdat de browser geen directe toegang heeft tot Mongo `episode_vectors`.
 
+## Risico-escalatie (niveau-gate)
+
+De `phase` zegt *wat* er gebeurt; `scoreReactiveMealRisk` bepaalt *hoe alarmerend* het maaltijd-vak wordt
+(`low` / `watch` / `high` / `urgent`). Voor een `reactive-drop` stuurt dit niet op de kale daalsnelheid maar
+op de **verwachte bodem**:
+
+```js
+projectReactiveNadir(meal, cal) // = currentMmol - max(0, (typicalDrop + undershoot) - dropFromPeak)
+```
+
+De verwachte bodem wordt vergeleken met universele klinische drempels uit `MEAL_DEFAULTS`
+(configureerbaar, zodat het systeem voor iedereen bruikbaar is):
+
+- `watchMmol` 4.5
+- `alertMmol` 3.9 (Level-1 hypo-alert)
+- `seriousMmol` 3.0 (klinisch significant)
+
+Gevolg: een daling die ruim boven 3.9 bodemt (bijv. normale postprandiale klaring 11 → 9) blijft `low` en
+escaleert niet; een daling die richting < 3.9 of < 3.0 projecteert wordt `high` / `urgent`. Een snelle val
+geeft een kleine extra (adrenerge symptomen kunnen ook boven 3.9 optreden), maar snelheid zonder niveau
+escaleert niet meer. De grootte van de val zelf komt uit de per-browser zelf-kalibratie
+(`typicalDrop` / `undershoot`).
+
+De badge-basiskleur van een `reactive-drop` volgt dit risico-niveau: rustig grijs (`low`), amber (`watch`)
+en rood (`high` / `urgent`) — rood blijft dus voorbehouden aan een daling die werkelijk de hypo-zone in
+projecteert.
+
 ## Tests
 
 Maaltijd-fixtures staan in:
@@ -125,16 +156,21 @@ De suite dekt onder andere:
 - stabiel hoog;
 - kleine ruisstijging.
 
+De risico-escalatie heeft een eigen check (`scripts/run-meal-risk-check.mjs`) die de niveau-gate dekt:
+verwachte-bodem-berekening, benigne hoge daling → `low`, en dalingen die richting < 4.5 / < 3.9 / < 3.0
+projecteren → `watch` / `high` / `urgent`, plus configureerbaarheid van de drempels.
+
 Draaien:
 
 ```sh
 npm run meal:fixtures
 npm run meal:vectors
+npm run meal:risk
 npm run meal:parity
 npm run meal:check
 ```
 
-`meal:check` is de hoofdcheck en draait syntax, fixtures, vectorcheck en parity.
+`meal:check` is de hoofdcheck en draait syntax, fixtures, vectorcheck, risico-check en parity.
 
 ## Deploy-notitie
 

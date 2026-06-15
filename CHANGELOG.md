@@ -14,6 +14,22 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 >
 > _Eerder (2026-06-04, commit `f280478`): meal-onset/`riseFromTrough`-features in V2-shadow._
 
+### Maaltijddetectie
+
+- **Niveau-gate voor de reactieve-daling-escalatie** (`scripts/lib/meal-detector.mjs`,
+  `nightscout-overlay/rate-overlay.js`). `scoreReactiveMealRisk` stuurt een `reactive-drop` nu op de
+  **verwachte bodem** (`projectReactiveNadir` = `currentMmol - max(0, (typicalDrop + undershoot) - dropFromPeak)`)
+  t.o.v. universele klinische drempels in `MEAL_DEFAULTS` (`watchMmol` 4.5, `alertMmol` 3.9, `seriousMmol` 3.0,
+  configureerbaar). Een daling die ruim boven 3.9 bodemt (bv. normale klaring 11 → 9) blijft `low` en escaleert
+  niet meer; een daling richting < 3.9 / < 3.0 wordt `high` / `urgent`. Snelheid zonder niveau escaleert niet
+  langer (kleine adrenerge bump blijft). Dit vervangt de oude vaste basis-score + huidig-niveau-bonus die
+  benigne dalingen al op `watch`/`urgent` zette.
+- **Badge-basiskleur volgt het risico-niveau**: rustig grijs (`low`), amber (`watch`), rood (`high`/`urgent`).
+  Rood is daarmee voorbehouden aan een daling die werkelijk de hypo-zone in projecteert.
+- **Tests**: nieuwe `scripts/run-meal-risk-check.mjs` (`npm run meal:risk`, in `meal:check`); de parity-check
+  (`scripts/check-meal-overlay-parity.mjs`) is uitgebreid van substring-canaries naar gedragspariteit via
+  sliding replay (incl. risico-scoring en episode-boekhouding), zodat drift tussen overlay en shared module faalt.
+
 ### Prestatie
 
 - **MongoDB-indexen voor `prediction_snapshots` + `user_feedback`** (`scripts/libreview-nightscout-sync.mjs`).
