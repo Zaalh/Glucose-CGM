@@ -13,6 +13,13 @@ export const MEAL_DEFAULTS = {
   typicalRiseMmol: 1.4,
   typicalDropMmol: 1.4,
   typicalUndershootMmol: 0.2,
+  // Universele klinische niveau-drempels (mmol/L) voor de escalatie van een
+  // reactieve daling. Level-1 hypo-alert = 3.9, klinisch significant = 3.0.
+  // Configureerbaar zodat het systeem voor iedereen bruikbaar is; de grootte
+  // van de val zelf komt uit de per-persoon zelf-kalibratie (typicalDrop/...).
+  watchMmol: 4.5,
+  alertMmol: 3.9,
+  seriousMmol: 3.0,
   samples: 0,
 }
 
@@ -263,6 +270,80 @@ export function detectMealState(readings, options = {}) {
     }
   }
   return finalizeMealState(null)
+}
+
+// Verwachte bodem (mmol/L) van een lopende reactieve daling/plateau: het
+// huidige niveau minus de resterende verwachte val. De totale val van piek tot
+// bodem (incl. undershoot) komt uit de zelf-gekalibreerde typische waarden, dus
+// de schatting personaliseert vanzelf. Geeft null als er te weinig info is.
+export function projectReactiveNadir(meal, cal) {
+  if (!meal || !Number.isFinite(meal.currentMmol)) return null
+  const expectedFall = (Number(cal.typicalDropMmol) || 0) + (Number(cal.typicalUndershootMmol) || 0)
+  const alreadyFell = Number.isFinite(meal.dropFromPeak)
+    ? meal.dropFromPeak
+    : (Number.isFinite(meal.peakMmol) ? meal.peakMmol - meal.currentMmol : 0)
+  const remainingFall = Math.max(0, expectedFall - alreadyFell)
+  return meal.currentMmol - remainingFall
+}
+
+export function classifyMealRisk(score) {
+  if (score >= 80) return 'urgent'
+  if (score >= 60) return 'high'
+  if (score >= 35) return 'watch'
+  return 'low'
+}
+
+// Escalatieniveau van het maaltijd-vak. Voor een reactieve daling stuurt dit op
+// de VERWACHTE BODEM t.o.v. universele klinische drempels (niet op de kale
+// daalsnelheid): een daling 11->9 die ruim boven 3.9 bodemt blijft 'low', een
+// daling die richting <3.9 of <3.0 projecteert wordt high/urgent. Een snelle
+// val geeft een kleine extra (adrenerge symptomen kunnen ook boven 3.9 optreden).
+export function scoreReactiveMealRisk(meal, cal, hypoRisk, peakSignal) {
+  if (!meal) return null
+  let score = 0
+
+  if (meal.phase === 'dip') {
+    score += 18
+    if (Number.isFinite(meal.preDipMmol) && meal.preDipMmol >= cal.preDipMmol * 1.5) score += 12
+  } else if (meal.phase === 'plateau') {
+    score += 22
+    if (Number.isFinite(meal.peakMmol) && Number.isFinite(meal.currentMmol) && meal.peakMmol - meal.currentMmol < 0.4) score += 6
+  } else if (meal.phase === 'rising') {
+    score += 25
+    if (meal.speed === 'snel') score += 18
+    else if (meal.speed === 'normaal') score += 10
+    if (Number.isFinite(meal.riseFromTrough) && meal.riseFromTrough >= cal.typicalRiseMmol) score += 12
+    if (Number.isFinite(meal.effRate) && meal.effRate >= cal.fastRate) score += 12
+  } else if (meal.phase === 'reactive-drop') {
+    score += 10
+    const nadir = projectReactiveNadir(meal, cal)
+    const serious = Number.isFinite(cal.seriousMmol) ? cal.seriousMmol : 3.0
+    const alert = Number.isFinite(cal.alertMmol) ? cal.alertMmol : 3.9
+    const watch = Number.isFinite(cal.watchMmol) ? cal.watchMmol : 4.5
+    if (Number.isFinite(nadir)) {
+      if (nadir < serious) score += 70
+      else if (nadir < alert) score += 50
+      else if (nadir < watch) score += 25
+    }
+    if (Number.isFinite(meal.dropRate)) {
+      if (meal.dropRate >= cal.dropUrgentRate) score += 12
+      else if (meal.dropRate >= cal.dropHighRate) score += 6
+    }
+  }
+
+  if (peakSignal) {
+    if (peakSignal.severity === 'urgent') score += 18
+    else if (peakSignal.severity === 'high') score += 12
+    else if (peakSignal.severity === 'watch') score += 7
+  }
+  if (hypoRisk) {
+    if (hypoRisk.css === 'urgent' || hypoRisk.css === 'hypo') score += 25
+    else if (hypoRisk.css === 'warning') score += 16
+    else if (hypoRisk.css === 'watch') score += 8
+  }
+
+  score = Math.max(0, Math.min(100, Math.round(score)))
+  return { score, level: classifyMealRisk(score) }
 }
 
 export function timelineFromMmolReadings(readings, nowMs) {

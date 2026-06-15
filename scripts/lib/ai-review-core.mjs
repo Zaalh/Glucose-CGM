@@ -301,7 +301,7 @@ export async function runAiReview({ db, aiRouter, dryRun = false, force = false,
 }
 
 // --- Rapporten (C/D): narratief dag-/triggerverslag bovenop de cijfers --------
-const AI_REPORT_TYPES = new Set(['daily', 'weekly', 'trigger'])
+const AI_REPORT_TYPES = new Set(['daily', 'weekly', 'period', 'episode', 'trigger'])
 
 function reportSystemPrompt() {
   return [
@@ -316,25 +316,26 @@ function reportSystemPrompt() {
   ].join('\n')
 }
 
-function reportUserPrompt({ stats, episodes, feedback, type }) {
+function reportUserPrompt({ stats, episodes, feedback, type, context }) {
   return JSON.stringify({
     reportType: type,
     stats: stats || null,
     episodes: Array.isArray(episodes) ? episodes.slice(0, 20) : [],
     recentUserFeedback: Array.isArray(feedback) ? feedback.map(compactFeedback) : [],
+    context: context || null,
   })
 }
 
 // Genereert één narratief rapport (1 LLM-call) en slaat het op in `ai_reports`.
 // stats/episodes/feedback worden door de aanroeper (server) aangeleverd.
-export async function runAiReport({ db, aiRouter, stats, episodes = [], feedback = [], type = 'daily' } = {}) {
+export async function runAiReport({ db, aiRouter, stats, episodes = [], feedback = [], type = 'daily', context = null } = {}) {
   if (!aiRouterConfigured(aiRouter)) {
     return { ok: true, skipped: true, reason: 'Geen AI-provider geconfigureerd.' }
   }
   const t = AI_REPORT_TYPES.has(type) ? type : 'daily'
   const messages = [
     { role: 'system', content: reportSystemPrompt() },
-    { role: 'user', content: reportUserPrompt({ stats, episodes, feedback, type: t }) },
+    { role: 'user', content: reportUserPrompt({ stats, episodes, feedback, type: t, context }) },
   ]
   let result = await callAiRouter(aiRouter, { temperature: 0.2, response_format: { type: 'json_object' }, messages })
   let parsed
@@ -364,6 +365,8 @@ export async function runAiReport({ db, aiRouter, stats, episodes = [], feedback
     source: sourceName(result),
     type: t,
     period: stats && stats.window ? stats.window : null,
+    scope: context && context.scope ? context.scope : null,
+    contextSnapshot: context || null,
     stats: stats || null,
     title: String(parsed?.title || 'Rapport').slice(0, 200),
     body: String(parsed?.body || '').slice(0, 4000),
@@ -388,7 +391,7 @@ function chatSystemPrompt() {
   ].join('\n')
 }
 
-function chatContext({ stats, episodes, observations, feedback }) {
+function chatContext({ stats, episodes, observations, feedback, context }) {
   return 'Datacontext (JSON, alleen ter onderbouwing): ' + JSON.stringify({
     stats: stats || null,
     episodes: Array.isArray(episodes) ? episodes.slice(0, 10) : [],
@@ -396,12 +399,13 @@ function chatContext({ stats, episodes, observations, feedback }) {
       ? observations.slice(0, 8).map((o) => ({ summary: o.summary, confidence: o.confidence, createdAt: o.createdAt }))
       : [],
     recentUserFeedback: Array.isArray(feedback) ? feedback.map(compactFeedback) : [],
+    context: context || null,
   })
 }
 
 // Beantwoordt één chatbericht. `messages` is de (door de client bijgehouden) historie;
 // alleen de laatste ~10 user/assistant-berichten worden meegestuurd. Geen opslag.
-export async function runAiChat({ aiRouter, messages = [], stats, episodes = [], observations = [], feedback = [] } = {}) {
+export async function runAiChat({ aiRouter, messages = [], stats, episodes = [], observations = [], feedback = [], context = null } = {}) {
   if (!aiRouterConfigured(aiRouter)) {
     return { ok: true, skipped: true, reason: 'Geen AI-provider geconfigureerd.' }
   }
@@ -418,7 +422,7 @@ export async function runAiChat({ aiRouter, messages = [], stats, episodes = [],
     temperature: 0.3,
     messages: [
       { role: 'system', content: chatSystemPrompt() },
-      { role: 'system', content: chatContext({ stats, episodes, observations, feedback }) },
+      { role: 'system', content: chatContext({ stats, episodes, observations, feedback, context }) },
       ...history,
     ],
   })

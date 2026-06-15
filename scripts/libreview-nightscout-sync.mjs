@@ -1034,10 +1034,21 @@ function startServer() {
       return
     }
 
+    if (url.pathname === '/ai-review/day-compare' && req.method === 'GET') {
+      try {
+        const result = await getAiDayCompare(url.searchParams.get('date'))
+        res.end(JSON.stringify({ ok: true, ...result }))
+      } catch (err) {
+        res.writeHead(err && err.statusCode ? err.statusCode : 500)
+        res.end(JSON.stringify({ ok: false, message: formatError(err) }))
+      }
+      return
+    }
+
     if (url.pathname === '/ai-review/report' && req.method === 'POST') {
       try {
         const body = await readJsonBody(req)
-        const result = await runAiReportOnce({ type: body && body.type })
+        const result = await runAiReportOnce({ type: body && body.type, date: body && body.date, days: body && body.days })
         res.end(JSON.stringify(result))
       } catch (err) {
         res.writeHead(err && err.statusCode ? err.statusCode : 500)
@@ -1061,7 +1072,7 @@ function startServer() {
     if (url.pathname === '/ai-review/chat' && req.method === 'POST') {
       try {
         const body = await readJsonBody(req)
-        const result = await runAiChatOnce({ messages: body && body.messages })
+        const result = await runAiChatOnce({ messages: body && body.messages, scope: body && body.scope })
         res.end(JSON.stringify(result))
       } catch (err) {
         res.writeHead(err && err.statusCode ? err.statusCode : 500)
@@ -1643,6 +1654,13 @@ function dayKeyInTz(date, timeZone) {
   return `${parts.year}-${parts.month}-${parts.day}`
 }
 
+function shiftDateKey(dateKey, days) {
+  const [year, month, day] = String(dateKey || '').split('-').map(Number)
+  if (!year || !month || !day) return null
+  const d = new Date(Date.UTC(year, month - 1, day + days, 12, 0, 0))
+  return d.toISOString().slice(0, 10)
+}
+
 function localDayRange(dateKey, timeZone) {
   const [year, month, day] = String(dateKey || '').split('-').map(Number)
   if (!year || !month || !day) return null
@@ -1759,6 +1777,17 @@ async function getAiDayReview(dateKey) {
       .sort({ peakAt: 1 })
       .limit(50)
       .toArray()
+    await ensureAuxIndexes(db)
+    const contextEvents = await db.collection('cgm_events')
+      .find({
+        eventAt: {
+          $gte: new Date(range.from).toISOString(),
+          $lt: new Date(range.to).toISOString(),
+        },
+      }, { projection: { relatedEntryId: 0 } })
+      .sort({ eventAt: -1 })
+      .limit(80)
+      .toArray()
     const highEpisodes = buildHighEpisodes(rows)
     const highToLow = []
     const usedLows = new Set()
@@ -1803,6 +1832,7 @@ async function getAiDayReview(dateKey) {
       `${highEpisodes.length} high-episodes`,
       `dekking ${stats.coveragePct}%`,
     ].join(' · ')
+    const suggestions = buildDaySuggestions({ stats, thresholdLows, lows, highEpisodes, highToLow, contextEvents, sourceHealth })
     return {
       date: dateKey || dayKeyInTz(new Date(), tz),
       window: { from: new Date(range.from).toISOString(), to: new Date(range.to).toISOString(), timeZone: tz },
@@ -1812,11 +1842,110 @@ async function getAiDayReview(dateKey) {
       lowEpisodes: lows,
       highEpisodes,
       highToLow,
+      contextEvents,
+      suggestions,
       notable: { worstLow, worstHigh, hypoBurden3_9: round(burden, 1) },
       sourceHealth,
     }
   } finally {
     if (client) await client.close().catch(() => undefined)
+  }
+}
+
+function buildDaySuggestions({ stats, thresholdLows, lows, highEpisodes, highToLow, contextEvents, sourceHealth }) {
+  const suggestions = []
+  const hasMealContext = (contextEvents || []).some((e) => ['meal', 'snack'].includes(e.type))
+  const hasFingerstick = (contextEvents || []).some((e) => e.type === 'fingerstick' || e.fingerstickMmol != null)
+  const hasSymptom = (contextEvents || []).some((e) => e.type === 'symptom' || (Array.isArray(e.symptoms) && e.symptoms.length))
+  const lowCount = thresholdLows ? thresholdLows.length : 0
+  if (sourceHealth && sourceHealth.level !== 'goed') {
+    suggestions.push({ type: 'data_quality', label: 'Datakwaliteit checken', question: 'Welke datagaten of missende metingen maken deze dag minder betrouwbaar?' })
+  }
+  if (lowCount && !hasFingerstick) {
+    suggestions.push({ type: 'fingerstick', label: 'Low bevestigen', question: 'Welke lows van deze dag zouden met vingerprik nuttig zijn om te bevestigen?' })
+  }
+  if ((lows || []).length && !hasMealContext) {
+    suggestions.push({ type: 'meal_context', label: 'Maaltijdcontext ontbreekt', question: 'Welke dips lijken mogelijk na eten te komen en welke maaltijdcontext ontbreekt?' })
+  }
+  if ((highToLow || []).length) {
+    suggestions.push({ type: 'high_to_low', label: 'High→low bekijken', question: 'Welke high→low koppelingen op deze dag zijn het meest relevant?' })
+  }
+  if ((highEpisodes || []).length >= 2) {
+    suggestions.push({ type: 'highs', label: 'High episodes vergelijken', question: 'Waardoor vielen de high-episodes van deze dag op ten opzichte van normale dagen?' })
+  }
+  if (lowCount && !hasSymptom) {
+    suggestions.push({ type: 'symptoms', label: 'Symptomen loggen', question: 'Welke lage momenten missen nog symptoomcontext?' })
+  }
+  if (stats && stats.coveragePct >= 80 && !suggestions.length) {
+    suggestions.push({ type: 'summary', label: 'Dag samenvatten', question: 'Vat deze dag samen: wat was opvallend en wat was juist normaal?' })
+  }
+  return suggestions.slice(0, 5)
+}
+
+function compactDayCompare(day) {
+  const stats = day && day.stats ? day.stats : {}
+  return {
+    date: day ? day.date : null,
+    tir: stats.tir ?? null,
+    tbr: stats.tbr ?? null,
+    tar: stats.tar ?? null,
+    mean: stats.mean ?? null,
+    cv: stats.cv ?? null,
+    min: stats.min ?? null,
+    max: stats.max ?? null,
+    coveragePct: stats.coveragePct ?? null,
+    lows: day && day.thresholdLows ? day.thresholdLows.length : null,
+    reactiveEpisodes: day && day.lowEpisodes ? day.lowEpisodes.length : null,
+    highs: day && day.highEpisodes ? day.highEpisodes.length : null,
+    burden3_9: day && day.notable ? day.notable.hypoBurden3_9 : null,
+  }
+}
+
+function compareDelta(current, other) {
+  const delta = {}
+  for (const key of ['tir', 'tbr', 'tar', 'mean', 'cv', 'lows', 'reactiveEpisodes', 'highs', 'burden3_9']) {
+    const a = current[key]
+    const b = other && other[key]
+    delta[key] = a != null && b != null ? round(Number(a) - Number(b), 1) : null
+  }
+  return delta
+}
+
+async function getAiDayCompare(dateKey) {
+  const tz = process.env.LIBREVIEW_TZ || 'Europe/Amsterdam'
+  const date = dateKey && /^\d{4}-\d{2}-\d{2}$/.test(dateKey) ? dateKey : dayKeyInTz(new Date(), tz)
+  const prevDate = shiftDateKey(date, -1)
+  const weekdayDate = shiftDateKey(date, -7)
+  const [currentDay, prevDay, weekdayDay, baseline] = await Promise.all([
+    getAiDayReview(date),
+    prevDate ? getAiDayReview(prevDate).catch(() => null) : null,
+    weekdayDate ? getAiDayReview(weekdayDate).catch(() => null) : null,
+    getAiStats(14),
+  ])
+  const current = compactDayCompare(currentDay)
+  const previous = prevDay ? compactDayCompare(prevDay) : null
+  const sameWeekday = weekdayDay ? compactDayCompare(weekdayDay) : null
+  const base = {
+    date: '14d baseline',
+    tir: baseline.tir,
+    tbr: baseline.tbr,
+    tar: baseline.tar,
+    mean: baseline.mean,
+    cv: baseline.cv,
+    lows: baseline.lows ? round(baseline.lows.count / 14, 1) : null,
+    reactiveEpisodes: baseline.reactive ? round(baseline.reactive.total / 14, 1) : null,
+    highs: baseline.highToLowContext ? round(baseline.highToLowContext.total / 14, 1) : null,
+    burden3_9: baseline.reactive ? round(baseline.reactive.totalAreaBelow3_9 / 14, 1) : null,
+    coveragePct: baseline.coveragePct,
+  }
+  return {
+    date,
+    current,
+    comparisons: {
+      previous: previous ? { date: prevDate, values: previous, delta: compareDelta(current, previous) } : null,
+      sameWeekday: sameWeekday ? { date: weekdayDate, values: sameWeekday, delta: compareDelta(current, sameWeekday) } : null,
+      baseline14d: { values: base, delta: compareDelta(current, base) },
+    },
   }
 }
 
@@ -2088,6 +2217,78 @@ async function getCgmEvents(limit) {
   }
 }
 
+async function getCgmEventsInRange(fromMs, toMs, limit = 50) {
+  let client = null
+  try {
+    client = new MongoClient(config.mongoUri)
+    await client.connect()
+    await ensureAuxIndexes(client.db())
+    return await client.db().collection('cgm_events')
+      .find({
+        eventAt: {
+          $gte: new Date(fromMs).toISOString(),
+          $lt: new Date(toMs).toISOString(),
+        },
+      }, { projection: { relatedEntryId: 0 } })
+      .sort({ eventAt: -1 }).limit(limit).toArray()
+  } finally {
+    if (client) await client.close().catch(() => undefined)
+  }
+}
+
+async function buildAiScopedContext(scope) {
+  const type = String((scope && scope.type) || '').trim()
+  if (type === 'period' || type === 'weekly') {
+    const days = Math.max(1, Math.min(90, Number(scope.days || (type === 'weekly' ? 7 : 14))))
+    const [stats, episodeResult, history, sourceHealth, recentEvents] = await Promise.all([
+      getAiStats(days),
+      getAiEpisodes(30, days),
+      getAiHistory(days),
+      getSourceHealth(),
+      getCgmEvents(80),
+    ])
+    return {
+      scope: { type, days, from: stats.window?.from || null, to: stats.window?.to || null },
+      stats,
+      episodes: episodeResult.episodes || [],
+      history: history.history || [],
+      sourceHealth,
+      recentEvents,
+    }
+  }
+  if (type !== 'day') return null
+  const date = String((scope && scope.date) || '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    const err = new Error('Dagcontext mist een geldige datum (YYYY-MM-DD).')
+    err.statusCode = 400
+    throw err
+  }
+  const tz = process.env.LIBREVIEW_TZ || 'Europe/Amsterdam'
+  const range = localDayRange(date, tz)
+  if (!range) {
+    const err = new Error('Ongeldige dagcontext.')
+    err.statusCode = 400
+    throw err
+  }
+  const [day, glucoseFeed, sourceHealth, userEvents] = await Promise.all([
+    getAiDayReview(date),
+    getGlucoseEventsFeed(date),
+    getSourceHealth(),
+    getCgmEventsInRange(range.from, range.to, 80),
+  ])
+  return {
+    scope: { type: 'day', date, timeZone: tz, from: new Date(range.from).toISOString(), to: new Date(range.to).toISOString() },
+    day,
+    glucoseEvents: {
+      summary: glucoseFeed.summary,
+      highEpisodeCount: glucoseFeed.highEpisodeCount,
+      events: (glucoseFeed.events || []).slice(0, 80),
+    },
+    userEvents,
+    sourceHealth,
+  }
+}
+
 // Server-side tijdweergave: forceer de lokale tijdzone. Zonder timeZone-optie pakt
 // toLocaleString de tijdzone van het server-proces (= UTC in de Docker-container),
 // waardoor server-gerenderde tijden 2u afwijken van de client-panelen (CEST). Zie
@@ -2327,7 +2528,7 @@ async function getEvaluation(days) {
 
 // D/C — Genereert één narratief rapport (1 LLM-call) achter dezelfde lock als de
 // review, zodat de free-tier nooit door spam wordt geraakt.
-async function runAiReportOnce({ type } = {}) {
+async function runAiReportOnce({ type, date, days } = {}) {
   if (aiReviewRunning) {
     const err = new Error('Er draait al een AI-taak.')
     err.statusCode = 409
@@ -2346,7 +2547,14 @@ async function runAiReportOnce({ type } = {}) {
   aiReviewRunning = true
   let client = null
   try {
-    const [stats, episodeResult] = await Promise.all([getAiStats(14), getAiEpisodes(20, 14)])
+    const reportType = String(type || 'daily')
+    const scopedContext = date
+      ? await buildAiScopedContext({ type: 'day', date })
+      : (reportType === 'weekly' || reportType === 'period')
+        ? await buildAiScopedContext({ type: reportType, days: days || (reportType === 'weekly' ? 7 : 14) })
+        : null
+    const statDays = scopedContext && scopedContext.scope && scopedContext.scope.days ? scopedContext.scope.days : 14
+    const [stats, episodeResult] = await Promise.all([getAiStats(statDays), getAiEpisodes(20, statDays)])
     const episodes = episodeResult.episodes || []
     client = new MongoClient(config.mongoUri)
     await client.connect()
@@ -2354,7 +2562,7 @@ async function runAiReportOnce({ type } = {}) {
     const feedback = await db.collection('user_feedback')
       .find({}, { projection: { createdAt: 1, type: 1, note: 1, relatedEntryIdentifier: 1, relatedEntryMmol: 1, riskAtFeedback: 1 } })
       .sort({ createdAt: -1 }).limit(20).toArray()
-    const result = await runAiReport({ db, aiRouter, stats, episodes, feedback, type })
+    const result = await runAiReport({ db, aiRouter, stats, episodes, feedback, type: reportType, context: scopedContext })
     aiReviewLastAt = Date.now()
     return result
   } finally {
@@ -2365,7 +2573,7 @@ async function runAiReportOnce({ type } = {}) {
 
 // Chat: 1 LLM-call per bericht. Wel de concurrency-lock (1 tegelijk), maar GÉÉN
 // min-interval (anders is chatten onbruikbaar traag).
-async function runAiChatOnce({ messages } = {}) {
+async function runAiChatOnce({ messages, scope } = {}) {
   if (aiReviewRunning) {
     const err = new Error('Er draait al een AI-taak; even wachten.')
     err.statusCode = 409
@@ -2378,6 +2586,7 @@ async function runAiChatOnce({ messages } = {}) {
   aiReviewRunning = true
   let client = null
   try {
+    const scopedContext = await buildAiScopedContext(scope)
     const [stats, episodeResult] = await Promise.all([getAiStats(14), getAiEpisodes(10, 14)])
     const episodes = episodeResult.episodes || []
     client = new MongoClient(config.mongoUri)
@@ -2389,7 +2598,7 @@ async function runAiChatOnce({ messages } = {}) {
         .find({}, { projection: { createdAt: 1, type: 1, note: 1, relatedEntryIdentifier: 1, relatedEntryMmol: 1, riskAtFeedback: 1 } })
         .sort({ createdAt: -1 }).limit(20).toArray(),
     ])
-    return await runAiChat({ aiRouter, messages, stats, episodes, observations, feedback })
+    return await runAiChat({ aiRouter, messages, stats, episodes, observations, feedback, context: scopedContext })
   } finally {
     aiReviewRunning = false
     if (client) await client.close().catch(() => undefined)
@@ -2402,7 +2611,7 @@ async function getAiReports(limit) {
     client = new MongoClient(config.mongoUri)
     await client.connect()
     return await client.db().collection('ai_reports')
-      .find({}, { projection: { 'stats.perHour': 0 } })
+      .find({}, { projection: { 'stats.perHour': 0, contextSnapshot: 0 } })
       .sort({ createdAt: -1 })
       .limit(limit)
       .toArray()

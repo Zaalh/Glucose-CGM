@@ -811,6 +811,9 @@
       '#cgm-meal-badge.meal-langzaam{border-color:#fcd34d;background:linear-gradient(135deg,#fef9c3 0%,#fde047 100%)}',
       '#cgm-meal-badge.meal-dip{border-color:#93c5fd;background:linear-gradient(135deg,#e0f2fe 0%,#bae6fd 100%);color:#0c3a5b;font-weight:800;opacity:.92}',
       '#cgm-meal-badge.meal-reactive-drop{border-color:#ef4444;background:linear-gradient(135deg,#fee2e2 0%,#ef4444 100%);color:#fff}',
+      // Reactieve daling waarvan de verwachte bodem veilig is: rustige kleur i.p.v. rood.
+      '#cgm-meal-badge.meal-reactive-drop-low{border-color:#cbd5e1;background:linear-gradient(135deg,#f1f5f9 0%,#e2e8f0 100%);color:#1f2937;opacity:.95}',
+      '#cgm-meal-badge.meal-reactive-drop-watch{border-color:#fcd34d;background:linear-gradient(135deg,#fef9c3 0%,#fde047 100%);color:#3a2e00}',
       '#cgm-meal-badge.meal-risk-watch{box-shadow:0 0 0 2px rgba(251,191,36,.38),0 1px 6px rgba(0,0,0,.35)}',
       '#cgm-meal-badge.meal-risk-high{box-shadow:0 0 0 2px rgba(249,115,22,.48),0 1px 8px rgba(0,0,0,.45)}',
       '#cgm-meal-badge.meal-risk-urgent{box-shadow:0 0 0 2px rgba(220,38,38,.58),0 1px 10px rgba(0,0,0,.55)}',
@@ -1309,6 +1312,11 @@
     typicalRiseMmol: 1.4,
     typicalDropMmol: 1.4,
     typicalUndershootMmol: 0.2,
+    // Universele klinische niveau-drempels (mmol/L) voor de escalatie van een
+    // reactieve daling. Level-1 hypo-alert = 3.9, klinisch significant = 3.0.
+    watchMmol: 4.5,
+    alertMmol: 3.9,
+    seriousMmol: 3.0,
     samples: 0
   };
   var MEAL_MIN_SAMPLES = 12;
@@ -1520,6 +1528,24 @@
     return 'low';
   }
 
+  // Verwachte bodem (mmol/L) van een lopende reactieve daling/plateau: huidig
+  // niveau minus de resterende verwachte val (uit de zelf-gekalibreerde
+  // typische val + undershoot). Personaliseert vanzelf.
+  function projectReactiveNadir(meal, cal) {
+    if (!meal || !Number.isFinite(meal.currentMmol)) return null;
+    var expectedFall = (Number(cal.typicalDropMmol) || 0) + (Number(cal.typicalUndershootMmol) || 0);
+    var alreadyFell = Number.isFinite(meal.dropFromPeak)
+      ? meal.dropFromPeak
+      : (Number.isFinite(meal.peakMmol) ? meal.peakMmol - meal.currentMmol : 0);
+    var remainingFall = Math.max(0, expectedFall - alreadyFell);
+    return meal.currentMmol - remainingFall;
+  }
+
+  // Escalatieniveau van het maaltijd-vak. Reactieve daling stuurt op de
+  // VERWACHTE BODEM t.o.v. universele klinische drempels (niet op de kale
+  // daalsnelheid): een daling die ruim boven 3.9 bodemt blijft 'low'; richting
+  // <3.9 of <3.0 wordt high/urgent. Snelle val geeft een kleine extra
+  // (adrenerge symptomen kunnen ook boven 3.9 optreden).
   function scoreReactiveMealRisk(meal, cal, hypoRisk, peakSignal) {
     if (!meal) return null;
     var score = 0;
@@ -1537,15 +1563,20 @@
       if (Number.isFinite(meal.riseFromTrough) && meal.riseFromTrough >= cal.typicalRiseMmol) score += 12;
       if (Number.isFinite(meal.effRate) && meal.effRate >= cal.fastRate) score += 12;
     } else if (meal.phase === 'reactive-drop') {
-      score += 45;
-      if (Number.isFinite(meal.dropRate)) {
-        if (meal.dropRate >= cal.dropUrgentRate) score += 25;
-        else if (meal.dropRate >= cal.dropHighRate) score += 16;
-        else if (meal.dropRate >= cal.dropWatchRate) score += 8;
+      score += 10;
+      var nadir = projectReactiveNadir(meal, cal);
+      var serious = Number.isFinite(cal.seriousMmol) ? cal.seriousMmol : 3.0;
+      var alert = Number.isFinite(cal.alertMmol) ? cal.alertMmol : 3.9;
+      var watch = Number.isFinite(cal.watchMmol) ? cal.watchMmol : 4.5;
+      if (Number.isFinite(nadir)) {
+        if (nadir < serious) score += 70;
+        else if (nadir < alert) score += 50;
+        else if (nadir < watch) score += 25;
       }
-      if (Number.isFinite(meal.dropFromPeak) && meal.dropFromPeak >= cal.typicalDropMmol) score += 10;
-      if (Number.isFinite(meal.currentMmol) && meal.currentMmol < 4.5) score += 15;
-      else if (Number.isFinite(meal.currentMmol) && meal.currentMmol < 5.3) score += 8;
+      if (Number.isFinite(meal.dropRate)) {
+        if (meal.dropRate >= cal.dropUrgentRate) score += 12;
+        else if (meal.dropRate >= cal.dropHighRate) score += 6;
+      }
     }
 
     if (peakSignal) {
@@ -1922,6 +1953,11 @@
     var cal = loadMealCalibration();
     var risk = scoreReactiveMealRisk(meal, cal, hypoRisk, peakSignal);
     var riskClass = risk && risk.level !== 'low' ? ' meal-risk-' + risk.level : '';
+    // Basiskleur van een reactieve daling volgt het risk-level: rood blijft
+    // voorbehouden aan high/urgent (verwachte bodem in de hypo-zone); een daling
+    // die veilig bodemt krijgt een rustige kleur i.p.v. alarmrood.
+    var dropLevel = risk && risk.level ? risk.level : 'high';
+    var dropBaseClass = (dropLevel === 'low' || dropLevel === 'watch') ? ('meal-reactive-drop-' + dropLevel) : 'meal-reactive-drop';
 
     function L(cls, txt) { return '<span class="' + cls + '">' + txt + '</span>'; }
     function num(v, d) { return Number.isFinite(v) ? v.toFixed(d) : null; }
@@ -1932,7 +1968,7 @@
     var riskScore = risk && Number.isFinite(risk.score) ? risk.score.toFixed(2) : '';
 
     if (meal.phase === 'reactive-drop') {
-      badge.className = 'meal-reactive-drop' + riskClass;
+      badge.className = dropBaseClass + riskClass;
       rows.push(L('meal-ic', '↘'));
       rows.push(L('meal-label', 'Reactieve daling ' + meal.speed));
       if (num(meal.peakMmol, 1) && num(meal.currentMmol, 1)) rows.push(L('meal-time', num(meal.peakMmol, 1) + ' → ' + num(meal.currentMmol, 1)));
@@ -2147,12 +2183,13 @@
       '  <div id="cgm-ai-explore"><div class="ai-empty">Laden…</div></div>',
       '</div>',
       '<div class="ai-pane" data-pane="rapporten" hidden>',
-      '  <div class="ai-row"><button type="button" class="ai-run" id="cgm-ai-genreport">Genereer dagrapport</button></div>',
+      '  <div class="ai-row"><select id="cgm-ai-report-type" aria-label="Rapporttype"><option value="daily">Dag/14d rapport</option><option value="weekly">Weekrapport</option><option value="period">Periode rapport</option></select><select id="cgm-ai-report-days" aria-label="Rapportvenster"><option value="7">7d</option><option value="14" selected>14d</option><option value="30">30d</option><option value="90">90d</option></select><button type="button" class="ai-run" id="cgm-ai-genreport">Genereer</button></div>',
       '  <div class="ai-status" id="cgm-ai-repstatus"></div>',
       '  <div id="cgm-ai-reports"><div class="ai-empty">Nog geen rapporten.</div></div>',
       '</div>',
       '<div class="ai-pane" data-pane="chat" hidden>',
       '  <div id="cgm-ai-chatlog" class="ai-chatlog"><div class="ai-empty">Stel een vraag over je data. Let op: elk bericht kost AI-quota.</div></div>',
+      '  <div id="cgm-ai-chatscope" class="ai-fine"></div>',
       '  <div class="ai-chatrow"><input id="cgm-ai-chatinput" type="text" placeholder="Vraag iets over je glucose…" aria-label="Chatvraag"><button type="button" class="ai-run" id="cgm-ai-chatsend">Stuur</button></div>',
       '</div>'
     ].join('');
@@ -2178,6 +2215,7 @@
     panel.querySelector('#cgm-ai-history').addEventListener('click', onAiHistoryClick);
     panel.querySelector('#cgm-ai-explore').addEventListener('click', onAiStatsClick);
     panel.querySelector('#cgm-ai-daydetail').addEventListener('click', onAiStatsClick);
+    panel.querySelector('#cgm-ai-daydetail').addEventListener('click', onAiDayActionClick);
     panel.querySelector('#cgm-ai-settings').addEventListener('change', onAiSettingsChange);
     panel.querySelector('#cgm-ai-settings').addEventListener('click', onAiSettingsClick);
     panel.querySelector('.ai-tabs').addEventListener('click', onAiTabClick);
@@ -2189,24 +2227,12 @@
   function onAiTabClick(event) {
     var btn = event.target && event.target.closest ? event.target.closest('.ai-tab') : null;
     if (!btn) return;
-    var tab = btn.getAttribute('data-tab');
-    var panel = document.getElementById('cgm-ai-panel');
-    if (!panel) return;
-    Array.prototype.forEach.call(panel.querySelectorAll('.ai-tab'), function (t) {
-      t.classList.toggle('active', t === btn);
-    });
-    Array.prototype.forEach.call(panel.querySelectorAll('.ai-pane'), function (p) {
-      p.hidden = p.getAttribute('data-pane') !== tab;
-    });
-    if (tab === 'stats') loadAiStats(true); // altijd verversen: toon de nieuwste metingen
-    if (tab === 'rapporten') loadAiReports();
-    if (tab === 'history') { loadAiHistory(); loadAiTodayEvents(); }
-    if (tab === 'explore') loadAiExplore(true);
-    if (tab === 'inzichten') loadAiPatterns();
+    activateAiTab(btn.getAttribute('data-tab'));
   }
 
   // --- Rapporten-tab (C/D): genereren kost 1 LLM-call; lezen is gratis.
   var aiReportsLoaded = false;
+  var aiPendingReportDate = null;
   function setRepStatus(t) { var el = document.getElementById('cgm-ai-repstatus'); if (el) el.textContent = t || ''; }
 
   function loadAiReports(force) {
@@ -2221,15 +2247,21 @@
   function generateAiReport() {
     var btn = document.getElementById('cgm-ai-genreport');
     if (btn) btn.disabled = true;
-    setRepStatus('Rapport genereren… (kan ~10s duren)');
+    var date = aiPendingReportDate;
+    var typeSel = document.getElementById('cgm-ai-report-type');
+    var daysSel = document.getElementById('cgm-ai-report-days');
+    var type = date ? 'daily' : (typeSel ? typeSel.value : 'daily');
+    var days = daysSel ? parseInt(daysSel.value, 10) || 14 : 14;
+    setRepStatus((date ? 'Dagrapport ' + date : (type === 'weekly' ? 'Weekrapport' : (type === 'period' ? 'Periode rapport' : 'Rapport'))) + ' genereren… (kan ~10s duren)');
     fetchWithTimeout('/_ai-review/report', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'daily' })
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: type, date: date || undefined, days: days })
     }, 120000)
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, json: j }; }); })
       .then(function (res) {
         if (!res.ok || !res.json || res.json.ok === false) { setRepStatus('Fout: ' + ((res.json && res.json.message) || 'onbekend')); return; }
         if (res.json.skipped) { setRepStatus('Overgeslagen: ' + res.json.reason); return; }
         setRepStatus('Klaar — model ' + ((res.json.report && res.json.report.model) || res.json.model || '?'));
+        aiPendingReportDate = null;
         loadAiReports(true);
       })
       .catch(function (err) { setRepStatus('Fout: ' + (err && err.message ? err.message : err)); })
@@ -2246,7 +2278,8 @@
       return (new Date(b.createdAt).getTime() || 0) - (new Date(a.createdAt).getTime() || 0);
     });
     sorted.forEach(function (rep) {
-      var meta = (rep.createdAt ? new Date(rep.createdAt).toLocaleString() : '') + ' · ' + (rep.type || '') + (rep.model ? ' · ' + rep.model : '');
+      var scope = rep.scope && rep.scope.type === 'day' && rep.scope.date ? ' · dag ' + rep.scope.date : '';
+      var meta = (rep.createdAt ? new Date(rep.createdAt).toLocaleString() : '') + ' · ' + (rep.type || '') + scope + (rep.model ? ' · ' + rep.model : '');
       var body = escapeHtml(rep.body || '').replace(/\n/g, '<br>');
       var statsLine = rep.stats ? '<div class="ai-d-meta">TIR ' + aiNum(rep.stats.tir, '%') + ' · CV ' + aiNum(rep.stats.cv, '%') +
         ' · lows ' + (rep.stats.lows ? rep.stats.lows.count : '–') + '</div>' : '';
@@ -2482,6 +2515,8 @@
     if (navBtn) { event.stopPropagation(); aiEpisodeNav(navBtn.closest('.ai-item'), navBtn.getAttribute('data-ep-nav')); return; }
     var noteBtn = t && t.closest ? t.closest('[data-ep-note]') : null;
     if (noteBtn) { event.stopPropagation(); aiEpisodeNote(noteBtn.closest('.ai-item')); return; }
+    var askBtn = t && t.closest ? t.closest('[data-ep-ask]') : null;
+    if (askBtn) { event.stopPropagation(); aiEpisodeAsk(askBtn.closest('.ai-item')); return; }
     var simBtn = t && t.closest ? t.closest('[data-sim-peak]') : null;
     if (simBtn) {
       event.stopPropagation();
@@ -2583,6 +2618,19 @@
       aiLoadEpisodeCurve(item);
       aiPatternsLoaded = false; loadAiPatterns(true);
     }).catch(function () {});
+  }
+
+  function aiEpisodeAsk(item) {
+    if (!item) return;
+    var peak = item.getAttribute('data-ep-peak');
+    var kind = item.getAttribute('data-ep-kind') || 'low';
+    aiChatScope = null;
+    activateAiTab('chat');
+    var input = document.getElementById('cgm-ai-chatinput');
+    if (input) {
+      input.value = 'Analyseer deze ' + (kind === 'high' ? 'high' : 'low/dip') + ' rond ' + aiTime(peak) + ': waarom is hij opvallend, welke context ontbreekt en lijkt hij op eerdere episodes?';
+      input.focus();
+    }
   }
 
   function aiLoadEpisodeCurve(item) {
@@ -2756,6 +2804,7 @@
     h.push('<div class="ai-rev-actions">' +
       '<button type="button" class="ai-rev-btn" data-ep-nav="prev">‹ vorige</button>' +
       '<button type="button" class="ai-rev-btn" data-ep-note="1">+ notitie</button>' +
+      '<button type="button" class="ai-rev-btn" data-ep-ask="1">vraag AI</button>' +
       '<button type="button" class="ai-rev-btn" data-ep-nav="next">volgende ›</button>' +
       '</div>');
     h.push('<div class="ai-d-id">review, geen behandeladvies · alleen je eigen data</div>');
@@ -2997,6 +3046,47 @@
     loadAiDayDetail(date);
   }
 
+  function activateAiTab(tab) {
+    var panel = document.getElementById('cgm-ai-panel');
+    if (!panel) return;
+    Array.prototype.forEach.call(panel.querySelectorAll('.ai-tab'), function (t) {
+      t.classList.toggle('active', t.getAttribute('data-tab') === tab);
+    });
+    Array.prototype.forEach.call(panel.querySelectorAll('.ai-pane'), function (p) {
+      p.hidden = p.getAttribute('data-pane') !== tab;
+    });
+    if (tab === 'stats') loadAiStats(true);
+    if (tab === 'history') { loadAiHistory(); loadAiTodayEvents(); }
+    if (tab === 'explore') loadAiExplore(true);
+    if (tab === 'inzichten') loadAiPatterns();
+    if (tab === 'rapporten') loadAiReports(true);
+    if (tab === 'chat') { renderAiChatScope(); renderAiChat(); }
+  }
+
+  function onAiDayActionClick(event) {
+    var chatBtn = event.target && event.target.closest ? event.target.closest('[data-day-chat]') : null;
+    var reportBtn = event.target && event.target.closest ? event.target.closest('[data-day-report]') : null;
+    if (!chatBtn && !reportBtn) return;
+    event.preventDefault();
+    var date = (chatBtn || reportBtn).getAttribute(chatBtn ? 'data-day-chat' : 'data-day-report');
+    if (chatBtn) {
+      aiChatScope = { type: 'day', date: date };
+      activateAiTab('chat');
+      var input = document.getElementById('cgm-ai-chatinput');
+      if (input) {
+        input.placeholder = 'Vraag over ' + date + '…';
+        var q = chatBtn.getAttribute('data-day-question');
+        if (q) input.value = q;
+        input.focus();
+      }
+      renderAiChatScope();
+      return;
+    }
+    aiPendingReportDate = date;
+    activateAiTab('rapporten');
+    generateAiReport();
+  }
+
   function loadAiDayDetail(date) {
     var box = document.getElementById('cgm-ai-daydetail');
     if (!box) return;
@@ -3004,14 +3094,24 @@
     if (box.scrollIntoView) box.scrollIntoView({ block: 'nearest' });
     Promise.all([
       fetchWithTimeout('/_ai-review/day?date=' + encodeURIComponent(date), { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; }),
-      fetchWithTimeout('/_ai-review/glucose-events?date=' + encodeURIComponent(date), { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; })
+      fetchWithTimeout('/_ai-review/glucose-events?date=' + encodeURIComponent(date), { cache: 'no-store' }, 15000).then(function (r) { return r.ok ? r.json() : null; }),
+      fetchWithTimeout('/_ai-review/day-compare?date=' + encodeURIComponent(date), { cache: 'no-store' }, 20000).then(function (r) { return r.ok ? r.json() : null; })
     ]).then(function (res) {
-        var day = res[0], feed = res[1];
+        var day = res[0], feed = res[1], compare = res[2];
         if ((!day || !day.ok) && (!feed || !feed.ok)) { box.innerHTML = '<div class="ai-empty">Geen dagdetail.</div>'; return; }
         var h = ['<div class="ai-sec">Dagdetail ' + escapeHtml(date) + '</div>'];
+        h.push('<div class="ai-rev-actions">' +
+          '<button type="button" class="ai-rev-btn" data-day-chat="' + escapeHtml(date) + '">Vraag over deze dag</button>' +
+          '<button type="button" class="ai-rev-btn" data-day-report="' + escapeHtml(date) + '">Dagrapport</button>' +
+          '</div>');
         if (feed && feed.ok) h.push(renderAiGlucoseEvents(feed));
         if (day && day.ok) {
           h.push(renderAiDayReview(day));
+          if (compare && compare.ok) h.push(renderAiDayCompare(compare));
+          if (day.suggestions && day.suggestions.length) h.push(renderAiDaySuggestions(day.suggestions, date));
+          if (day.contextEvents && day.contextEvents.length) {
+            h.push(renderAiContextEvents(day.contextEvents));
+          }
           if (day.thresholdLows && day.thresholdLows.length) {
             h.push(renderTodayThresholdLows('Lows < 3.9 dagdetail (alle)', day.thresholdLows));
           }
@@ -3024,6 +3124,55 @@
         box.innerHTML = h.join('');
       })
       .catch(function () { box.innerHTML = '<div class="ai-empty">Kon dag niet laden.</div>'; });
+  }
+
+  function renderAiContextEvents(events) {
+    var h = ['<div class="ai-sec">Notities/context deze dag</div>'];
+    events.slice(0, 20).forEach(function (e) {
+      var bits = [];
+      if (e.fingerstickMmol != null) bits.push('vingerprik ' + e.fingerstickMmol + ' mmol');
+      if (e.relatedEntryMmol != null) bits.push('CGM ' + e.relatedEntryMmol);
+      if (e.note) bits.push(e.note);
+      if (e.symptoms && e.symptoms.length) bits.push(e.symptoms.join(', '));
+      h.push('<div class="ai-fine">' + escapeHtml(aiHM(e.eventAt) + ' · ' + (AI_EVENT_GLYPH[e.type] || '•') + ' ' + (e.type || 'note') + (bits.length ? ' · ' + bits.join(' · ') : '')) + '</div>');
+    });
+    return h.join('');
+  }
+
+  function renderAiDayCompare(c) {
+    var h = ['<div class="ai-sec">Vergelijking</div>'];
+    function row(label, cmp) {
+      if (!cmp || !cmp.delta) return '';
+      var d = cmp.delta;
+      var parts = [
+        'TIR ' + aiSigned(d.tir, 'pp'),
+        'laag ' + aiSigned(d.tbr, 'pp'),
+        'gem ' + aiSigned(d.mean, ''),
+        'CV ' + aiSigned(d.cv, 'pp'),
+        'lows ' + aiSigned(d.lows, ''),
+        'burden ' + aiSigned(d.burden3_9, '')
+      ];
+      return '<div class="ai-fine"><b>' + escapeHtml(label) + ':</b> ' + escapeHtml(parts.join(' · ')) + '</div>';
+    }
+    h.push(row('vs vorige dag', c.comparisons && c.comparisons.previous));
+    h.push(row('vs zelfde weekdag', c.comparisons && c.comparisons.sameWeekday));
+    h.push(row('vs 14d baseline', c.comparisons && c.comparisons.baseline14d));
+    return h.join('');
+  }
+
+  function aiSigned(v, unit) {
+    if (v === null || v === undefined || !Number.isFinite(Number(v))) return '–';
+    var n = Number(v);
+    return (n > 0 ? '+' : '') + n + (unit || '');
+  }
+
+  function renderAiDaySuggestions(suggestions, date) {
+    var h = ['<div class="ai-sec">Slimme vragen</div>', '<div class="ai-ql-btns">'];
+    suggestions.forEach(function (s) {
+      h.push('<button type="button" class="ai-ql-btn" data-day-chat="' + escapeHtml(date) + '" data-day-question="' + escapeHtml(s.question || '') + '">' + escapeHtml(s.label || 'Vraag') + '</button>');
+    });
+    h.push('</div>');
+    return h.join('');
   }
 
   // Glucose Events feed: dag-tegels (TIR/AVG/PEAK/CV) + high-banner + event-tijdlijn.
@@ -3707,9 +3856,28 @@
 
   // --- Chat-tab: 1 LLM-call per bericht (kost quota). History in geheugen.
   var aiChatHistory = [];
+  var aiChatScope = null;
+  function renderAiChatScope() {
+    var el = document.getElementById('cgm-ai-chatscope');
+    if (!el) return;
+    if (aiChatScope && aiChatScope.type === 'day' && aiChatScope.date) {
+      el.innerHTML = 'Context: dag ' + escapeHtml(aiChatScope.date) +
+        ' · <button type="button" class="ai-rev-btn" id="cgm-ai-clearscope">wis context</button>';
+      var btn = document.getElementById('cgm-ai-clearscope');
+      if (btn) btn.onclick = function () {
+        aiChatScope = null;
+        var input = document.getElementById('cgm-ai-chatinput');
+        if (input) input.placeholder = 'Vraag iets over je glucose…';
+        renderAiChatScope();
+      };
+    } else {
+      el.textContent = 'Context: laatste 14 dagen';
+    }
+  }
   function renderAiChat() {
     var log = document.getElementById('cgm-ai-chatlog');
     if (!log) return;
+    renderAiChatScope();
     if (!aiChatHistory.length) {
       log.innerHTML = '<div class="ai-empty">Stel een vraag over je data. Let op: elk bericht kost AI-quota.</div>';
       return;
@@ -3735,11 +3903,17 @@
     if (sendBtn) sendBtn.disabled = true;
     input.disabled = true;
     fetchWithTimeout('/_ai-review/chat', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: aiChatHistory.slice(-10) })
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: aiChatHistory.slice(-10), scope: aiChatScope || undefined })
     }, 120000)
-      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, json: j }; }); })
+      .then(function (r) {
+        return r.text().then(function (text) {
+          var json = null;
+          try { json = text ? JSON.parse(text) : null; } catch (e) {}
+          return { ok: r.ok, json: json, text: text };
+        });
+      })
       .then(function (res) {
-        if (!res.ok || !res.json || res.json.ok === false) aiChatHistory.push({ role: 'assistant', content: 'Fout: ' + ((res.json && res.json.message) || 'onbekend') });
+        if (!res.ok || !res.json || res.json.ok === false) aiChatHistory.push({ role: 'assistant', content: 'Fout: ' + ((res.json && res.json.message) || (res.text && res.text.slice(0, 120)) || 'onbekend') });
         else if (res.json.skipped) aiChatHistory.push({ role: 'assistant', content: 'Overgeslagen: ' + res.json.reason });
         else aiChatHistory.push({ role: 'assistant', content: res.json.reply || '(geen antwoord)' });
         renderAiChat();
@@ -4103,28 +4277,38 @@
       return;
     }
 
+    function fmtNumber(value, digits, fallback) {
+      var n = Number(value);
+      if (!Number.isFinite(n)) return fallback || '--';
+      return n.toFixed(digits);
+    }
+    function fmtInt(value, fallback) {
+      var n = Number(value);
+      if (!Number.isFinite(n)) return fallback || '--';
+      return String(Math.round(n));
+    }
+
     panel.style.display = 'grid';
     panel.innerHTML = [
       '<div class="stats-title">Laatste 24 uur (update: ' + new Date().toLocaleTimeString() + ')</div>',
-      '<div class="stat low"><span class="stat-label">Laag</span><span class="stat-value">', stats.lowPct, '%</span></div>',
-      '<div class="stat range"><span class="stat-label">In bereik</span><span class="stat-value">', stats.inRangePct, '%</span></div>',
-      '<div class="stat high"><span class="stat-label">Hoog</span><span class="stat-value">', stats.highPct, '%</span></div>',
-      '<div class="stat"><span class="stat-label">Gemiddelde</span><span class="stat-value">', stats.average.toFixed(1), ' mmol/L</span></div>',
-      '<div class="stat"><span class="stat-label">Min</span><span class="stat-value">', stats.min.toFixed(1), ' mmol/L</span></div>',
-      '<div class="stat"><span class="stat-label">Max</span><span class="stat-value">', stats.max.toFixed(1), ' mmol/L</span></div>',
-      '<div class="stat"><span class="stat-label">Std. afwijking</span><span class="stat-value">', stats.stdDev.toFixed(1), ' mmol/L</span></div>',
-      '<div class="stat"><span class="stat-label">CV</span><span class="stat-value">', Math.round(stats.cv), '% ', stats.stability, '</span></div>',
-      '<div class="stat"><span class="stat-label">Gesch. HbA1c</span><span class="stat-value">', stats.estimatedA1c.toFixed(1), '%</span></div>',
-      '<div class="stat range"><span class="stat-label">In bereik</span><span class="stat-value">', stats.inRangePct, '%</span></div>',
-      '<div class="stat"><span class="stat-label">Metingen</span><span class="stat-value">', stats.count, '</span></div>',
-      '<div class="stat low"><span class="stat-label">Onder 3.0</span><span class="stat-value">', stats.urgentLowPct, '%</span></div>',
-      '<div class="stat low"><span class="stat-label">Hypo events</span><span class="stat-value">', stats.hypoEvents, '</span></div>',
+      '<div class="stat low"><span class="stat-label">Laag</span><span class="stat-value">', aiNum(stats.lowPct, '%'), '</span></div>',
+      '<div class="stat range"><span class="stat-label">In bereik</span><span class="stat-value">', aiNum(stats.inRangePct, '%'), '</span></div>',
+      '<div class="stat high"><span class="stat-label">Hoog</span><span class="stat-value">', aiNum(stats.highPct, '%'), '</span></div>',
+      '<div class="stat"><span class="stat-label">Gemiddelde</span><span class="stat-value">', fmtNumber(stats.average, 1), ' mmol/L</span></div>',
+      '<div class="stat"><span class="stat-label">Min</span><span class="stat-value">', fmtNumber(stats.min, 1), ' mmol/L</span></div>',
+      '<div class="stat"><span class="stat-label">Max</span><span class="stat-value">', fmtNumber(stats.max, 1), ' mmol/L</span></div>',
+      '<div class="stat"><span class="stat-label">Std. afwijking</span><span class="stat-value">', fmtNumber(stats.stdDev, 1), ' mmol/L</span></div>',
+      '<div class="stat"><span class="stat-label">CV</span><span class="stat-value">', fmtInt(stats.cv), '% ', escapeHtml(stats.stability || ''), '</span></div>',
+      '<div class="stat"><span class="stat-label">Gesch. HbA1c</span><span class="stat-value">', fmtNumber(stats.estimatedA1c, 1), '%</span></div>',
+      '<div class="stat"><span class="stat-label">Metingen</span><span class="stat-value">', aiNum(stats.count, ''), '</span></div>',
+      '<div class="stat low"><span class="stat-label">Onder 3.0</span><span class="stat-value">', aiNum(stats.urgentLowPct, '%'), '</span></div>',
+      '<div class="stat low"><span class="stat-label">Hypo events</span><span class="stat-value">', aiNum(stats.hypoEvents, ''), '</span></div>',
       '<div class="stat"><span class="stat-label">Laatste hypo</span><span class="stat-value">', stats.lastHypoMinutes === null ? 'geen' : stats.lastHypoMinutes + 'm', '</span></div>',
-      '<div class="stat ', stats.impactLevel === 'urgent' || stats.impactLevel === 'high' ? 'low' : (stats.impactLevel === 'watch' ? 'high' : ''), '"><span class="stat-label">Volatiliteit score</span><span class="stat-value">', stats.impactScore, '/100</span></div>',
+      '<div class="stat ', stats.impactLevel === 'urgent' || stats.impactLevel === 'high' ? 'low' : (stats.impactLevel === 'watch' ? 'high' : ''), '"><span class="stat-label">Volatiliteit score</span><span class="stat-value">', aiNum(stats.impactScore, '/100'), '</span></div>',
       '<div class="stat high"><span class="stat-label">Snelste stijging</span><span class="stat-value">', stats.fastestRise === null ? '--' : signed(stats.fastestRise, 3) + '/min', '</span></div>',
       '<div class="stat low"><span class="stat-label">Snelste daling</span><span class="stat-value">', stats.fastestDrop === null ? '--' : signed(stats.fastestDrop, 3) + '/min', '</span></div>',
-      '<div class="stat"><span class="stat-label">Gemiste gaten</span><span class="stat-value">', stats.missingIntervals, '</span></div>',
-      '<div class="stat"><span class="stat-label">Nacht min</span><span class="stat-value">', stats.nightMin === null ? '--' : stats.nightMin.toFixed(1) + ' mmol/L', '</span></div>'
+      '<div class="stat"><span class="stat-label">Gemiste gaten</span><span class="stat-value">', aiNum(stats.missingIntervals, ''), '</span></div>',
+      '<div class="stat"><span class="stat-label">Nacht min</span><span class="stat-value">', stats.nightMin === null ? '--' : fmtNumber(stats.nightMin, 1) + ' mmol/L', '</span></div>'
     ].join('');
     positionContainer();
   }
