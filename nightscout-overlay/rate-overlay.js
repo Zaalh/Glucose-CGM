@@ -804,7 +804,7 @@
       '#cgm-hypo-alert.warning{color:#2f1600;border-color:#f59e0b;background:linear-gradient(135deg,#ffe08a 0%,#fb923c 100%)}',
       '#cgm-hypo-alert.hypo,#cgm-hypo-alert.urgent{color:#fff7ed;border-color:#fb7185;background:linear-gradient(135deg,#f59e0b 0%,#e11d48 100%);text-shadow:0 1px 2px rgba(0,0,0,.45)}',
       '#cgm-hypo-alert,#cgm-hypo-alert.ok,#cgm-hypo-alert.watch,#cgm-hypo-alert.warning,#cgm-hypo-alert.hypo,#cgm-hypo-alert.urgent{color:#111!important;text-shadow:none!important}',
-      '#cgm-meal-badge{position:absolute!important;z-index:10001!important;display:none;flex-direction:column;align-items:center;justify-content:center;gap:3px;text-align:center;width:120px;min-height:72px;box-sizing:border-box;border:1px solid #f59e0b;border-radius:9px;padding:8px 7px;font-family:Arial,Helvetica,sans-serif;font-weight:900;font-size:11px;line-height:1.15;color:#2f1600;background:linear-gradient(135deg,#fde68a 0%,#fbbf24 100%);box-shadow:0 1px 8px rgba(0,0,0,.5);white-space:normal;pointer-events:none}',
+      '#cgm-meal-badge{position:absolute!important;z-index:10001!important;display:none;flex-direction:column;align-items:center;justify-content:center;gap:3px;text-align:center;width:150px;min-height:72px;box-sizing:border-box;border:1px solid #f59e0b;border-radius:9px;padding:8px 7px;font-family:Arial,Helvetica,sans-serif;font-weight:900;font-size:11px;line-height:1.15;color:#2f1600;background:linear-gradient(135deg,#fde68a 0%,#fbbf24 100%);box-shadow:0 1px 8px rgba(0,0,0,.5);white-space:normal;pointer-events:none}',
       '#cgm-meal-badge .meal-ic{font-size:22px;line-height:1}',
       '#cgm-meal-badge .meal-time{font-family:monospace;font-weight:900;opacity:.9}',
       '#cgm-meal-badge.meal-snel{border-color:#fb7185;background:linear-gradient(135deg,#fecaca 0%,#fb7185 100%)}',
@@ -814,7 +814,7 @@
       '#cgm-meal-badge.meal-risk-watch{box-shadow:0 0 0 2px rgba(251,191,36,.38),0 1px 6px rgba(0,0,0,.35)}',
       '#cgm-meal-badge.meal-risk-high{box-shadow:0 0 0 2px rgba(249,115,22,.48),0 1px 8px rgba(0,0,0,.45)}',
       '#cgm-meal-badge.meal-risk-urgent{box-shadow:0 0 0 2px rgba(220,38,38,.58),0 1px 10px rgba(0,0,0,.55)}',
-      '@media(max-width:700px){#cgm-meal-badge{width:100px;min-height:64px;font-size:10px;padding:6px 5px}#cgm-meal-badge .meal-ic{font-size:18px}}',
+      '@media(max-width:700px){#cgm-meal-badge{width:128px;min-height:64px;font-size:10px;padding:6px 5px}#cgm-meal-badge .meal-ic{font-size:18px}}',
       '#cgm-point-rate-tooltip{position:absolute!important;z-index:10001!important;display:none;min-width:178px;border:1px solid rgba(255,255,255,.22);border-radius:5px;background:rgba(0,0,0,.86);color:#f3f4f6;font-family:Arial,Helvetica,sans-serif;padding:7px 8px;box-shadow:0 2px 12px rgba(0,0,0,.55);pointer-events:none}',
       '#cgm-point-rate-tooltip .pt-head{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:8px;font-size:12px;font-weight:900;line-height:1.15;margin-bottom:4px}',
       '#cgm-point-rate-tooltip .pt-head .pt-bg{text-align:left}',
@@ -1778,56 +1778,68 @@
   function renderMealBadge(readings, hypoRisk, peakSignal) {
     var badge = ensureMealBadge();
     var meal = detectMealState(readings);
+    var debug = false;
+    if (!meal && MEAL_BADGE_DEBUG) {
+      // Dummy met de uitgebreidste fase (reactive-drop) zodat de volle layout zichtbaar is.
+      debug = true;
+      meal = {
+        phase: 'reactive-drop', speed: 'hoog', minutesSincePeak: 18, dropRate: 0.085,
+        dropFromPeak: 1.6, peakMmol: 7.8, currentMmol: 6.2, expectedDipAt: Date.now() + 25 * 60000
+      };
+    }
     if (!meal) {
-      if (MEAL_BADGE_DEBUG) {
-        badge.className = 'meal-langzaam';
-        badge.innerHTML =
-          '<span class="meal-ic">🍽️</span>' +
-          '<span class="meal-label">Maaltijd langzaam</span>' +
-          '<span class="meal-time">· 12m (debug)</span>';
-        badge.style.display = 'flex';
-        positionMealBadge();
-        return;
-      }
       badge.style.display = 'none';
       return;
     }
     var cal = loadMealCalibration();
-    var risk = scoreReactiveMealRisk(meal, cal, hypoRisk, peakSignal);
+    var risk = debug ? { score: 0.62, level: 'high' } : scoreReactiveMealRisk(meal, cal, hypoRisk, peakSignal);
     var riskClass = risk && risk.level !== 'low' ? ' meal-risk-' + risk.level : '';
-    var riskTxt = risk && risk.level !== 'low'
-      ? '<span class="meal-time">· risico ' + (risk.level === 'watch' ? 'let op' : risk.level) + '</span>' : '';
-    if (meal.phase === 'dip') {
-      badge.className = 'meal-dip' + riskClass;
-      badge.innerHTML =
-        '<span class="meal-ic">🍽</span>' +
-        '<span class="meal-label">Dip — mogelijk maaltijd</span>' + riskTxt;
-    } else if (meal.phase === 'reactive-drop') {
+
+    function L(cls, txt) { return '<span class="' + cls + '">' + txt + '</span>'; }
+    function num(v, d) { return Number.isFinite(v) ? v.toFixed(d) : null; }
+
+    var rows = [];
+    var riskLevelTxt = risk && risk.level && risk.level !== 'low'
+      ? (risk.level === 'watch' ? 'let op' : risk.level) : '';
+    var riskScore = risk && Number.isFinite(risk.score) ? risk.score.toFixed(2) : '';
+
+    if (meal.phase === 'reactive-drop') {
       badge.className = 'meal-reactive-drop' + riskClass;
-      var dropRateTxt = Number.isFinite(meal.dropRate)
-        ? '<span class="meal-time">· ' + meal.dropRate.toFixed(2) + '/min</span>' : '';
-      badge.innerHTML =
-        '<span class="meal-ic">↘</span>' +
-        '<span class="meal-label">Reactieve daling ' + meal.speed + '</span>' +
-        '<span class="meal-time">· ' + meal.minutesSincePeak + 'm na piek</span>' +
-        dropRateTxt + riskTxt;
+      rows.push(L('meal-ic', '↘'));
+      rows.push(L('meal-label', 'Reactieve daling ' + meal.speed));
+      if (num(meal.peakMmol, 1) && num(meal.currentMmol, 1)) rows.push(L('meal-time', num(meal.peakMmol, 1) + ' → ' + num(meal.currentMmol, 1)));
+      if (num(meal.dropFromPeak, 1)) rows.push(L('meal-time', 'Δ -' + num(meal.dropFromPeak, 1) + ' mmol'));
+      if (num(meal.dropRate, 2)) rows.push(L('meal-time', num(meal.dropRate, 2) + '/min'));
+      if (Number.isFinite(meal.minutesSincePeak)) rows.push(L('meal-time', meal.minutesSincePeak + 'm na piek'));
+      if (Number.isFinite(meal.expectedDipAt)) rows.push(L('meal-time', 'dip ~' + formatClock(meal.expectedDipAt)));
     } else if (meal.phase === 'plateau') {
       badge.className = 'meal-snel' + riskClass;
-      var plateauDipTxt = Number.isFinite(meal.expectedDipAt)
-        ? '<span class="meal-time">· dip mogelijk ~' + formatClock(meal.expectedDipAt) + '</span>' : '';
-      badge.innerHTML =
-        '<span class="meal-ic">🍽️</span>' +
-        '<span class="meal-label">Maaltijd plateau</span>' +
-        '<span class="meal-time">· ' + meal.minutesSincePeak + 'm na piek</span>' + plateauDipTxt + riskTxt;
+      rows.push(L('meal-ic', '🍽️'));
+      rows.push(L('meal-label', 'Maaltijd plateau'));
+      if (num(meal.peakMmol, 1)) rows.push(L('meal-time', 'piek ' + num(meal.peakMmol, 1)));
+      if (Number.isFinite(meal.minutesSincePeak)) rows.push(L('meal-time', meal.minutesSincePeak + 'm na piek'));
+      if (Number.isFinite(meal.expectedDipAt)) rows.push(L('meal-time', 'dip ~' + formatClock(meal.expectedDipAt)));
+    } else if (meal.phase === 'dip') {
+      badge.className = 'meal-dip' + riskClass;
+      rows.push(L('meal-ic', '🍽'));
+      rows.push(L('meal-label', 'Dip — mogelijk maaltijd'));
+      if (num(meal.preDipMmol, 1)) rows.push(L('meal-time', 'pre-dip +' + num(meal.preDipMmol, 1)));
+      if (num(meal.currentMmol, 1)) rows.push(L('meal-time', num(meal.currentMmol, 1) + ' mmol'));
     } else {
       badge.className = 'meal-' + meal.speed + riskClass;
-      var dipTxt = Number.isFinite(meal.expectedDipAt)
-        ? '<span class="meal-time">· dip ~' + formatClock(meal.expectedDipAt) + '</span>' : '';
-      badge.innerHTML =
-        '<span class="meal-ic">🍽️</span>' +
-        '<span class="meal-label">Maaltijd ' + meal.speed + '</span>' +
-        '<span class="meal-time">· ' + meal.minutesSinceMeal + 'm</span>' + dipTxt + riskTxt;
+      rows.push(L('meal-ic', '🍽️'));
+      rows.push(L('meal-label', 'Maaltijd ' + meal.speed));
+      if (num(meal.currentMmol, 1)) rows.push(L('meal-time', num(meal.currentMmol, 1) + ' mmol'));
+      if (num(meal.riseFromTrough, 1)) rows.push(L('meal-time', '↗ +' + num(meal.riseFromTrough, 1) + ' mmol'));
+      if (num(meal.effRate, 2)) rows.push(L('meal-time', num(meal.effRate, 2) + '/min'));
+      if (Number.isFinite(meal.minutesSinceMeal)) rows.push(L('meal-time', meal.minutesSinceMeal + 'm'));
+      if (Number.isFinite(meal.expectedDipAt)) rows.push(L('meal-time', 'dip ~' + formatClock(meal.expectedDipAt)));
     }
+
+    if (riskLevelTxt) rows.push(L('meal-time', 'risico ' + riskLevelTxt + (riskScore ? ' ' + riskScore : '')));
+    if (debug) rows.push(L('meal-time', '(debug)'));
+
+    badge.innerHTML = rows.join('');
     badge.style.display = 'flex';
     positionMealBadge();
   }
