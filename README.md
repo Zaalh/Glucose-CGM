@@ -393,7 +393,14 @@ gestapeld vierkant kaartje **links vóór de klok** (verankerd aan `#currentTime
 met per fase zo veel mogelijk detail — bv. bij een reactieve daling: piek→huidig,
 Δ mmol, daalsnelheid/min, minuten na piek, voorspelde dip en de risico-score —
 zolang een maaltijd-episode loopt; geen extra API-call, berekend uit de readings
-die de overlay al heeft.
+die de overlay al heeft. De escalatie van een reactieve daling stuurt op de
+**verwachte bodem** (`projectReactiveNadir`) t.o.v. universele klinische drempels
+(`watchMmol` 4.5, `alertMmol` 3.9, `seriousMmol` 3.0, configureerbaar), niet op de
+kale daalsnelheid: een daling die ruim boven 3.9 bodemt (bv. normale klaring 11 → 9)
+blijft `low`, een daling richting < 3.9 / < 3.0 wordt `high` / `urgent`. De
+badge-basiskleur volgt dat niveau — rustig grijs (`low`), amber (`watch`), rood
+(`high`/`urgent`) — zodat rood voorbehouden blijft aan een echte hypo-projectie.
+Zie `mealdetectie.md` voor de detector + risico-laag.
 
 Nog open (databottleneck, niet code):
 
