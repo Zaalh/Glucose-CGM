@@ -103,8 +103,9 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
     *plateau* → piek, min na piek, dip, risico; *dip* → pre-dip + huidige mmol. Vak verbreed naar 150px (mobiel
     128px) voor de getallen.
   - **`MEAL_BADGE_ALWAYS_VISIBLE`** (`nightscout-overlay/rate-overlay.js`): kan tijdelijk op `true` om het
-    maaltijd-vak altijd zichtbaar te maken voor positie/layout-tests. Bij geen echte detectie toont het vak
-    `Geen maaltijd · detector actief`; echte meal-fases blijven leidend en er wordt geen fake reactive-drop getoond.
+    maaltijd-vak altijd zichtbaar te maken voor positie/layout-tests. Bij geen echte detectie toont het vak echte
+    idle-context zoals huidige waarde, trend/rate, recente puntcount, 60m bereik en de belangrijkste blocker; echte
+    meal-fases blijven leidend en er wordt geen fake reactive-drop getoond.
   - **Glucose-volatiliteit in Stats/AI.** De 24u stats tonen nu een **Volatiliteit score** op basis van de snelste
     recente sample-beweging. De AI-tab krijgt een sectie **Glucose-volatiliteit · snelle sprongen** met snelste
     stijging/daling en de grootste recente piek→dal sprongen uit de episode-database. Formulering blijft

@@ -1783,6 +1783,90 @@
   // Testmodus: toon het vak altijd, maar zonder fake maaltijdstatus.
   var MEAL_BADGE_ALWAYS_VISIBLE = true;
 
+  function mealIdleContext(readings) {
+    if (!readings || !readings.length) {
+      return {
+        label: 'Geen maaltijd',
+        rows: ['geen CGM-data']
+      };
+    }
+    var latest = readings[0];
+    var latestTime = readingTime(latest);
+    var currentMmol = mmol(Number(latest.sgv));
+    if (!Number.isFinite(latestTime) || !Number.isFinite(currentMmol)) {
+      return {
+        label: 'Geen maaltijd',
+        rows: ['laatste meting ongeldig']
+      };
+    }
+
+    var cal = loadMealCalibration();
+    var prev10 = findBaseline(readings, latestTime, 10);
+    var rate10 = null;
+    if (prev10) {
+      var rateDt = (latestTime - readingTime(prev10)) / 60000;
+      if (rateDt > 0) rate10 = (currentMmol - mmol(Number(prev10.sgv))) / rateDt;
+    }
+
+    var recent = readings.filter(function (entry) {
+      var time = readingTime(entry);
+      var value = mmol(Number(entry.sgv));
+      return Number.isFinite(time) && Number.isFinite(value) && time <= latestTime && time >= latestTime - 60 * 60000;
+    });
+
+    var trough = null;
+    var troughMmol = Infinity;
+    var peak = null;
+    var peakMmol = -Infinity;
+    recent.forEach(function (entry) {
+      var value = mmol(Number(entry.sgv));
+      if (value < troughMmol) { troughMmol = value; trough = entry; }
+      if (value > peakMmol) { peakMmol = value; peak = entry; }
+    });
+
+    var reason = 'wachten op patroon';
+    var riseFromTrough = null;
+    var ageMin = null;
+    var sustainedRisePoints = 0;
+    if (trough) {
+      ageMin = (latestTime - readingTime(trough)) / 60000;
+      riseFromTrough = currentMmol - troughMmol;
+      sustainedRisePoints = readings.filter(function (entry) {
+        var time = readingTime(entry);
+        return Number.isFinite(time) && time > readingTime(trough) && time <= latestTime &&
+          mmol(Number(entry.sgv)) >= troughMmol + 0.45;
+      }).length;
+      if (sustainedRisePoints < 2) reason = 'geen sustained rise';
+      else if (rate10 !== null && rate10 < cal.slowRate) reason = 'stijging te traag';
+      else if (riseFromTrough < 0.6) reason = 'stijging te klein';
+      else if (ageMin < 5) reason = 'nog te vroeg';
+    }
+    if (recent.length < 4) reason = 'te weinig recente punten';
+
+    var trend = 'vlak';
+    if (rate10 !== null) {
+      if (rate10 >= 0.04) trend = 'stijgt';
+      else if (rate10 <= -0.04) trend = 'daalt';
+    }
+
+    var latestAgeMin = Math.max(0, Math.round((Date.now() - latestTime) / 60000));
+    var rows = [
+      currentMmol.toFixed(1) + ' mmol · ' + trend + (rate10 !== null ? ' ' + rate10.toFixed(2) + '/min' : ''),
+      recent.length + ' punten · laatste ' + latestAgeMin + 'm',
+      reason
+    ];
+    if (peak && trough) {
+      rows.push('60m ' + troughMmol.toFixed(1) + '-' + peakMmol.toFixed(1));
+    }
+    if (Number.isFinite(riseFromTrough) && riseFromTrough > 0.2) {
+      rows[2] = reason + ' · ↗ +' + riseFromTrough.toFixed(1);
+    }
+    return {
+      label: 'Geen maaltijd',
+      rows: rows.slice(0, 4)
+    };
+  }
+
   function renderMealBadge(readings, hypoRisk, peakSignal) {
     var badge = ensureMealBadge();
     var meal = detectMealState(readings);
@@ -1791,12 +1875,14 @@
         badge.style.display = 'none';
         return;
       }
+      var idle = mealIdleContext(readings);
       badge.className = 'meal-dip';
       badge.innerHTML = [
         '<span class="meal-ic">🍽</span>',
-        '<span class="meal-label">Geen maaltijd</span>',
-        '<span class="meal-time">detector actief</span>'
-      ].join('');
+        '<span class="meal-label">' + idle.label + '</span>'
+      ].concat(idle.rows.map(function (row) {
+        return '<span class="meal-time">' + row + '</span>';
+      })).join('');
       badge.style.display = 'flex';
       positionMealBadge();
       return;

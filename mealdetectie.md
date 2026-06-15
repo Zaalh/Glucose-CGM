@@ -165,8 +165,10 @@ met `200` tonen, controleer eerst deze byte-counts en force-recreate de `nightsc
 - De live overlay en `scripts/lib/meal-detector.mjs` bevatten nog dubbele kernlogica.
 - De huidige fixtures zijn synthetisch; echte live episodes moeten nog worden toegevoegd.
 - `MEAL_BADGE_ALWAYS_VISIBLE` kan tijdelijk aan staan voor UI-positionering. Dan blijft het vak zichtbaar met
-  `Geen maaltijd · detector actief` wanneer er geen echte detectie is. Echte `dip`/`rising`/`plateau`/`reactive-drop`
-  statussen blijven leidend.
+  `Geen maaltijd` wanneer er geen echte detectie is. Die idle-weergave gebruikt echte CGM-context: huidige waarde,
+  trend/rate, aantal recente punten, leeftijd van de laatste meting, 60m bereik en de belangrijkste blocker
+  (`geen sustained rise`, `stijging te traag`, `stijging te klein`, `nog te vroeg` of `te weinig recente punten`).
+  Echte `dip`/`rising`/`plateau`/`reactive-drop` statussen blijven leidend.
 - Vectorinformatie is nu offline beschikbaar, maar nog niet live in de overlay gekoppeld.
 - CGM-data heeft sensorlag, ruis en mogelijke compressie-artefacten; de detector moet daarom als heuristiek worden gezien.
 
