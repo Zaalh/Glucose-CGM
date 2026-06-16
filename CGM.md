@@ -103,7 +103,7 @@ npm run hypo:backtest
 npm run hypo:tune
 ```
 
-Reactieve-hypo detector V2 (`hypo.md`): bouwt `reactive_hypo_episodes`, draait de V1-vs-V2 backtest (precision/recall/lead-time), en auto-tunet de V2-parameters met een temporele train/test-split naar `scripts/reactive-hypo-v2-state.json`. Draaien in het Docker-netwerk (Mongo bereikbaar).
+Reactieve-hypo detector V2 (`hypo.md`): bouwt `reactive_hypo_episodes`, draait de V1-vs-V2 backtest (precision/recall/lead-time), en auto-tunet de V2-parameters met een temporele train/test-split naar `scripts/reactive-hypo-v2-state.json`. Draaien in het Docker-netwerk (Mongo bereikbaar). De state kan ook `params.similarity` bevatten; daarmee worden afstandsdrempels, dynamische match-cap, afstandsmarges en curve-similarity cutoff voor `episode_vectors` live exact hetzelfde toegepast als in backtest/tuner.
 
 > `episodes:build` hoeft niet meer handmatig: de `libreview-sync` `--loop`-modus bouwt `reactive_hypo_episodes` automatisch opnieuw elke `EPISODES_BUILD_INTERVAL_MINUTES` (default 15, in de compose-`environment`; 0 = uit). De CLI (`npm run episodes:build`) en de loop delen dezelfde `buildReactiveHypoEpisodes()`.
 
@@ -127,7 +127,7 @@ Rapporten over je eigen data: (near-)hypo's, time-in-range, snelste daling, V1 v
 
 ### Automatisch leren (dagelijks)
 
-`scripts/daily-hypo-tune.sh` draait via launchd (`deploy/com.glucosecgm.hypotune.plist`, dagelijks 04:30 op de iMac): episodes verversen → auto-tunen op je eigen episodes → dag/week/weekdag/patroon-rapporten in `hypo-tune-reports/`. De sync laadt de geleerde params (`scripts/reactive-hypo-v2-state.json`) en past ze toe op de V2 shadow.
+`scripts/daily-hypo-tune.sh` draait via launchd (`deploy/com.glucosecgm.hypotune.plist`, dagelijks 04:30 op de iMac): episodes verversen → auto-tunen op je eigen episodes → dag/week/weekdag/patroon-rapporten in `hypo-tune-reports/`. De sync laadt de geleerde params (`scripts/reactive-hypo-v2-state.json`) en past ze toe op de V2 shadow. Op meerdere weken 1-min data kan tuning minuten duren; de tuner zoekt daarom staged (kernparams eerst, daarna similarity-refinement). Live voorspelling blijft snel omdat alleen nieuwe punten tegen de bestaande vectorlaag worden gematcht.
 
 Installeren:
 
@@ -310,12 +310,12 @@ De live setup is geverifieerd met InfluxDB `1.8.10`, Grafana `11.5.2`, datasourc
 - `scripts/run-spike-filter-check.mjs`: regressiecheck voor Laag 9 (`172 -> 154 -> 172` single-point spike).
 - `scripts/run-data-quality-check.mjs`: regressiecheck voor Laag 10 (gaten, dubbele/out-of-order timestamps, stale data).
 - `scripts/lib/reactive-hypo-detector.mjs`: V2 reactieve-hypo detector (`evaluateReactiveHypoRiskV2`), tunebaar via params.
-- `scripts/lib/episode-similarity.mjs`: gedeelde episode-similarity (`findSimilarEpisodes` + `patternFromFeatures`); voedt het `pattern`-object (component 6 / `patternScore`) in live-sync, backtest én tuner identiek.
+- `scripts/lib/episode-similarity.mjs`: gedeelde episode-similarity (`findSimilarEpisodes` + `patternFromFeatures`); voedt het `pattern`-object (component 6 / `patternScore`) in live-sync, backtest én tuner identiek. Gebruikt dynamische match-selectie in plaats van een vaste top-N; de getunede `params.similarity` uit state kan afstandsdrempels, hard max en curve-cutoffs aanpassen.
 - `scripts/lib/episode-builder.mjs` + `scripts/build-reactive-hypo-episodes.mjs`: bouwt `reactive_hypo_episodes` (de reactieve piek→daling-lows; voedt ML/backtest).
 - `buildThresholdLows(rows)` (pure helper in `scripts/libreview-nightscout-sync.mjs`): telt elke run <3.9 als losse drempel-low (nadir/duur/punten/burden; datagat >30 min splitst), los van de episode-builder en alleen voor het dashboard (`thresholdLows` in de `/ai-review/day`-feed) — voedt geen ML.
 - `scripts/lib/legacy-risk-v1.mjs`: getrouwe V1-port voor de backtest (één-op-één met de sync houden).
 - `scripts/evaluate-hypo-detector.mjs`: backtest V1 vs V2 (precision/recall/lead-time).
-- `scripts/tune-reactive-hypo-v2.mjs` + `scripts/reactive-hypo-v2-state.json`: auto-tuner en getunede V2-parameters.
+- `scripts/tune-reactive-hypo-v2.mjs` + `scripts/reactive-hypo-v2-state.json`: auto-tuner en getunede V2-parameters, inclusief optionele similarity-params voor de vectorlaag. Dry-run met `HYPO_TUNE_DRY_RUN=1` schrijft geen state.
 - `scripts/build-entry-features.mjs`: Backfill van `entry_features`.
 - `scripts/analyze-patterns.mjs`: Detectie van pattern events.
 - `scripts/backfill-prediction-snapshots.mjs`: Historische snapshot backfill.
@@ -335,7 +335,7 @@ De voorspelling gebruikt weighted linear regression op recente metingen. Recente
 
 Geen quadratic regression gebruiken voor glucosevoorspelling. Bij minuutdata geeft dat te snel overfit en wilde extrapolaties.
 
-Naast de V1-regel draait een **V2 reactieve-hypo detector** (`scripts/lib/reactive-hypo-detector.mjs`, zie `hypo.md`) die curvevorm, dalingssnelheid, CGM-lag, scenario's en persoonlijke episodes combineert. V2 staat in **shadow-mode**: per snapshot opgeslagen als `shadowRisk`, maar V1 (`rules-v1.1`) blijft de enige alarmbron tot V2 op genoeg 1-min data getuned en geactiveerd is (M6). Live en backtest delen dezelfde featurebuilder/detector, zodat de backtest meet wat live draait.
+Naast de V1-regel draait een **V2 reactieve-hypo detector** (`scripts/lib/reactive-hypo-detector.mjs`, zie `hypo.md`) die curvevorm, dalingssnelheid, CGM-lag, scenario's en persoonlijke episodes combineert. V2 staat in **shadow-mode**: per snapshot opgeslagen als `shadowRisk`, maar V1 (`rules-v1.1`) blijft de enige alarmbron tot V2 op genoeg 1-min data getuned en geactiveerd is (M6). Live en backtest delen dezelfde featurebuilder/detector, zodat de backtest meet wat live draait. Nightscout/MongoDB blijft de bron van waarheid; `episode_vectors` zijn alleen een afgeleide zoeklaag/cache die uit MongoDB opnieuw gebouwd kan worden.
 
 De featurebuilder (`scripts/lib/hypo-features.mjs`) berekent o.a. `acceleration` (versnelt de daling?), herstelsignalen (`isDecelerating`/`isBottoming`/`recoverySignal`) die vals alarm dempen wanneer een daling al voorbij is, een **variabele CGM-lag** (`effectiveLagMinutes` 7/5/3/0 min, afhankelijk van de dalingssnelheid) en een **meal-onset detector** (`mealOnset`/`riseFromTroughMmol`/`minutesSinceTrough`): herkent dat een maaltijdpiek begint zodat V2 al in de stijgende fase een lage `watch` geeft (~10-15 min eerder dan de daling). Die `watch` werkt als risk-floor, niet als score-bijdrage, dus meal-onset kan nooit zelf tot een alarm leiden. Laag 9 draait dezelfde median-of-3 spike-filter in live-sync, featurebuilder, backtest en tuner; alleen de werk-timeline wordt opgeschoond, ruwe CGM-entries blijven intact en snapshots markeren dit met `spikeFiltered`/`rawCurrentMmol` wanneer het gebeurt. De live-sync geeft V2 hetzelfde `pattern`-object (persoonlijke episode-vergelijking) door als V1, en sinds 2026-06-04 doen de backtest én auto-tuner dat ook via de gedeelde `scripts/lib/episode-similarity.mjs` — train/serve zijn dus gelijkgetrokken (component 6 / `patternScore` wordt overal hetzelfde gevoed). De hypo-kaart in de overlay toont V1 en V2 naast elkaar (`niveau · score`, bij V2 ook `confidence %` en `✓` bij getunede params; V1 heeft geen `%` want het regelmodel berekent geen confidence). Redenen per model staan in de hover-tooltip; de sync-risk mag het kaart-alarm escaleren maar nooit verlagen. `hypo.md` bevat het volledige verbeterd-voorspellingsplan (9 lagen).
 

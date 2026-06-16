@@ -241,6 +241,12 @@ npm run vectors:build
 
 Bouwt `episode_vectors` uit `pattern_events` + entries: per episode een genormaliseerde curve-vector, een uitlegbare featureVector en de gemeten outcome. Basis voor de live similarity-correctie. Draai dit ná `patterns:analyze`.
 
+Nightscout/MongoDB blijft de bron van waarheid voor ruwe metingen, snapshots, feedback
+en episodes. `episode_vectors` vervangen die database niet; ze zijn een afgeleide
+zoeklaag/cache bovenop MongoDB. Als de vectorlogica verandert, bouw je de vectors opnieuw
+uit de database. Live gebruikt vectors alleen om persoonlijke, vergelijkbare patronen snel
+te vinden.
+
 ```bash
 npm run snapshots:backfill
 ```
@@ -294,6 +300,26 @@ Auto-tuner: temporele train/test-split + grid search over de V2-parameters met e
 recall-gebonden doel. Schrijft de beste set naar `scripts/reactive-hypo-v2-state.json`
 (en niets bij te weinig hypo-events). Wordt pas zinvol met genoeg 1-min data.
 
+De tuner optimaliseert naast score-drempels ook de persoonlijke vectorlaag:
+`patternRecencyDays` en `params.similarity` (afstandsdrempel, dynamische match-cap,
+afstandsmarge en curve-similarity cutoff). Het aantal gebruikte matches is niet vast
+`8` of `15`: de selector neemt minimaal genoeg bewijs, breidt uit als extra matches dicht
+bij de beste match blijven, en gebruikt een veiligheidsplafond (`hardMax`) uit defaults of
+state. Bij weinig data blijft de patroonlaag neutraal en blijft de universele safety-laag
+leidend.
+
+Dry-run zonder state te schrijven:
+
+```bash
+HYPO_TUNE_DRY_RUN=1 npm run hypo:tune
+```
+
+Op ~3 weken 1-min data kan volledige tuning meerdere minuten duren, omdat replay-punten
+met `episode_vectors` worden vergeleken. De tuner zoekt daarom staged: eerst de
+kernparameters, daarna een compacte similarity-refinement rond de beste kandidaat. Verdere
+versnelling kan door precomputed vector-score matrices; live voorspellen blijft snel omdat
+live maar een nieuwe meting per minuut verwerkt.
+
 ```bash
 npm run detector:fixtures
 npm run episodes:check
@@ -330,7 +356,9 @@ evaluator over genoeg episodes stabiel blijft.
 `scripts/daily-hypo-tune.sh` draait via launchd (`deploy/com.glucosecgm.hypotune.plist`,
 dagelijks 04:30): episodes verversen → auto-tunen op je eigen episodes → dag/week/weekdag/
 patroon-rapporten in `hypo-tune-reports/`. De sync laadt de geleerde parameters
-(`scripts/reactive-hypo-v2-state.json`) en past ze toe op de V2 shadow.
+(`scripts/reactive-hypo-v2-state.json`) en past ze toe op de V2 shadow. De state kan naast
+V2-scoreparams ook `similarity`-params bevatten; live, backtest en tuner gebruiken dan exact
+dezelfde vectorselectie.
 
 Installeren op de server:
 
@@ -379,6 +407,9 @@ Reactieve-hypo detector V2 (`hypo.md`):
 - V2 krijgt dezelfde persoonlijke episode-vergelijking (`pattern`) als V1 in de live-sync;
   sinds 2026-06-04 ook in backtest en auto-tuner (gedeelde `scripts/lib/episode-similarity.mjs`),
   zodat train/serve gelijk zijn
+- Dynamische vector matching: `pattern` gebruikt geen vaste top-N meer. Het aantal beste
+  patronen hangt af van matchkwaliteit, beschikbare historie, recency-weighting en getunede
+  `similarity`-params.
 
 Verbeterd voorspellingsplan: `hypo.md` beschrijft 10 gebouwde lagen (nadir-schatting,
 curvevorm-match, dagdeel-context, weekdag-patroon, meal-onset detector, spike-filter
