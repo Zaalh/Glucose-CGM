@@ -4177,7 +4177,9 @@
       alertTop = ((bgOnlyRect.bottom + statusRect.top) / 2 + window.scrollY) - 70;
     }
     var alertRect = alert.getBoundingClientRect();
-    var alertBottom = window.scrollY + alertRect.bottom;
+    var alertHeight = alertRect.height || 0;
+    var alertBottom = alertTop + alertHeight;
+    containerTop = Math.max(containerTop, alertBottom + 8);
     buttonTop = alertBottom + 4;
 
     if (window.innerWidth <= 700) {
@@ -4255,10 +4257,12 @@
       var stackHeight = stackButtons.reduce(function (sum, el) {
         return sum + (el.getBoundingClientRect().height || 24);
       }, 0) + stackGap * (stackButtons.length - 1);
-      var stackLeft = window.scrollX + alertRect.right + 10;
-      var stackTop = window.scrollY + alertRect.top + Math.max(0, (alertRect.height - stackHeight) / 2);
+      var alertLeft = (window.innerWidth - alertRect.width) / 2 + window.scrollX;
+      var alertRight = alertLeft + alertRect.width;
+      var stackLeft = alertRight + 10;
+      var stackTop = alertTop + Math.max(0, (alertHeight - stackHeight) / 2);
       if (stackLeft + maxButtonWidth > window.scrollX + window.innerWidth - 8) {
-        stackLeft = window.scrollX + alertRect.left - maxButtonWidth - 10;
+        stackLeft = alertLeft - maxButtonWidth - 10;
       }
       stackLeft = Math.max(window.scrollX + 6, stackLeft);
       stackButtons.forEach(function (el) {
