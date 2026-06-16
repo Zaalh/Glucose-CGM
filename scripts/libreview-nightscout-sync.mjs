@@ -268,6 +268,7 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
     // (incl. drop-context-gate, riseRate15m/riseFromBaseline en curve-match).
     const pattern = patternFromFeatures(shadowFeaturesFull, episodeVectors, {
       recencyDays: v2State ? v2State.params?.patternRecencyDays : null,
+      similarity: v2State ? v2State.params?.similarity : null,
     })
 
     const risk = evaluateRiskRuleV1({
@@ -283,7 +284,7 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
     })
     if (pattern && pattern.similarEpisodeCount >= 3 && pattern.similarHypoRatio >= 0.5) {
       risk.reasons = risk.reasons.concat(
-        `Lijkt op ${pattern.similarEpisodeCount} top-matches; ${pattern.similarHypoCount} gingen onder 4.5`,
+        `Lijkt op ${pattern.similarEpisodeCount} beste patronen; ${pattern.similarHypoCount} gingen onder 4.5`,
       )
     }
 

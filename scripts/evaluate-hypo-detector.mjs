@@ -224,17 +224,18 @@ export function evaluateV1(ctx) {
   return { metrics: scoreModel(pts, ctx.hypoOnsets, ctx.windowMs, ctx.mergeGapMs, ctx.predictiveFloor), points: pts }
 }
 
-function patternKey(recencyDays) {
-  return Number.isFinite(recencyDays) && recencyDays > 0 ? String(recencyDays) : 'all'
+function patternKey(recencyDays, similarity) {
+  const recencyKey = Number.isFinite(recencyDays) && recencyDays > 0 ? String(recencyDays) : 'all'
+  return JSON.stringify({ recency: recencyKey, similarity: similarity || null })
 }
 
-function patternsFor(ctx, recencyDays) {
+function patternsFor(ctx, recencyDays, similarity) {
   if (!ctx.episodeVectors) return null
-  const key = patternKey(recencyDays)
+  const key = patternKey(recencyDays, similarity)
   if (ctx.patternCache.has(key)) return ctx.patternCache.get(key)
   const patterns = new Map()
   for (const p of ctx.points) {
-    const pattern = patternFromFeatures(p.features, ctx.episodeVectors, { recencyDays })
+    const pattern = patternFromFeatures(p.features, ctx.episodeVectors, { recencyDays, similarity })
     if (pattern) patterns.set(p.idx, pattern)
   }
   ctx.patternCache.set(key, patterns)
@@ -242,7 +243,7 @@ function patternsFor(ctx, recencyDays) {
 }
 
 export function evaluateV2(ctx, params) {
-  const patterns = patternsFor(ctx, params?.patternRecencyDays)
+  const patterns = patternsFor(ctx, params?.patternRecencyDays, params?.similarity)
   const pts = ctx.points.map((p) => {
     const pattern = patterns ? patterns.get(p.idx) ?? null : null
     const r = evaluateReactiveHypoRiskV2(p.features, { params, pattern })

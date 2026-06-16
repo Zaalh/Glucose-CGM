@@ -23,6 +23,16 @@ const CURVE_MIN_POINTS = 8
 const CURVE_MIN_SIMILARITY = 0.8
 const WEEKDAYS = ['maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag', 'zondag']
 
+export const DEFAULT_SIMILARITY_PARAMS = {
+  scales: SIM_SCALES,
+  maxDist: SIM_MAX_DIST,
+  hardMax: SIM_K_HARD_MAX,
+  extraDistMargin: SIM_EXTRA_DIST_MARGIN,
+  extraDistRatio: SIM_EXTRA_DIST_RATIO,
+  curveMinSimilarity: CURVE_MIN_SIMILARITY,
+  curveExtraSimilarityMargin: CURVE_EXTRA_SIM_MARGIN,
+}
+
 function sq(x) {
   return x * x
 }
@@ -99,20 +109,43 @@ function recencyWeight(vectorMs, currentMs, recencyDays) {
   return Math.pow(0.5, ageDays / recencyDays)
 }
 
+function similarityParams(options = {}) {
+  const p = options.similarity || {}
+  const scales = { ...DEFAULT_SIMILARITY_PARAMS.scales, ...(p.scales || {}) }
+  return {
+    scales,
+    maxDist: Number.isFinite(p.maxDist) ? p.maxDist : DEFAULT_SIMILARITY_PARAMS.maxDist,
+    hardMax: Number.isFinite(p.hardMax) ? p.hardMax : DEFAULT_SIMILARITY_PARAMS.hardMax,
+    extraDistMargin: Number.isFinite(p.extraDistMargin)
+      ? p.extraDistMargin
+      : DEFAULT_SIMILARITY_PARAMS.extraDistMargin,
+    extraDistRatio: Number.isFinite(p.extraDistRatio)
+      ? p.extraDistRatio
+      : DEFAULT_SIMILARITY_PARAMS.extraDistRatio,
+    curveMinSimilarity: Number.isFinite(p.curveMinSimilarity)
+      ? p.curveMinSimilarity
+      : DEFAULT_SIMILARITY_PARAMS.curveMinSimilarity,
+    curveExtraSimilarityMargin: Number.isFinite(p.curveExtraSimilarityMargin)
+      ? p.curveExtraSimilarityMargin
+      : DEFAULT_SIMILARITY_PARAMS.curveExtraSimilarityMargin,
+  }
+}
+
 function adaptiveMaxCount(candidateCount, options = {}) {
-  if (Number.isFinite(options.maxK)) return Math.max(1, Math.min(candidateCount, options.maxK))
+  const hardMax = Number.isFinite(options.hardMax) ? options.hardMax : SIM_K_HARD_MAX
   if (candidateCount <= 8) return candidateCount
   // More candidates allow a broader vote, but grow sublinearly so dense history
   // cannot drown the local shape in weaker matches.
-  return Math.min(candidateCount, SIM_K_HARD_MAX, Math.max(8, Math.ceil(Math.sqrt(candidateCount) * 3)))
+  return Math.min(candidateCount, hardMax, Math.max(8, Math.ceil(Math.sqrt(candidateCount) * 3)))
 }
 
 function selectDistanceMatches(scored, options = {}) {
   if (!scored.length) return []
+  const sim = similarityParams(options)
   const minCount = Math.max(1, Number.isFinite(options.minCount) ? options.minCount : 3)
-  const maxK = Math.max(minCount, adaptiveMaxCount(scored.length, options))
-  const extraMargin = Number.isFinite(options.extraMargin) ? options.extraMargin : SIM_EXTRA_DIST_MARGIN
-  const extraRatio = Number.isFinite(options.extraRatio) ? options.extraRatio : SIM_EXTRA_DIST_RATIO
+  const maxK = Math.max(minCount, adaptiveMaxCount(scored.length, { hardMax: sim.hardMax }))
+  const extraMargin = Number.isFinite(options.extraMargin) ? options.extraMargin : sim.extraDistMargin
+  const extraRatio = Number.isFinite(options.extraRatio) ? options.extraRatio : sim.extraDistRatio
   const top = []
   for (const candidate of scored) {
     if (top.length >= maxK) break
@@ -136,9 +169,10 @@ function selectDistanceMatches(scored, options = {}) {
 
 function selectCurveMatches(scored, options = {}) {
   if (!scored.length) return []
+  const sim = similarityParams(options)
   const minCount = Math.max(1, Number.isFinite(options.minCount) ? options.minCount : 3)
-  const maxK = Math.max(minCount, adaptiveMaxCount(scored.length, options))
-  const extraMargin = Number.isFinite(options.extraMargin) ? options.extraMargin : CURVE_EXTRA_SIM_MARGIN
+  const maxK = Math.max(minCount, adaptiveMaxCount(scored.length, { hardMax: sim.hardMax }))
+  const extraMargin = Number.isFinite(options.extraMargin) ? options.extraMargin : sim.curveExtraSimilarityMargin
   const top = []
   for (const candidate of scored) {
     if (top.length >= maxK) break
@@ -156,6 +190,8 @@ function selectCurveMatches(scored, options = {}) {
 // gewogen drop-correctie en hoeveel vergelijkbare episodes in (near-)hypo eindigden.
 export function findSimilarEpisodes(input, vectors, options = {}) {
   if (!vectors || !vectors.length) return null
+  const sim = similarityParams(options)
+  const scales = sim.scales
   const scored = []
   const currentMs = Number.isFinite(options.currentMs) ? options.currentMs : null
   const recencyDays = Number.isFinite(options.recencyDays) ? options.recencyDays : null
@@ -166,26 +202,26 @@ export function findSimilarEpisodes(input, vectors, options = {}) {
     if (currentMs !== null && vectorMs !== null && vectorMs > currentMs) continue
     const f = v.featureVector
     if (!f || !Number.isFinite(f.peakMmol) || !Number.isFinite(f.dropFromPeakMmol)) continue
-    let sum = sq((f.peakMmol - input.peakMmol) / SIM_SCALES.peakMmol)
+    let sum = sq((f.peakMmol - input.peakMmol) / scales.peakMmol)
     let dims = 1
-    sum += sq((f.dropFromPeakMmol - input.dropFromPeakMmol) / SIM_SCALES.dropFromPeakMmol)
+    sum += sq((f.dropFromPeakMmol - input.dropFromPeakMmol) / scales.dropFromPeakMmol)
     dims += 1
     if (Number.isFinite(f.minutesPeakToEnd) && Number.isFinite(input.minutesSincePeak)) {
-      sum += sq((f.minutesPeakToEnd - input.minutesSincePeak) / SIM_SCALES.minutesSincePeak)
+      sum += sq((f.minutesPeakToEnd - input.minutesSincePeak) / scales.minutesSincePeak)
       dims += 1
     }
     // Aanloop-dimensies: alleen meetellen als beide kanten de feature hebben, zodat
     // oudere episode_vectors (zonder deze velden) niet wegvallen tijdens de overgang.
     if (Number.isFinite(f.riseRate15m) && Number.isFinite(input.riseRate15m)) {
-      sum += sq((f.riseRate15m - input.riseRate15m) / SIM_SCALES.riseRate15m)
+      sum += sq((f.riseRate15m - input.riseRate15m) / scales.riseRate15m)
       dims += 1
     }
     if (Number.isFinite(f.riseFromBaseline) && Number.isFinite(input.riseFromBaseline)) {
-      sum += sq((f.riseFromBaseline - input.riseFromBaseline) / SIM_SCALES.riseFromBaseline)
+      sum += sq((f.riseFromBaseline - input.riseFromBaseline) / scales.riseFromBaseline)
       dims += 1
     }
     const dist = Math.sqrt(sum / dims)
-    if (dist <= SIM_MAX_DIST) {
+    if (dist <= sim.maxDist) {
       scored.push({
         dist,
         drop: f.dropFromPeakMmol,
@@ -197,7 +233,7 @@ export function findSimilarEpisodes(input, vectors, options = {}) {
   if (scored.length < 3) return null
 
   scored.sort((a, b) => a.dist - b.dist)
-  const top = selectDistanceMatches(scored)
+  const top = selectDistanceMatches(scored, { similarity: sim })
   let wsum = 0
   let wdrop = 0
   let whypo = 0
@@ -223,6 +259,7 @@ export function findSimilarEpisodes(input, vectors, options = {}) {
 
 export function findCurveMatches(liveCurveShape, vectors, options = {}) {
   if (!liveCurveShape || liveCurveShape.length < CURVE_MIN_POINTS || !vectors || !vectors.length) return null
+  const simParams = similarityParams(options)
   const scored = []
   const currentMs = Number.isFinite(options.currentMs) ? options.currentMs : null
   const recencyDays = Number.isFinite(options.recencyDays) ? options.recencyDays : null
@@ -232,13 +269,13 @@ export function findCurveMatches(liveCurveShape, vectors, options = {}) {
     if (!Array.isArray(v.vector) || v.vector.length < liveCurveShape.length) continue
     const historicalPrefix = normalize(v.vector.slice(0, liveCurveShape.length))
     const sim = cosine(liveCurveShape, historicalPrefix)
-    if (Number.isFinite(sim) && sim >= CURVE_MIN_SIMILARITY) {
+    if (Number.isFinite(sim) && sim >= simParams.curveMinSimilarity) {
       scored.push({ similarity: sim, outcome: v.outcome, recencyWeight: recencyWeight(vectorMs, currentMs, recencyDays) })
     }
   }
   if (scored.length < 3) return null
   scored.sort((a, b) => b.similarity - a.similarity)
-  const top = selectCurveMatches(scored)
+  const top = selectCurveMatches(scored, { similarity: simParams })
   const hypoCount = top.filter((s) => s.outcome === 'hypo' || s.outcome === 'near_hypo').length
   let wsum = 0
   let whypo = 0
@@ -278,10 +315,14 @@ export function patternFromFeatures(features, vectors, options = {}) {
       riseFromBaseline: features.riseFromBaseline,
     },
     vectors,
-    { currentMs, recencyDays: options.recencyDays },
+    { currentMs, recencyDays: options.recencyDays, similarity: options.similarity },
   )
   if (!similar) return null
-  const curve = findCurveMatches(features.liveCurveShape, vectors, { currentMs, recencyDays: options.recencyDays })
+  const curve = findCurveMatches(features.liveCurveShape, vectors, {
+    currentMs,
+    recencyDays: options.recencyDays,
+    similarity: options.similarity,
+  })
   const wday = options.enableWeekday ? weekdayRisk(features.weekday, vectors) : null
   return {
     similarEpisodeCount: similar.count,

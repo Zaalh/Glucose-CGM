@@ -30,6 +30,36 @@ const MIN_EVENTS = Number(process.env.HYPO_TUNE_MIN_EVENTS ?? 2)
 const STATE_PATH = join(dirname(fileURLToPath(import.meta.url)), 'reactive-hypo-v2-state.json')
 
 // Parameterruimte (klein en uitlegbaar; de FP-gevoelige knoppen).
+function similarityGrid() {
+  return [
+    null,
+    {
+      maxDist: 0.8,
+      hardMax: 18,
+      extraDistMargin: 0.14,
+      extraDistRatio: 1.25,
+      curveMinSimilarity: 0.84,
+      curveExtraSimilarityMargin: 0.03,
+    },
+    {
+      maxDist: 0.866,
+      hardMax: 24,
+      extraDistMargin: 0.18,
+      extraDistRatio: 1.35,
+      curveMinSimilarity: 0.8,
+      curveExtraSimilarityMargin: 0.04,
+    },
+    {
+      maxDist: 0.92,
+      hardMax: 30,
+      extraDistMargin: 0.22,
+      extraDistRatio: 1.45,
+      curveMinSimilarity: 0.76,
+      curveExtraSimilarityMargin: 0.05,
+    },
+  ]
+}
+
 function paramGrid() {
   const grid = []
   for (const likely of [5, 6, 7]) {
@@ -39,15 +69,18 @@ function paramGrid() {
         for (const worstCaseToLikely of [true, false]) {
           for (const safeNadirDamping of [false, true]) {
             for (const patternRecencyDays of [null, 7, 14, 21]) {
-              grid.push({
-                scoreCut: { watch: 3, likely, urgent },
-                accelDownBonus,
-                worstCaseToLikely,
-                safeNadirDamping,
-                patternRecencyDays,
-                safeUncertaintyDamping: false,
-                recentLowRecoveryDamping: false,
-              })
+              for (const similarity of similarityGrid()) {
+                grid.push({
+                  scoreCut: { watch: 3, likely, urgent },
+                  accelDownBonus,
+                  worstCaseToLikely,
+                  safeNadirDamping,
+                  patternRecencyDays,
+                  ...(similarity ? { similarity } : {}),
+                  safeUncertaintyDamping: false,
+                  recentLowRecoveryDamping: false,
+                })
+              }
             }
           }
         }

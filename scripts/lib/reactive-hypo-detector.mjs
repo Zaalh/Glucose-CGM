@@ -6,6 +6,7 @@
 // context (persoonlijke patroonmatch, feedback). Pure functie, geen I/O.
 
 import { round, clamp } from './hypo-features.mjs'
+import { DEFAULT_SIMILARITY_PARAMS } from './episode-similarity.mjs'
 
 export const MODEL_VERSION = 'reactive-hypo-v2'
 
@@ -27,6 +28,7 @@ export const DEFAULT_PARAMS = {
   worstCaseToLikely: true, // worst-case <4.0 dwingt minimaal 'likely'
   safeNadirDamping: false, // demp drop-context naar 'watch' als zelfs worst-case >=4.5 blijft
   patternRecencyDays: null, // half-life voor persoonlijke pattern-match; null = alle vectors gelijk
+  similarity: DEFAULT_SIMILARITY_PARAMS, // vector-match tuning; gebruikt door patternFromFeatures
   safeUncertaintyDamping: false, // demp onzekerheids-only escalatie als harde low-signalen ontbreken
   recentLowRecoveryDamping: false, // demp post-hypo nasleep als herstel objectief stabiel lijkt
 }
@@ -44,6 +46,14 @@ function mergeParams(params) {
       Number.isFinite(p.patternRecencyDays) && p.patternRecencyDays > 0
         ? p.patternRecencyDays
         : DEFAULT_PARAMS.patternRecencyDays,
+    similarity: {
+      ...DEFAULT_PARAMS.similarity,
+      ...(p.similarity || {}),
+      scales: {
+        ...DEFAULT_PARAMS.similarity.scales,
+        ...(p.similarity?.scales || {}),
+      },
+    },
     safeUncertaintyDamping:
       typeof p.safeUncertaintyDamping === 'boolean'
         ? p.safeUncertaintyDamping
