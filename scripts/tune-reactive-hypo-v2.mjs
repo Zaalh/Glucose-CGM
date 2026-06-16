@@ -69,22 +69,33 @@ function paramGrid() {
         for (const worstCaseToLikely of [true, false]) {
           for (const safeNadirDamping of [false, true]) {
             for (const patternRecencyDays of [null, 7, 14, 21]) {
-              for (const similarity of similarityGrid()) {
-                grid.push({
-                  scoreCut: { watch: 3, likely, urgent },
-                  accelDownBonus,
-                  worstCaseToLikely,
-                  safeNadirDamping,
-                  patternRecencyDays,
-                  ...(similarity ? { similarity } : {}),
-                  safeUncertaintyDamping: false,
-                  recentLowRecoveryDamping: false,
-                })
-              }
+              grid.push({
+                scoreCut: { watch: 3, likely, urgent },
+                accelDownBonus,
+                worstCaseToLikely,
+                safeNadirDamping,
+                patternRecencyDays,
+                safeUncertaintyDamping: false,
+                recentLowRecoveryDamping: false,
+              })
             }
           }
         }
       }
+    }
+  }
+  return grid
+}
+
+function similarityRefinementGrid(baseParams) {
+  const grid = []
+  for (const patternRecencyDays of [null, 7, 14, 21]) {
+    for (const similarity of similarityGrid()) {
+      grid.push({
+        ...baseParams,
+        patternRecencyDays,
+        ...(similarity ? { similarity } : { similarity: undefined }),
+      })
     }
   }
   return grid
@@ -169,7 +180,17 @@ function tune(timeline, options = {}) {
     test: evaluateV2(testCtx, params).metrics,
   }))
 
-  const best = pickBest(results)
+  const coreBest = pickBest(results)
+  const similarityResults = options.refineDamping || options.skipSimilarityRefinement
+    ? []
+    : similarityRefinementGrid(coreBest.params).map((params) => ({
+      params,
+      train: evaluateV2(trainCtx, params).metrics,
+      test: evaluateV2(testCtx, params).metrics,
+    }))
+
+  const allResults = results.concat(similarityResults)
+  const best = pickBest(allResults)
   const defaultTrain = evaluateV2(trainCtx, DEFAULT_PARAMS).metrics
   const defaultTest = evaluateV2(testCtx, DEFAULT_PARAMS).metrics
   const v1Train = evaluateV1(trainCtx).metrics
@@ -197,7 +218,7 @@ function tune(timeline, options = {}) {
       v2_default: { train: line(defaultTrain), test: line(defaultTest) },
       v2_tuned: { train: line(best.train), test: line(best.test) },
     },
-    gridSize: grid.length,
+    gridSize: allResults.length,
   }
 }
 
