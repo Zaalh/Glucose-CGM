@@ -12,8 +12,7 @@ const SIM_SCALES = { peakMmol: 4, dropFromPeakMmol: 3, minutesSincePeak: 30, ris
 // of een vector nu 3 of 5 bruikbare features heeft. 0.866 = 1.5/sqrt(3) reproduceert
 // exact het oude 3-dimensie-gedrag (sqrt(sum) <= 1.5). Mogelijk herijken via backtest.
 const SIM_MAX_DIST = 0.866
-const SIM_K_BASE = 8
-const SIM_K_MAX = 15
+const SIM_K_HARD_MAX = 30
 const SIM_EXTRA_DIST_MARGIN = 0.18
 const SIM_EXTRA_DIST_RATIO = 1.35
 const CURVE_EXTRA_SIM_MARGIN = 0.04
@@ -100,17 +99,24 @@ function recencyWeight(vectorMs, currentMs, recencyDays) {
   return Math.pow(0.5, ageDays / recencyDays)
 }
 
+function adaptiveMaxCount(candidateCount, options = {}) {
+  if (Number.isFinite(options.maxK)) return Math.max(1, Math.min(candidateCount, options.maxK))
+  if (candidateCount <= 8) return candidateCount
+  // More candidates allow a broader vote, but grow sublinearly so dense history
+  // cannot drown the local shape in weaker matches.
+  return Math.min(candidateCount, SIM_K_HARD_MAX, Math.max(8, Math.ceil(Math.sqrt(candidateCount) * 3)))
+}
+
 function selectDistanceMatches(scored, options = {}) {
   if (!scored.length) return []
   const minCount = Math.max(1, Number.isFinite(options.minCount) ? options.minCount : 3)
-  const baseK = Math.max(minCount, Number.isFinite(options.baseK) ? options.baseK : SIM_K_BASE)
-  const maxK = Math.max(baseK, Number.isFinite(options.maxK) ? options.maxK : SIM_K_MAX)
+  const maxK = Math.max(minCount, adaptiveMaxCount(scored.length, options))
   const extraMargin = Number.isFinite(options.extraMargin) ? options.extraMargin : SIM_EXTRA_DIST_MARGIN
   const extraRatio = Number.isFinite(options.extraRatio) ? options.extraRatio : SIM_EXTRA_DIST_RATIO
   const top = []
   for (const candidate of scored) {
     if (top.length >= maxK) break
-    if (top.length < baseK) {
+    if (top.length < minCount) {
       top.push(candidate)
       continue
     }
@@ -131,13 +137,12 @@ function selectDistanceMatches(scored, options = {}) {
 function selectCurveMatches(scored, options = {}) {
   if (!scored.length) return []
   const minCount = Math.max(1, Number.isFinite(options.minCount) ? options.minCount : 3)
-  const baseK = Math.max(minCount, Number.isFinite(options.baseK) ? options.baseK : SIM_K_BASE)
-  const maxK = Math.max(baseK, Number.isFinite(options.maxK) ? options.maxK : SIM_K_MAX)
+  const maxK = Math.max(minCount, adaptiveMaxCount(scored.length, options))
   const extraMargin = Number.isFinite(options.extraMargin) ? options.extraMargin : CURVE_EXTRA_SIM_MARGIN
   const top = []
   for (const candidate of scored) {
     if (top.length >= maxK) break
-    if (top.length < baseK) {
+    if (top.length < minCount) {
       top.push(candidate)
       continue
     }

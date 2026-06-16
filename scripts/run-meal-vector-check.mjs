@@ -45,7 +45,23 @@ const densePattern = findSimilarEpisodes({
   riseRate15m: 0.11,
   riseFromBaseline: 2,
 }, denseVectors, { currentMs: NOW })
-assert.equal(densePattern.count, 14)
+assert.equal(densePattern.count, 12)
+
+const sparseVectors = [
+  vector(0, { peakMmol: 9.0, dropFromPeakMmol: 2.3, minutesPeakToEnd: 24, riseRate15m: 0.11, riseFromBaseline: 2 }, 'hypo'),
+  vector(1, { peakMmol: 9.1, dropFromPeakMmol: 2.4, minutesPeakToEnd: 25, riseRate15m: 0.11, riseFromBaseline: 2 }, 'hypo'),
+  vector(2, { peakMmol: 8.9, dropFromPeakMmol: 2.2, minutesPeakToEnd: 23, riseRate15m: 0.11, riseFromBaseline: 2 }, 'stable'),
+  vector(3, { peakMmol: 11.8, dropFromPeakMmol: 4.6, minutesPeakToEnd: 44, riseRate15m: 0.2, riseFromBaseline: 4.4 }, 'stable'),
+  vector(4, { peakMmol: 12.0, dropFromPeakMmol: 4.7, minutesPeakToEnd: 45, riseRate15m: 0.2, riseFromBaseline: 4.5 }, 'stable'),
+]
+const sparsePattern = findSimilarEpisodes({
+  peakMmol: 9,
+  dropFromPeakMmol: 2.3,
+  minutesSincePeak: 24,
+  riseRate15m: 0.11,
+  riseFromBaseline: 2,
+}, sparseVectors, { currentMs: NOW })
+assert.equal(sparsePattern.count, 3)
 
 const riskyRiseVectors = [
   vector(0, { peakMmol: 8.9, dropFromPeakMmol: 2.0, minutesPeakToEnd: 40, riseRate15m: 0.10, riseFromBaseline: 1.7 }, 'near_hypo'),
