@@ -12,7 +12,11 @@ const SIM_SCALES = { peakMmol: 4, dropFromPeakMmol: 3, minutesSincePeak: 30, ris
 // of een vector nu 3 of 5 bruikbare features heeft. 0.866 = 1.5/sqrt(3) reproduceert
 // exact het oude 3-dimensie-gedrag (sqrt(sum) <= 1.5). Mogelijk herijken via backtest.
 const SIM_MAX_DIST = 0.866
-const SIM_K = 8
+const SIM_K_BASE = 8
+const SIM_K_MAX = 15
+const SIM_EXTRA_DIST_MARGIN = 0.18
+const SIM_EXTRA_DIST_RATIO = 1.35
+const CURVE_EXTRA_SIM_MARGIN = 0.04
 const MEAL_RISE_MAX_DIST = 0.9
 const MEAL_DROP_MAX_DIST = 0.9
 const MS_PER_DAY = 86_400_000
@@ -96,6 +100,53 @@ function recencyWeight(vectorMs, currentMs, recencyDays) {
   return Math.pow(0.5, ageDays / recencyDays)
 }
 
+function selectDistanceMatches(scored, options = {}) {
+  if (!scored.length) return []
+  const minCount = Math.max(1, Number.isFinite(options.minCount) ? options.minCount : 3)
+  const baseK = Math.max(minCount, Number.isFinite(options.baseK) ? options.baseK : SIM_K_BASE)
+  const maxK = Math.max(baseK, Number.isFinite(options.maxK) ? options.maxK : SIM_K_MAX)
+  const extraMargin = Number.isFinite(options.extraMargin) ? options.extraMargin : SIM_EXTRA_DIST_MARGIN
+  const extraRatio = Number.isFinite(options.extraRatio) ? options.extraRatio : SIM_EXTRA_DIST_RATIO
+  const top = []
+  for (const candidate of scored) {
+    if (top.length >= maxK) break
+    if (top.length < baseK) {
+      top.push(candidate)
+      continue
+    }
+    const bestDist = top[0].dist
+    const prevDist = top[top.length - 1].dist
+    if (
+      candidate.dist <= bestDist + extraMargin &&
+      candidate.dist <= prevDist * extraRatio + 0.02
+    ) {
+      top.push(candidate)
+    } else {
+      break
+    }
+  }
+  return top
+}
+
+function selectCurveMatches(scored, options = {}) {
+  if (!scored.length) return []
+  const minCount = Math.max(1, Number.isFinite(options.minCount) ? options.minCount : 3)
+  const baseK = Math.max(minCount, Number.isFinite(options.baseK) ? options.baseK : SIM_K_BASE)
+  const maxK = Math.max(baseK, Number.isFinite(options.maxK) ? options.maxK : SIM_K_MAX)
+  const extraMargin = Number.isFinite(options.extraMargin) ? options.extraMargin : CURVE_EXTRA_SIM_MARGIN
+  const top = []
+  for (const candidate of scored) {
+    if (top.length >= maxK) break
+    if (top.length < baseK) {
+      top.push(candidate)
+      continue
+    }
+    if (candidate.similarity >= top[0].similarity - extraMargin) top.push(candidate)
+    else break
+  }
+  return top
+}
+
 // Vergelijkt de huidige situatie met opgeslagen episode_vectors. Geeft een
 // gewogen drop-correctie en hoeveel vergelijkbare episodes in (near-)hypo eindigden.
 export function findSimilarEpisodes(input, vectors, options = {}) {
@@ -141,7 +192,7 @@ export function findSimilarEpisodes(input, vectors, options = {}) {
   if (scored.length < 3) return null
 
   scored.sort((a, b) => a.dist - b.dist)
-  const top = scored.slice(0, SIM_K)
+  const top = selectDistanceMatches(scored)
   let wsum = 0
   let wdrop = 0
   let whypo = 0
@@ -182,7 +233,7 @@ export function findCurveMatches(liveCurveShape, vectors, options = {}) {
   }
   if (scored.length < 3) return null
   scored.sort((a, b) => b.similarity - a.similarity)
-  const top = scored.slice(0, SIM_K)
+  const top = selectCurveMatches(scored)
   const hypoCount = top.filter((s) => s.outcome === 'hypo' || s.outcome === 'near_hypo').length
   let wsum = 0
   let whypo = 0
@@ -255,7 +306,7 @@ function classifyPatternRisk(hypoRatio, weightedDrop, options = {}) {
 function patternSummary(scored, minCount, options = {}) {
   if (scored.length < minCount) return null
   scored.sort((a, b) => a.dist - b.dist)
-  const top = scored.slice(0, SIM_K)
+  const top = selectDistanceMatches(scored, { minCount })
   let wsum = 0
   let wdrop = 0
   let whypo = 0

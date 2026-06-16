@@ -302,7 +302,7 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
     if (ratio >= 0.6) {
       patternScore = 2
       reasons.push(
-        `Lijkt op ${pattern.similarEpisodeCount} top-matches; ${pattern.similarHypoCount ?? '?'} gingen onder 4.5`,
+        `Lijkt op ${pattern.similarEpisodeCount} beste patronen; ${pattern.similarHypoCount ?? '?'} gingen onder 4.5`,
       )
     } else if (ratio >= 0.4) {
       patternScore = 1
@@ -313,7 +313,7 @@ export function evaluateReactiveHypoRiskV2(features, context = {}) {
     if (curveRatio >= 0.6) {
       patternScore += 2
       reasons.push(
-        `Curvevorm lijkt op ${pattern.curveMatchCount} top-matches; ${pattern.curveHypoCount ?? '?'} gingen onder 4.5`,
+        `Curvevorm lijkt op ${pattern.curveMatchCount} beste patronen; ${pattern.curveHypoCount ?? '?'} gingen onder 4.5`,
       )
     } else if (curveRatio >= 0.4) {
       patternScore += 1

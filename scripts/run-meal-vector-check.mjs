@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mealPatternFromState } from './lib/episode-similarity.mjs'
+import { findSimilarEpisodes, mealPatternFromState } from './lib/episode-similarity.mjs'
 
 const NOW = Date.UTC(2026, 5, 1, 12, 0, 0)
 
@@ -30,6 +30,22 @@ assert.equal(dropPattern.patternKind, 'post-peak-drop')
 assert.equal(dropPattern.similarEpisodeCount, 4)
 assert.equal(dropPattern.similarHypoCount, 3)
 assert.equal(dropPattern.patternRisk, 'high')
+
+const denseVectors = Array.from({ length: 14 }, (_, index) => vector(index, {
+  peakMmol: 9 + index * 0.01,
+  dropFromPeakMmol: 2.3 + index * 0.01,
+  minutesPeakToEnd: 24 + index * 0.2,
+  riseRate15m: 0.11,
+  riseFromBaseline: 2,
+}, index % 3 === 0 ? 'hypo' : 'stable'))
+const densePattern = findSimilarEpisodes({
+  peakMmol: 9,
+  dropFromPeakMmol: 2.3,
+  minutesSincePeak: 24,
+  riseRate15m: 0.11,
+  riseFromBaseline: 2,
+}, denseVectors, { currentMs: NOW })
+assert.equal(densePattern.count, 14)
 
 const riskyRiseVectors = [
   vector(0, { peakMmol: 8.9, dropFromPeakMmol: 2.0, minutesPeakToEnd: 40, riseRate15m: 0.10, riseFromBaseline: 1.7 }, 'near_hypo'),

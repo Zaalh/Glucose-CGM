@@ -3991,12 +3991,12 @@
     var ratio = Number(pattern.similarHypoRatio);
     var ratioText = Number.isFinite(ratio) ? ' · ' + Math.round(ratio * 100) + '%' : '';
     var hypoText = Number.isFinite(hypoCount) ? hypoCount : '?';
-    var line = 'vergelijkbaar: top ' + count + ' matches · ' + hypoText + ' onder 4.5' + ratioText;
+    var line = 'vergelijkbaar: beste ' + count + ' patronen · ' + hypoText + ' onder 4.5' + ratioText;
     var curveCount = Number(pattern.curveMatchCount);
     if (Number.isFinite(curveCount) && curveCount >= 3) {
       var curveHypo = Number(pattern.curveHypoCount);
       var curveRatio = Number(pattern.curveHypoRatio);
-      line += ' · curve top ' + curveCount + ': ' + (Number.isFinite(curveHypo) ? curveHypo : '?') + ' onder 4.5';
+      line += ' · curve beste ' + curveCount + ': ' + (Number.isFinite(curveHypo) ? curveHypo : '?') + ' onder 4.5';
       if (Number.isFinite(curveRatio)) line += ' (' + Math.round(curveRatio * 100) + '%)';
     }
     if (pattern.weekdayRiskHigh && pattern.weekday) {
