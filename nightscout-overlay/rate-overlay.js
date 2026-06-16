@@ -1409,28 +1409,39 @@
       if (!parsed || !Array.isArray(parsed.riseRates) || parsed.riseRates.length < MEAL_MIN_SAMPLES) {
         return Object.assign({}, MEAL_DEFAULTS);
       }
-      var preDips = Array.isArray(parsed.preDips) ? parsed.preDips : [];
-      var peakToNadir = Array.isArray(parsed.peakToNadir) ? parsed.peakToNadir : [];
-      var dropRates = Array.isArray(parsed.dropRates) ? parsed.dropRates : [];
-      var rises = Array.isArray(parsed.rises) ? parsed.rises : [];
-      var drops = Array.isArray(parsed.drops) ? parsed.drops : [];
-      var undershoots = Array.isArray(parsed.undershoots) ? parsed.undershoots : [];
+      // numericArray() saneert elke serie (alleen eindige getallen, gecapt op
+      // MEAL_SAMPLE_CAP) — zelfde saneerder die import/normalize gebruiken, dus
+      // ook NaN/strings uit getamperde localStorage vallen weg.
+      var riseRates = numericArray(parsed.riseRates);
+      var preDips = numericArray(parsed.preDips);
+      var peakToNadir = numericArray(parsed.peakToNadir);
+      var dropRates = numericArray(parsed.dropRates);
+      var rises = numericArray(parsed.rises);
+      var drops = numericArray(parsed.drops);
+      var undershoots = numericArray(parsed.undershoots);
       var learnedDropWatch = percentile(dropRates, 0.50);
       var learnedDropHigh = percentile(dropRates, 0.75);
       var learnedDropUrgent = percentile(dropRates, 0.90);
-      return {
-        fastRate: percentile(parsed.riseRates, 0.75),
-        slowRate: percentile(parsed.riseRates, 0.25),
-        preDipMmol: median(preDips) || MEAL_DEFAULTS.preDipMmol,
-        dipToNadirMin: median(peakToNadir) || MEAL_DEFAULTS.dipToNadirMin,
-        dropWatchRate: Math.max(0.04, learnedDropWatch || MEAL_DEFAULTS.dropWatchRate),
-        dropHighRate: Math.max(0.07, learnedDropHigh || MEAL_DEFAULTS.dropHighRate),
-        dropUrgentRate: Math.max(0.10, learnedDropUrgent || MEAL_DEFAULTS.dropUrgentRate),
-        typicalRiseMmol: median(rises) || MEAL_DEFAULTS.typicalRiseMmol,
-        typicalDropMmol: median(drops) || MEAL_DEFAULTS.typicalDropMmol,
-        typicalUndershootMmol: median(undershoots) || MEAL_DEFAULTS.typicalUndershootMmol,
-        samples: parsed.riseRates.length
-      };
+      // fin(): geleerde waarde alleen overnemen als ze eindig is — anders de
+      // generieke default. Niet `|| default`, want een legitiem-lage geleerde
+      // waarde (bv. preDip/undershoot ~0) mag niet als "ontbrekend" wegvallen.
+      function fin(v, d) { return Number.isFinite(v) ? v : d; }
+      // Object.assign over MEAL_DEFAULTS: de klinische niveau-drempels
+      // (watch/alert/seriousMmol) en eventuele toekomstige defaults komen zo
+      // automatisch mee op het gekalibreerde pad. MEAL_DEFAULTS = enige bron.
+      return Object.assign({}, MEAL_DEFAULTS, {
+        fastRate: percentile(riseRates, 0.75),
+        slowRate: percentile(riseRates, 0.25),
+        preDipMmol: fin(median(preDips), MEAL_DEFAULTS.preDipMmol),
+        dipToNadirMin: fin(median(peakToNadir), MEAL_DEFAULTS.dipToNadirMin),
+        dropWatchRate: Math.max(0.04, fin(learnedDropWatch, MEAL_DEFAULTS.dropWatchRate)),
+        dropHighRate: Math.max(0.07, fin(learnedDropHigh, MEAL_DEFAULTS.dropHighRate)),
+        dropUrgentRate: Math.max(0.10, fin(learnedDropUrgent, MEAL_DEFAULTS.dropUrgentRate)),
+        typicalRiseMmol: fin(median(rises), MEAL_DEFAULTS.typicalRiseMmol),
+        typicalDropMmol: fin(median(drops), MEAL_DEFAULTS.typicalDropMmol),
+        typicalUndershootMmol: fin(median(undershoots), MEAL_DEFAULTS.typicalUndershootMmol),
+        samples: riseRates.length
+      });
     } catch (_err) {
       return Object.assign({}, MEAL_DEFAULTS);
     }
@@ -1565,9 +1576,9 @@
     } else if (meal.phase === 'reactive-drop') {
       score += 10;
       var nadir = projectReactiveNadir(meal, cal);
-      var serious = Number.isFinite(cal.seriousMmol) ? cal.seriousMmol : 3.0;
-      var alert = Number.isFinite(cal.alertMmol) ? cal.alertMmol : 3.9;
-      var watch = Number.isFinite(cal.watchMmol) ? cal.watchMmol : 4.5;
+      var serious = Number.isFinite(cal.seriousMmol) ? cal.seriousMmol : MEAL_DEFAULTS.seriousMmol;
+      var alert = Number.isFinite(cal.alertMmol) ? cal.alertMmol : MEAL_DEFAULTS.alertMmol;
+      var watch = Number.isFinite(cal.watchMmol) ? cal.watchMmol : MEAL_DEFAULTS.watchMmol;
       if (Number.isFinite(nadir)) {
         if (nadir < serious) score += 70;
         else if (nadir < alert) score += 50;
