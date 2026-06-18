@@ -11,6 +11,17 @@
   var RATE_MODE_KEY = 'cgm-rate-overlay-mode';
   var RATE_VIEW_KEY = 'cgm-rate-overlay-view';
   var RATE_CALC_KEY = 'cgm-rate-overlay-calc';
+  // Regressie-modus: tijd-gewogen kleinste-kwadraten helling i.p.v. 2-punts verschil.
+  // Gebruikt alle metingen in het venster, dempt de kwantisatie-ruis van hele-mg/dL-feeds
+  // en geeft een continue helling. tau = recency-weging (recente punten zwaarder), zodat
+  // een verse daling de helling domineert zonder de ruisdemping van het venster te verliezen.
+  var CALC_ORDER = ['verhouding', 'momentaan', 'regressie'];
+  var REG_MIN_POINTS = 3;          // minder punten -> val terug op 2-punts
+  var REG_TAU_FRACTION = 0.6;      // tau als fractie van het venster (lager = responsiever)
+  var REG_TAU_MAX_MS = 12 * 60000; // recency-weging plat boven dit punt
+  // Voedt de regressie-helling ook de hypo-risk/forecast-basis (los van de weergave-toggle).
+  // Op false valt alles terug op de oude 2-punts calculateRows, voor vergelijking.
+  var REG_FEEDS_ALARMS = true;
   var SOUND_OFF_KEY = 'cgm-nightscout-sound-off';
   var ESTIMATE_LINE_CLASS = 'cgm-estimated-glucose-line';
   var ESTIMATE_GAP_MIN_MS = 150000;
@@ -188,6 +199,47 @@
     };
   }
 
+  // Tijd-gewogen kleinste-kwadraten helling (mmol/min) over alle metingen in
+  // [latestTime - windowMs, latestTime]. Weegt recente punten zwaarder met w = exp(Δt/tau)
+  // (Δt <= 0), zodat een verse daling de helling domineert. Geeft ook de onzekerheid (se)
+  // uit de fit. Geeft null bij < REG_MIN_POINTS punten of een ontaarde fit.
+  function regressionSlope(readings, latestTime, windowMs, tauMs) {
+    if (!Number.isFinite(latestTime) || !(windowMs > 0)) return null;
+    var tau = (tauMs && tauMs > 0) ? tauMs : windowMs * REG_TAU_FRACTION;
+    var minT = latestTime - windowMs;
+    var sw = 0, sx = 0, sy = 0, sxx = 0, sxy = 0, syy = 0, n = 0;
+    var oldest = latestTime;
+    for (var i = 0; i < readings.length; i++) {
+      var t = readingTime(readings[i]);
+      if (!Number.isFinite(t) || t > latestTime || t < minT) continue;
+      var sgv = Number(readings[i].sgv);
+      if (!Number.isFinite(sgv)) continue;
+      var x = (t - latestTime) / 60000;  // minuten t.o.v. nu (<= 0)
+      var y = mmol(sgv);
+      var w = Math.exp((t - latestTime) / tau); // recent ~1, ouder -> kleiner
+      sw += w; sx += w * x; sy += w * y;
+      sxx += w * x * x; sxy += w * x * y; syy += w * y * y;
+      n += 1;
+      if (t < oldest) oldest = t;
+    }
+    if (n < REG_MIN_POINTS) return null;
+    var denom = sw * sxx - sx * sx;
+    if (!Number.isFinite(denom) || Math.abs(denom) < 1e-9) return null;
+    var slope = (sw * sxy - sx * sy) / denom; // mmol per minuut
+    if (!Number.isFinite(slope)) return null;
+    var intercept = (sy - slope * sx) / sw;
+    // Gewogen residu-som -> onzekerheid van de helling (alleen informatief).
+    var ssr = Math.max(0, syy - intercept * sy - slope * sxy);
+    var variance = ssr / Math.max(1, n - 2);
+    var se = Math.sqrt(variance * sw / denom);
+    return {
+      slope: slope,
+      n: n,
+      spanMin: (latestTime - oldest) / 60000,
+      se: Number.isFinite(se) ? se : null
+    };
+  }
+
   function calculateRows(readings, anchorEntry) {
     var latest = anchorEntry || readings[0];
     if (!latest) return [];
@@ -265,6 +317,58 @@
     });
   }
 
+  // Regressie: elk vakje N = de tijd-gewogen kleinste-kwadraten helling over de laatste
+  // N minuten (alle punten, recente zwaarder). Glad i.p.v. blokkerig, geen vastklikken op
+  // 0.0555-veelvouden. Korte vensters met te weinig punten vallen terug op 2-punts.
+  function calculateRegressionRows(readings, anchorEntry) {
+    var latest = anchorEntry || readings[0];
+    if (!latest) return [];
+    var latestTime = readingTime(latest);
+    var latestMmol = mmol(Number(latest.sgv));
+    return WINDOWS_MINUTES.map(function (minutesBack) {
+      var windowMs = minutesBack * 60000 + MAX_BASELINE_DIFF_MS;
+      var tau = Math.min(windowMs, REG_TAU_MAX_MS) * REG_TAU_FRACTION;
+      var fit = regressionSlope(readings, latestTime, windowMs, tau);
+      if (fit) {
+        var rateMgdl = fit.slope * MGDL_PER_MMOL;
+        var spanMin = fit.spanMin || minutesBack;
+        return {
+          label: minutesBack + 'm',
+          actualMinutes: spanMin,
+          _baseTime: latestTime - spanMin * 60000,
+          rateMgdl: rateMgdl,
+          rateMmol: fit.slope,
+          se: fit.se,
+          deltaMmol: fit.slope * spanMin,
+          fromMmol: latestMmol - fit.slope * spanMin,
+          toMmol: latestMmol,
+          arrow: trendArrow(rateMgdl),
+          css: trendClass(rateMgdl),
+          text: trendLabel(rateMgdl)
+        };
+      }
+      // Te weinig punten voor regressie (bv. 1-2m bij 1-min feed): 2-punts terugval.
+      var baseline = findBaseline(readings, latestTime, minutesBack);
+      if (!baseline) return { label: minutesBack + 'm', missing: true };
+      var minutesActual = (latestTime - readingTime(baseline)) / 60000;
+      if (minutesActual <= 0) return { label: minutesBack + 'm', missing: true };
+      var deltaMgdl = Number(latest.sgv) - Number(baseline.sgv);
+      return {
+        label: minutesBack + 'm',
+        actualMinutes: minutesActual,
+        _baseTime: readingTime(baseline),
+        rateMgdl: deltaMgdl / minutesActual,
+        rateMmol: mmol(deltaMgdl) / minutesActual,
+        deltaMmol: mmol(deltaMgdl),
+        fromMmol: mmol(Number(baseline.sgv)),
+        toMmol: latestMmol,
+        arrow: trendArrow(deltaMgdl / minutesActual),
+        css: trendClass(deltaMgdl / minutesActual),
+        text: trendLabel(deltaMgdl / minutesActual)
+      };
+    });
+  }
+
   // Bij een trage feed (telefoon uit bereik) zijn er geen echte per-minuut-punten.
   // Meerdere minuut-vensters snappen dan binnen de ±75s-tolerantie op dezelfde fysieke
   // meting en tonen identieke vakjes. Hier houden we per echte meting alleen het venster
@@ -288,10 +392,23 @@
   }
 
   function computeRows(readings, anchorEntry) {
-    var rows = getCalcMode() === 'momentaan'
+    var mode = getCalcMode();
+    if (mode === 'regressie') {
+      // Regressie geeft al continue, unieke hellingen per venster: dedupe niet nodig.
+      return calculateRegressionRows(readings, anchorEntry);
+    }
+    var rows = mode === 'momentaan'
       ? calculateMomentRows(readings, anchorEntry)
       : calculateRows(readings, anchorEntry);
     return dedupeDisplayRows(rows);
+  }
+
+  // Basis voor forecast/hypo-risk: regressie-rijen als REG_FEEDS_ALARMS aan staat,
+  // anders de oude 2-punts verhouding-rijen. Los van de weergave-toggle.
+  function forecastBasisRows(readings, anchorEntry) {
+    return REG_FEEDS_ALARMS
+      ? calculateRegressionRows(readings, anchorEntry)
+      : calculateRows(readings, anchorEntry);
   }
 
   function getPrimaryRate(rows) {
@@ -373,7 +490,7 @@
       var anchorTime = readingTime(anchor);
       if (!Number.isFinite(anchorTime)) continue;
       var contextDesc = points.slice(0, i + 1).reverse();
-      var rows = calculateRows(contextDesc, anchor);
+      var rows = forecastBasisRows(contextDesc, anchor);
       var rate = getForecastRateMmol(rows);
       if (!Number.isFinite(rate)) continue;
       var signal = detectPeakDropSignal(contextDesc);
@@ -1212,7 +1329,7 @@
     button.id = 'cgm-rate-calc-toggle';
     button.type = 'button';
     button.addEventListener('click', function () {
-      var next = getCalcMode() === 'momentaan' ? 'verhouding' : 'momentaan';
+      var next = CALC_ORDER[(CALC_ORDER.indexOf(getCalcMode()) + 1) % CALC_ORDER.length];
       localStorage.setItem(RATE_CALC_KEY, next);
       // A calc-mode tap is meant to compare the current live rate cards.
       // If history had an old chart point selected, the hypo block kept
@@ -1226,7 +1343,12 @@
   }
 
   function getCalcMode() {
-    return localStorage.getItem(RATE_CALC_KEY) === 'momentaan' ? 'momentaan' : 'verhouding';
+    var v = localStorage.getItem(RATE_CALC_KEY);
+    return (v === 'momentaan' || v === 'regressie') ? v : 'verhouding';
+  }
+
+  function calcLabel(mode) {
+    return mode === 'momentaan' ? 'momentaan' : mode === 'regressie' ? 'regressie' : 'verhouding';
   }
 
   function ensureHistoryNav() {
@@ -1267,7 +1389,7 @@
     if (!currentReadings.length) return;
     selectedReadingTime = anchorTime;
     var anchorEntry = currentReadings.find(function (entry) { return readingTime(entry) === anchorTime; }) || null;
-    currentForecastRows = calculateRows(currentReadings, anchorEntry);
+    currentForecastRows = forecastBasisRows(currentReadings, anchorEntry);
     render(computeRows(currentReadings, anchorEntry));
   }
 
@@ -2140,7 +2262,7 @@
     var view = getViewMode();
     viewButton.textContent = view === 'history' ? 'history' : 'live';
     var calcButton = ensureCalcToggle();
-    calcButton.textContent = getCalcMode() === 'momentaan' ? 'momentaan' : 'verhouding';
+    calcButton.textContent = calcLabel(getCalcMode());
   }
 
   function updateHistoryNav() {
@@ -4890,8 +5012,9 @@
           anchorEntry = readings[0];
         }
         var rows = computeRows(readings, anchorEntry);
-        // Forecast/risk altijd uit verhouding-rijen, los van de weergave-toggle.
-        currentForecastRows = calculateRows(readings, anchorEntry);
+        // Forecast/risk altijd uit de basis-rijen (regressie als REG_FEEDS_ALARMS aan),
+        // los van de weergave-toggle.
+        currentForecastRows = forecastBasisRows(readings, anchorEntry);
         latestReading = readings[0] || null;
         renderCurrentGlucose(anchorEntry || readings[0]);
         renderCurrentDelta();

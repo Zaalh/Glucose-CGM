@@ -7,6 +7,25 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Snelheidsvakjes
 
+- **Regressie-modus: tijd-gewogen kleinste-kwadraten helling** (`nightscout-overlay/rate-overlay.js`,
+  `regressionSlope` + `calculateRegressionRows`). De bestaande standen (`momentaan`, `verhouding`)
+  berekenen de snelheid als **2-punts verschil** (`delta / minuten`). Omdat `sgv` een heel getal
+  mg/dL is en de feed ~1-min punten levert, klikt zo'n helling vast op veelvouden van ~0.0555 mmol/min:
+  bij een vlakke/gestage trend zie je identieke of zigzaggende cijfers (de "dezelfde snelheden"-vraag),
+  en de daling-detectie krijgt onnodige ruis. De nieuwe derde stand fit een **gewogen lineaire regressie
+  over álle punten** in het venster (recente zwaarder, `w = exp(Δt/tau)`), wat de kwantisatie-ruis dempt
+  en een continue helling geeft. Aanpak gevolgd naar Loop (regressie over ~laatste 15 min "to filter out
+  noise while still responding fast"). De calc-toggle cyclet nu `verhouding → momentaan → regressie`.
+- **Regressie voedt ook de forecast/hypo-risk** (`forecastBasisRows`, achter `REG_FEEDS_ALARMS`).
+  `currentForecastRows` komt nu uit de regressie-basis i.p.v. de 2-punts `calculateRows`; `getPrimaryRate`
+  (≤5 min) en `getForecastRateMmol` (5/10/15/20-blend) consumeren zo gladdere per-venster-hellingen.
+  Korte vensters reageren snel, lange dempen — responsief op een beginnende daling, rustig bij ruis.
+  Los van de weergave-toggle (de tegel-keuze raakt de detector niet); `REG_FEEDS_ALARMS=false` zet alles
+  terug op de oude 2-punts basis voor vergelijking. V2-detector/§21-logica ongemoeid.
+  Smoke-test: `scripts/run-regression-rate-check.mjs` (gladder dan 2-punts, kort venster reageert op knik,
+  continue helling). Live geverifieerd: waar de feed tussen 0.000 en −0.093 sprong, gaf regressie een
+  stabiele −0.088 mmol/min.
+
 - **Ontdubbeling van per-minuut-vakjes bij trage feed** (`nightscout-overlay/rate-overlay.js`,
   `dedupeDisplayRows` in `computeRows`). Wanneer de feed traag binnenkomt (telefoon uit bereik,
   ~5 min tussen metingen) snapten meerdere minuut-vensters binnen de ±75s-tolerantie op dezelfde
