@@ -23,8 +23,8 @@ Zaalh
 @claude
 claude Claude# AI-review in de overlay — uitgebreid plan (llm.md)
 
-Status: **Fase 1–4 geïmplementeerd & getest** (deploy naar de iMac is de laatste
-stap). Dit document beschrijft het ontwerp om de AI-review als knop + paneel in de
+Status: **Fase 1–4 geïmplementeerd, getest & gedeployed** (live op de iMac). Dit
+document beschrijft het ontwerp om de AI-review als knop + paneel in de
 Nightscout-overlay te krijgen, gevoed door Ollama Cloud, met een meegebouwde
 periodieke achtergrond-loop. Sectie 10 beschrijft de **roadmap** om de AI
 betekenisvoller te maken dan alleen "samenvatten achteraf".
@@ -1369,9 +1369,10 @@ begrenst handmatige spam, maar als de periodieke loop (`AI_REVIEW_INTERVAL_MINUT
 aanstaat, vuurt die nu vaker. Aanbeveling bij activeren van de loop: verrijkte review
 max ~1×/dag, of knop-getriggerd houden.
 
-**Open follow-ups:** overlay rendert `evidence` nog niet expliciet (additief/veilig);
-`getAiStats(14)` in `runAiReviewOnce` moet 14d blijven zolang `getAiPatterns` hard 14d
-gebruikt (venster-invariant, §21.7 punt 3).
+**Open follow-ups:** `getAiStats(14)` in `runAiReviewOnce` moet 14d blijven zolang
+`getAiPatterns` hard 14d gebruikt (venster-invariant, §21.7 punt 3). *(De eerdere
+follow-up "overlay rendert `evidence` nog niet expliciet" is afgehandeld: de overlay
+toont het als "Onderbouwing"-lijst in de observatie-accordion, zie §21.9 hierboven.)*
 
 ---
 
