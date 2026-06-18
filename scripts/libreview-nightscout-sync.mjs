@@ -1259,9 +1259,22 @@ async function runAiReviewOnce({ model } = {}) {
   aiReviewRunning = true
   let client = null
   try {
+    // §21: verrijk de observatie-review met dezelfde deterministische aggregaten die
+    // rapport/chat al krijgen (AGP-stats + episodes). Venster vast op 14d, consistent
+    // met getAiPatterns (§21.7 invariant). De `reactive`-digest in stats vervangt de
+    // losse episode-lijst grotendeels; episodes worden in de core tot top-5 beperkt.
+    const [stats, episodeResult] = await Promise.all([
+      getAiStats(14),
+      getAiEpisodes(20, 14),
+    ])
     client = new MongoClient(config.mongoUri)
     await client.connect()
-    const result = await runAiReview({ db: client.db(), aiRouter })
+    const result = await runAiReview({
+      db: client.db(),
+      aiRouter,
+      stats,
+      episodes: (episodeResult && episodeResult.episodes) || [],
+    })
     aiReviewLastAt = Date.now()
     return result
   } finally {

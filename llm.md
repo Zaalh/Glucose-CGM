@@ -497,7 +497,16 @@ UI-tabs (12.6). Daarna **C/D** (narratief, 1 call), gekoppeld aan de periodieke 
 
 ---
 
-## 13. Interactieve chat (gevraagd) — plan
+## 13. Interactieve chat (gevraagd) — GEBOUWD (live)
+
+**Status: GEBOUWD (live).** De volledige keten is geïmplementeerd: core `runAiChat`
+([`ai-review-core.mjs`](scripts/lib/ai-review-core.mjs)) + route `POST /ai-review/chat`
+→ `runAiChatOnce` ([`libreview-nightscout-sync.mjs`](scripts/libreview-nightscout-sync.mjs))
++ nginx-locatie `/_ai-review/chat` + Chat-tab in de overlay (`sendAiChat`/`renderAiChat`,
+[`rate-overlay.js`](nightscout-overlay/rate-overlay.js)). De chat houdt de laatste ~10
+berichten bij, stuurt stats(14d)/episodes/observaties/feedback + optionele dag-scope mee,
+draait achter de concurrency-lock zónder min-interval, en toont "AI denkt na…" +
+fout-/skip-afhandeling. 13.1–13.3 hieronder zijn de implementatiehistorie.
 
 **Doel:** een chatvenster in het paneel waar je vragen kunt stellen ("waarom dipte ik
 vanmorgen?", "wanneer ben ik het meest kwetsbaar?") en de AI antwoordt, **gegrond in je
@@ -549,8 +558,9 @@ Op basis van online onderzoek (zie Bronnen) — relevant voor reactieve hypoglyk
   koppelen** (trigger-identificatie, precies jouw doel) en bekende context benoemen
   (eiwit/vet vóór koolhydraten = "preload" vertraagt de piek en dempt de rebound-dip;
   low-GI; frequente kleine maaltijden). **Beschrijvend, nooit als voorschrift.**
-- **Richere review-context:** geef de AGP-stats + episodes ook mee aan de gewone
-  observatie-review (nu vooral snapshots), zodat observaties op weekpatronen leunen.
+- **Richere review-context:** ✅ GEBOUWD (§21) — de observatie-review krijgt nu de
+  AGP-stats + episodes mee, zodat observaties op weekpatronen leunen i.p.v. alleen
+  losse snapshots.
 - **Counterfactuals/voedingssuggesties** (uit de literatuur) bewust **niet** doen: te dicht
   op medisch advies; buiten de veiligheidsgrens.
 
@@ -1076,6 +1086,247 @@ Aanbevolen volgorde na sectie 19:
 
 ---
 
+## 21. Rijkere AI-overzichten via professionele context-engineering — plan
+
+**Status: GEBOUWD (W1–W5 live).** Aanleiding: de overzichten van de observatie-review
+voelen mager ("de dataset lijkt beperkt"). Diagnose én oplossing hieronder zijn
+research-gegrond (zie nieuwe Bronnen onderaan: context-engineering, tabular-LLM,
+lost-in-the-middle, klinische CGM/AGP-standaard).
+
+Geïmplementeerd in `ai-review-core.mjs` (`compactStats`/`compactEpisode`/`vulnerableWindow`,
+lost-in-the-middle-prompt, `evidence`-schema, verzachte skip-conditie + `COVERAGE_MIN_PCT`,
+en `previewReviewPrompt` voor de no-LLM smoke) en `libreview-nightscout-sync.mjs`
+(`runAiReviewOnce` levert `getAiStats(14)` + `getAiEpisodes(20,14)` aan). De
+structurele bron (`stats.trend`/`reactive`/`highToLowContext` + afgeleid kwetsbaar
+venster) wordt meegestuurd i.p.v. de al-genarreerde pattern-cards (§21.7), dus
+`getAiPatterns` wordt niet dubbel aangeroepen.
+
+### 21.1 Diagnose — waaróm de overzichten mager voelen
+
+De observatie-review is **niet** datalimiet maar **input-limiet**. `runAiReviewOnce`
+([`libreview-nightscout-sync.mjs`](scripts/libreview-nightscout-sync.mjs)) roept
+`runAiReview({ db, aiRouter })` aan — verder niets. Intern stuurt
+[`ai-review-core.mjs`](scripts/lib/ai-review-core.mjs) `runAiReview` dan naar het model:
+
+1. **≤24 `prediction_snapshots`**, alleen met `risk ∈ {watch, high, urgent}`
+   (tenzij `force`). Op een rustige dag zonder alarmen → `"Geen relevante recente
+   snapshots"` → de review **slaat volledig over**.
+2. **≤20 `user_feedback`**.
+
+Dat is alles. Tegelijk bestaan er rijke, deterministische aggregaten die **niet** naar
+de observatie-review gaan, terwijl `runAiReport` en `runAiChat` ze wél krijgen:
+
+| Bron | Functie | Naar observatie-review? |
+|------|---------|--------------------------|
+| AGP-stats (TIR/TBR/TAR/CV/per-uur) | `getAiStats(days)` | ❌ |
+| Episodes + metrics | `getAiEpisodes(limit, days)` | ❌ |
+| Patroon-cards (week-vs-week, kwetsbaar venster, high→low) | `getAiPatterns()` | ❌ |
+| Maaltijd-/symptoom-events | `cgm_events` | ❌ |
+
+Dit is exact het open punt uit §14 ("Richere review-context"). De fix is gratis: het
+zijn puur Mongo-reads; alleen de prompt wordt groter.
+
+### 21.2 Research-principes (en wat ze hier betekenen)
+
+1. **LLM narreert, rekent niet.** Het sterkste anti-hallucinatie-principe voor
+   numerieke data: bereken álles deterministisch en geef de LLM alleen de
+   kant-en-klare getallen om te duiden. Modellen verminken/verzinnen waarden zodra ze
+   zelf serialiseren of rekenen. → Trek de bestaande deterministische aanpak volledig
+   door naar de observatie-review en verbied herberekening expliciet in de prompt.
+2. **Structuur + eenheid > kale JSON-dump.** Expliciete tabel-/`key=value`-structuur
+   mét eenheid in de sleutelnaam (`tir_3.9_10_pct = 88`) verhoogt het begrip meetbaar
+   t.o.v. een platte `JSON.stringify`-blob met losse numerieke velden.
+3. **"Lost in the middle".** LLM's hebben een U-vormige aandacht: begin en eind van de
+   prompt krijgen de meeste aandacht, het midden zakt weg (tot −30%). → Zet de
+   **kernsamenvatting (AGP-metrics + kwetsbaar venster) bovenaan én herhaal de
+   kernvraag onderaan**; stop de lange snapshot-lijst in het midden.
+4. **Comprimeer op grenzen, budgetteer tokens.** Stuur samenvattingen/aggregaten, geen
+   ruwe historie. → Episodes zonder ruwe `readings`, per-uur-profiel i.p.v. alle
+   metingen, harde caps op lijstlengtes.
+5. **Klinische standaard = AGP / International Consensus on Time in Range.** Canonieke
+   set: TIR, TBR, TAR, gemiddelde glucose, CV% (doel <36%), GMI, mediaan-dagcurve.
+   **Nuance voor déze gebruiker:** die targets zijn diabetes-gekalibreerd. Bij
+   reactieve hypoglykemie zonder insuline is **TBR (tijd <3.9 en <3.0) en de timing
+   van dips** de hoofdmetric, niet TIR-boven; GMI (HbA1c-proxy) is hier minder
+   relevant. Gebruik de AGP-*vorm*, maar houd de *framing* op vroege-daling-detectie.
+6. **Output-contract met evidence.** Professionele medische-LLM-pipelines dwingen een
+   gestructureerd antwoord af met "welke data gebruikt" + "onzekerheid". → Voeg een
+   `evidence`-veld toe aan het observatie-schema zodat claims traceerbaar zijn (sluit
+   aan op §17.1).
+
+### 21.3 Implementatieplan
+
+**Wijziging 1 — `runAiReviewOnce` levert de aggregaten aan.**
+Vóór de `runAiReview`-call dezelfde helpers aanroepen die het rapport al gebruikt:
+```js
+const [stats, episodeResult, patterns] = await Promise.all([
+  getAiStats(14), getAiEpisodes(20, 14), getAiPatterns()
+])
+const result = await runAiReview({
+  db: client.db(), aiRouter,
+  stats, episodes: episodeResult.episodes || [], patterns
+})
+```
+Hergebruikt bestaande, geteste functies — geen nieuwe query-logica.
+
+**Wijziging 2 — `runAiReview` accepteert en compacteert de extra context.**
+- Signatuur: `runAiReview({ db, aiRouter, dryRun, force, limit, stats, episodes, patterns })`.
+- Nieuwe compacters, analoog aan `compactSnapshot`/`compactFeedback`:
+  - `compactStats(stats)` → AGP-consensus set met eenheid-in-sleutel
+    (`tir_3.9_10_pct`, `tbr_3.9_pct`, `tbr_3.0_pct`, `tar_10_pct`, `mean_mmol`,
+    `cv_pct`, `coverage_pct`, `lows_count`) + `perHour` (de sleutel voor "wanneer dip
+    ik"). TBR-velden vooraan (use-case-prioriteit).
+  - `compactEpisode(e)` → `peakMmol, nadirMmol, peakToNadirMinutes, fallRate,
+    severity, shape, timeOfDayBucket, recoveryMinutes` — **geen ruwe readings**.
+  - `patterns` → doorgeven zoals ze zijn (al compact).
+
+**Wijziging 3 — prompt-structuur (lost-in-the-middle-bewust).**
+Volgorde van de `userPrompt`-payload:
+1. **Boven:** `agpSummary` (kernmetrics, TBR-first) + `vulnerableWindow` (uit patterns).
+2. **Midden:** `recentEpisodes`, `snapshots`, `recentUserFeedback`.
+3. **Onder:** korte herhaling van de taak + de kernvraag ("benoem week-/dagpatronen en
+   wanneer dips clusteren, gebruik uitsluitend bovenstaande cijfers").
+
+`systemPrompt` erbij:
+- "Gebruik agpSummary (TIR/TBR/CV/per-uur) en recentEpisodes om week-/dagpatronen te
+  benoemen, niet alleen losse snapshots."
+- "Herbereken geen getallen; citeer uitsluitend de meegegeven waarden."
+- "Bij lage `coverage_pct` of weinig episodes: formuleer expliciet voorzichtig."
+  (consistent met §17-guardrail.)
+
+**Wijziging 4 — schema: `evidence`-veld.**
+`SCHEMA_HINT` uitbreiden: elke observatie krijgt
+`"evidence": ["welke metric/episode/feedback gebruikt is"]`. `cleanObservation`
+valideert en kapt (max ~6 items). Klein, traceerbaar, professionele norm.
+
+**Wijziging 5 — skip-conditie verzachten (lost de "rustige dag"-leegte op).**
+Nu stopt de review bij geen risico-snapshots. Verzachten naar: **skip alleen als er
+noch risico-snapshots, noch episodes, noch bruikbare stats (coverage > drempel) zijn.**
+Dan geeft de review ook op kalme dagen een zinvol AGP-overzicht.
+
+### 21.4 Designkeuzes — VASTGELEGD (beste optie voor deze setup)
+
+Afgewogen voor de concrete context: single-user, reactieve hypoglykemie zonder
+insuline, Ollama free-tier (1 model/concurrent, GPU-quota), deterministisch-first.
+
+- **Scope:** alleen de **observatie-review** verrijken (W1-5 hieronder). Rapport en chat
+  krijgen al `stats + episodes`; daar is de meerwaarde van extra patterns/events
+  marginaal en het oppervlak groter. De leegte zit in de review → daar de winst pakken.
+  Zowel het `evidence`-veld (W4) als de skip-versoepeling (W5) horen erbij: samen lossen
+  ze de twee helften van de klacht op (mager → contextrijk; rustige dag → niet meer leeg).
+- **Prompt-format:** **hybride gelabelde JSON** met eenheid-in-sleutelnaam
+  (`tir_3.9_10_pct`). Robuust te valideren naast `json_object`-mode en begrijpelijker dan
+  een kale blob; géén volledige markdown-tabel (mengt slecht met JSON-mode + lastiger
+  valideren).
+- **Metrics/framing:** **TBR-first**, klinische AGP-set **zónder GMI**. GMI is een
+  HbA1c-proxy voor diabetici — hier irrelevant en mogelijk misleidend. Volgorde:
+  `tbr_3.9_pct`, `tbr_3.0_pct`, dan `tir_3.9_10_pct`, `tar_10_pct`, `mean_mmol`,
+  `cv_pct`, `coverage_pct`, `lows_count`, `perHour`.
+- **Vensters/caps:** stats over **14 dagen** (AGP-literatuur: ~14d geeft een betrouwbaar
+  beeld); **20** episodes, **24** snapshots, **20** feedback. Caps bewaken het
+  token-budget (principe 21.2.4).
+- **Evidence-veld:** toevoegen (traceerbaarheid > minimale schema-uitbreiding).
+
+### 21.5 Verificatie
+- `npm run ai:tdz-check` + `node --check` op beide gewijzigde bestanden.
+- Nieuwe `--dry-run`-smoke die de samengestelde prompt-payload print zónder LLM-call,
+  zodat zichtbaar is dat AGP-stats/episodes/patterns + evidence-schema erin zitten.
+
+### 21.6 Bestanden
+| Bestand | Aard |
+|---------|------|
+| [`scripts/lib/ai-review-core.mjs`](scripts/lib/ai-review-core.mjs) | signatuur + `compactStats`/`compactEpisode` + prompt-herstructurering + `evidence`-schema + skip-conditie |
+| [`scripts/libreview-nightscout-sync.mjs`](scripts/libreview-nightscout-sync.mjs) | `runAiReviewOnce` levert stats/episodes/patterns aan |
+| `llm.md` | §14 markeren als gebouwd zodra geïmplementeerd |
+
+**Risico:** laag — hergebruikt geteste aggregators, raakt de detector/alarmlaag niet,
+nul extra LLM-kosten. Enige effect: grotere review-prompt (daarom de compacters +
+token-budget).
+
+### 21.7 Senior-review — code-geverifieerde correcties
+
+Na inspectie van de echte functies in
+[`libreview-nightscout-sync.mjs`](scripts/libreview-nightscout-sync.mjs) — vier
+correcties op 21.3/21.4 vóór er code geschreven wordt:
+
+1. **Veldnamen kloppen niet met de aannames.** `getAiStats` retourneert geen
+   `tbr_3.9_pct`-achtige sleutels maar: `tir`, `tbr` (=onder 3.9), `veryLow` (=onder
+   3.0), `tar`, `veryHigh`, `mean`, `sd`, `cv`, `coveragePct`, `lows{count,longestMin}`,
+   `perHour`, `perWeekday`, `heatmap`, `trend`, `reactive`, `highToLowContext`, `gmi`.
+   → `compactStats` moet **mappen**: `tbr_3.9_pct ← tbr`, `tbr_3.0_pct ← veryLow`,
+   `coverage_pct ← coveragePct`, enz. (de eenheid-in-sleutel is een hernoeming, niet een
+   bestaand veld).
+
+2. **`getAiPatterns()` roept intern al `getAiStats(14)` aan** (eerste regel) én opent een
+   eigen MongoClient. W1 zoals geschreven (`Promise.all([getAiStats(14),
+   getAiEpisodes(20,14), getAiPatterns()])`) berekent de stats dus **twee keer**.
+   → Senior-fix: `getAiPatterns(stats)` een optionele `stats`-parameter geven en die
+   doorgeven, zodat de aggregatie één keer draait. Anders: bewust accepteren als
+   goedkope dubbeling (single-user), maar dan expliciet documenteren.
+
+3. **Venster-koppeling is hard-coded.** `getAiPatterns` gebruikt overal `14`d (`since14`,
+   `getAiStats(14)`). Het 14d-besluit (21.4) is dus verplicht consistent met patterns;
+   verander je later het review-venster, dan **moet** patterns mee — anders beschrijven
+   stats en de pattern-cards verschillende periodes en ziet de LLM tegenstrijdige
+   getallen. Vastleggen als invariant.
+
+4. **Token-budget: schrap `heatmap` en `perWeekday` in `compactStats`.** `heatmap` is
+   7×24 = 168 cellen; samen met `perHour` blaast dat de prompt op zonder
+   narratie-meerwaarde. → `compactStats` neemt alléén `perHour` (+ de scalaire metrics
+   en `trend`). `heatmap`/`perWeekday`/`gmi` weglaten.
+
+**Twee verbeteringen die de inspectie blootlegt (meenemen):**
+
+- **`stats.reactive`** (uit `summarizeReactiveEpisodes`) is het meest use-case-relevante
+  veld en stond niet in het plan. → Opnemen in `compactStats`; past precies bij de
+  TBR-first/postprandiale framing.
+- **`getAiPatterns` geeft vóór-genarreerde NL `cards` terug** (mens-leesbare strings).
+  Die ongefilterd doorgeven laat de LLM al-genarreerde tekst hér-narreren (risico op
+  herhaling/tegenspraak). → Beter de **structurele bron** meegeven (`stats.trend`-delta's,
+  het "kwetsbaar venster"-uur, `highToLowContext`) i.p.v. de gerenderde card-strings;
+  of de cards meesturen mét instructie "dit zijn deterministische feiten: herformuleer,
+  herbereken niet". Voorkeur: structurele bron (compacter + geen dubbele narratie).
+
+**Conclusie senior-review:** plan is uitvoerbaar en laag-risico, maar 21.3 W1/W2 moeten
+worden bijgesteld op (1) veld-mapping, (2) geen dubbele stats-berekening, (3) venster als
+invariant, (4) heatmap/perWeekday uit het budget. Met die vier correcties + de twee
+toevoegingen is het bouwklaar.
+
+### 21.8 Tweede verificatieronde — twee bijstellingen (waarvan één op 21.7)
+
+Nadere inspectie van `summarizeReactiveEpisodes` (de bron van `stats.reactive`) en de
+`perHour`-definitie:
+
+1. **`perHour` is zelf een token-bom — correctie op 21.7 punt 4.** Elk van de 24 uur-
+   buckets heeft 10 velden: `hour, mean, lowPct, highPct, tir, p10, p25, p50, p75, p90`
+   = ~240 getallen, net zo zwaar als de `heatmap` die ik schrapte. "Alleen `perHour`
+   houden" is dus niet genoeg. → `compactStats` reduceert `perHour` tot **`{hour,
+   lowPct}`** (precies wat "wanneer dip ik" nodig heeft); percentielen/tir/highPct/mean
+   per uur weglaten.
+
+2. **`stats.reactive` maakt de losse episode-lijst grotendeels overbodig.**
+   `summarizeReactiveEpisodes` levert al een complete deterministische digest:
+   `byOutcome` (hypo/near_hypo/safe_drop), `bySeverity`, `byShape`, `byTimeOfDay`,
+   `medianDropMmol`, `medianNadirMmol`, `medianPeakToNadirMin`, `medianRecoveryMin`,
+   `totalTimeBelow3_9Min`, `totalAreaBelow3_9` (burden), `pctPostprandialCandidate`,
+   `artefactFlags`, `reboundHigh`. → Stuur **`stats.reactive` als hoofd-digest** en
+   beperk de losse episodes tot **de 5 meest recente/zwaarste** (i.p.v. 20). Hoger
+   signaal, kleiner budget, geen dubbele informatie. Past de cap in 21.4 aan: episodes
+   **5**, niet 20.
+
+**Bijgewerkte token-budget-regels (definitief):**
+- `compactStats`: scalairen (`tir/tbr/veryLow/tar/mean/cv/coveragePct/lows`) + `trend`
+  + `reactive` + `perHour`→`{hour,lowPct}`. Weglaten: `heatmap`, `perWeekday`, `gmi`,
+  per-uur-percentielen.
+- episodes: top-5 (recent of zwaarste), gecompacteerd zonder `readings`.
+- snapshots: ≤24 (ongewijzigd). feedback: ≤20 (ongewijzigd).
+
+**Status na 2 rondes:** bouwklaar. Alle hergebruikte velden/functies zijn nu tegen de
+code geverifieerd; de open keuzes (episode-cap 5, perHour-reductie, reactive-as-digest)
+zijn beslist.
+
+---
+
 ## Bronnen
 
 - [OpenAI compatibility — Ollama docs](https://docs.ollama.com/api/openai-compatibility)
@@ -1097,3 +1348,9 @@ Aanbevolen volgorde na sectie 19:
 - [When Large Language Models Fail in Healthcare — promptgevoeligheid/risico](https://arxiv.org/abs/2606.07237)
 - [SmartXdrip Community Preview — companion review app](https://github.com/solgosea/smartxdrip-community-preview)
 - [SmartXdrip Docs — Home / Insights / History / Episode / Stats workflow](https://solgosea.github.io/smartxdrip-docs/)
+- [Better Think with Tables — tabular structuur verhoogt LLM-begrip (arXiv 2412.17189)](https://arxiv.org/html/2412.17189v3)
+- [LLMs on Tabular Data: A Survey — serialisatie & hallucinatie (arXiv 2402.17944)](https://arxiv.org/html/2402.17944v2)
+- [Lost in the Middle / Found in the Middle — positie-bias in lange context (arXiv 2406.16008)](https://arxiv.org/abs/2406.16008)
+- [Improving Clinical Text Summarization in LLMs — gestructureerde context verhoogt factualiteit (arXiv 2504.16394)](https://arxiv.org/pdf/2504.16394)
+- [Context Engineering in LLM-based Agents — write/select/compress/isolate](https://jtanruan.medium.com/context-engineering-in-llm-based-agents-d670d6b439bc)
+- [AGP Report: Practical Tips & Recommendations (Diabetes Therapy)](https://link.springer.com/article/10.1007/s13300-022-01229-9)

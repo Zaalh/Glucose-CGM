@@ -9,6 +9,9 @@ import { aiRouterConfigured, callAiRouter, readAiRouterConfig } from './ai-route
 
 export const DEFAULT_LIMIT = 24
 const CONFIDENCE = new Set(['low', 'medium', 'high'])
+// Minimale datadekking (§21 W5) waaronder stats te mager zijn om de review op te
+// laten draaien bij afwezigheid van snapshots/episodes.
+const COVERAGE_MIN_PCT = 10
 // Retentie: oudere observaties/vragen worden bij elke run opgeruimd zodat de
 // collecties niet onbegrensd groeien (vooral met de periodieke loop).
 const RETENTION_DAYS = Math.max(1, Number(process.env.AI_REVIEW_RETENTION_DAYS ?? 90))
@@ -125,6 +128,59 @@ function compactSnapshot(s) {
   }
 }
 
+// Compacte AGP-samenvatting voor de observatie-review (§21). Principe: de LLM
+// narreert, rekent niet — alle waarden komen deterministisch uit getAiStats.
+// Eenheid-in-sleutel + TBR-first (de hoofdmetric bij reactieve hypo zonder insuline).
+// `heatmap`/`perWeekday`/`gmi` en de per-uur-percentielen worden bewust weggelaten om
+// het token-budget te bewaken; `perHour` wordt gereduceerd tot {hour, lowPct} (precies
+// wat "wanneer dip ik" nodig heeft).
+function compactStats(stats) {
+  if (!stats) return null
+  const perHourLowPct = Array.isArray(stats.perHour)
+    ? stats.perHour.filter((p) => p && p.n).map((p) => ({ hour: p.hour, lowPct: p.lowPct }))
+    : []
+  return {
+    window_days: stats.window?.days ?? null,
+    coverage_pct: stats.coveragePct ?? null,
+    // TBR-first: tijd onder 3.9 en 3.0 is de hoofdmetric voor deze use-case.
+    'tbr_3.9_pct': stats.tbr ?? null,
+    'tbr_3.0_pct': stats.veryLow ?? null,
+    'tir_3.9_10_pct': stats.tir ?? null,
+    'tar_10_pct': stats.tar ?? null,
+    mean_mmol: stats.mean ?? null,
+    cv_pct: stats.cv ?? null,
+    lows_count: stats.lows?.count ?? null,
+    trend: stats.trend ?? null,
+    // De reactieve-episode-digest is de meest use-case-relevante samenvatting.
+    reactive: stats.reactive ?? null,
+    perHourLowPct,
+  }
+}
+
+// Het kwetsbaarste uur (hoogste lowPct met genoeg metingen) als structureel feit,
+// i.p.v. de al-genarreerde pattern-card-string.
+function vulnerableWindow(stats) {
+  const perHour = Array.isArray(stats?.perHour) ? stats.perHour : []
+  const worst = perHour.filter((p) => p && p.n >= 10).sort((a, b) => b.lowPct - a.lowPct)[0]
+  return worst ? { hour: worst.hour, lowPct: worst.lowPct } : null
+}
+
+// Compacte episode zonder ruwe `readings`: alleen de duiding-relevante metrics.
+function compactEpisode(e) {
+  return {
+    peakAt: e.peakAt ?? null,
+    peakMmol: e.peakMmol ?? null,
+    nadirMmol: e.nadirMmol ?? null,
+    minutesPeakToNadir: e.minutesPeakToNadir ?? null,
+    fallRateMmolPerMin: e.fallRateMmolPerMin ?? null,
+    severity: e.severity ?? null,
+    shape: e.shape ?? null,
+    timeOfDayBucket: e.timeOfDayBucket ?? null,
+    recoveryMinutes: e.recoveryMinutes ?? null,
+    outcome: e.outcome ?? null,
+  }
+}
+
 // Compacte weergave van gebruikersfeedback. Sluit de lus: de AI weet wat de
 // gebruiker eerder bevestigde (confirmed/feels_hypo/fingerstick) of ontkende
 // (false_alarm), zodat observaties persoonlijk en cumulatief worden (roadmap 10.1).
@@ -140,7 +196,7 @@ function compactFeedback(f) {
 }
 
 const SCHEMA_HINT =
-  '{"observations":[{"scope":"model_review","summary":"...","hypothesis":"...","confidence":"low|medium|high","needsUserConfirmation":false}],"questions":[{"question":"...","reason":"...","relatedEntryIdentifier":null}]}'
+  '{"observations":[{"scope":"model_review","summary":"...","hypothesis":"...","confidence":"low|medium|high","needsUserConfirmation":false,"evidence":["welke metric/episode/feedback gebruikt is"]}],"questions":[{"question":"...","reason":"...","relatedEntryIdentifier":null}]}'
 
 function systemPrompt() {
   return [
@@ -149,6 +205,10 @@ function systemPrompt() {
     'Je mag NOOIT live alarmbeslissingen nemen, drempels aanpassen of medisch advies geven.',
     'Geef alleen korte uitleg, hypotheses en maximaal drie nuttige vragen voor latere gebruikersfeedback.',
     'Baseer je alleen op de meegegeven samenvatting. Wees voorzichtig bij weinig data.',
+    'Gebruik agpSummary (TBR/TIR/CV/perHourLowPct), vulnerableWindow en recentEpisodes om week- en dagpatronen te benoemen, niet alleen losse snapshots.',
+    'Herbereken geen getallen en bereken geen nieuwe statistieken; citeer uitsluitend de meegegeven waarden.',
+    'Vul per observatie het veld "evidence" met de concrete metric/episode/feedback waarop je je baseert.',
+    'Bij lage coverage_pct of weinig episodes: formuleer expliciet voorzichtig en benoem dat conclusies onzeker zijn.',
     'Als je pattern-velden noemt: noem similarEpisodeCount/curveMatchCount "top-matches" of "gebruikte matches", niet het totaal aantal vergelijkbare episodes.',
     'Noem similarHypoCount/curveHypoCount nooit "bevestigde hypo’s"; dit zijn detector-uitkomsten onder 4.5 (hypo/near_hypo), tenzij recentUserFeedback expliciet bevestiging geeft.',
     'Vermeng feature-match en curve-match niet: rapporteer hun counts/ratios apart of kies één bron.',
@@ -162,16 +222,19 @@ function systemPrompt() {
   ].join('\n')
 }
 
-function userPrompt(snapshots, feedback) {
+// Payload-volgorde is bewust "lost-in-the-middle"-aware (§21.2.3): de kernsamenvatting
+// staat BOVENAAN (hoogste aandacht), de lange detaillijsten in het MIDDEN, en de
+// kernopdracht wordt ONDERAAN herhaald (ook hoge aandacht).
+function userPrompt(snapshots, feedback, stats, episodes) {
   return JSON.stringify({
-    task: 'Vat recente CGM prediction_snapshots samen voor ai_observations en ai_questions, rekening houdend met eerdere gebruikersfeedback.',
-    constraints: {
-      noAlarmDecision: true,
-      noThresholdChanges: true,
-      noMedicalAdvice: true,
-      maxObservations: 5,
-      maxQuestions: 3,
-    },
+    // BOVEN — kernsamenvatting.
+    agpSummary: compactStats(stats),
+    vulnerableWindow: vulnerableWindow(stats),
+    highToLowContext: stats?.highToLowContext ?? null,
+    // MIDDEN — detaillijsten.
+    recentEpisodes: Array.isArray(episodes) ? episodes.slice(0, 5).map(compactEpisode) : [],
+    snapshots: snapshots.map(compactSnapshot),
+    recentUserFeedback: feedback.map(compactFeedback),
     patternSemantics: {
       similarEpisodeCount: 'Aantal gebruikte top-matches uit de similarity-laag; dit is begrensd en geen totaal aantal historische episodes.',
       similarHypoCount: 'Aantal top-matches met detector-uitkomst hypo of near_hypo; dit zijn geen door gebruiker bevestigde hypo’s.',
@@ -180,18 +243,31 @@ function userPrompt(snapshots, feedback) {
       curveHypoCount: 'Aantal curve-top-matches met detector-uitkomst hypo of near_hypo; dit zijn geen door gebruiker bevestigde hypo’s.',
       curveHypoRatio: 'Gewogen fractie van curve-top-matches met detector-uitkomst hypo of near_hypo.',
     },
-    recentUserFeedback: feedback.map(compactFeedback),
-    snapshots: snapshots.map(compactSnapshot),
+    // ONDER — herhaalde kernopdracht.
+    task: 'Benoem week- en dagpatronen op basis van agpSummary, vulnerableWindow en recentEpisodes: wanneer clusteren dips, hoe gedragen piek→dal-episodes zich, en hoe sluit dit aan op recentUserFeedback. Gebruik UITSLUITEND de meegegeven cijfers; herbereken niets.',
+    constraints: {
+      noAlarmDecision: true,
+      noThresholdChanges: true,
+      noMedicalAdvice: true,
+      maxObservations: 5,
+      maxQuestions: 3,
+    },
   })
+}
+
+// §21.5: bouwt de exacte review-prompt (system + user) ZONDER LLM-call, zodat een
+// smoke kan controleren dat AGP-stats/episodes + evidence-schema erin zitten.
+export function previewReviewPrompt({ snapshots = [], feedback = [], stats = null, episodes = [] } = {}) {
+  return { system: systemPrompt(), user: userPrompt(snapshots, feedback, stats, episodes) }
 }
 
 // Roept de AI-router aan en parseert JSON. Bij ongeldige JSON: eenmalig opnieuw
 // proberen met een expliciete correctie-instructie (Ollama Cloud kan geen schema
 // afdwingen, dus we leunen op prompt + retry).
-async function callChat(aiRouter, snapshots, feedback) {
+async function callChat(aiRouter, snapshots, feedback, stats, episodes) {
   const baseMessages = [
     { role: 'system', content: systemPrompt() },
-    { role: 'user', content: userPrompt(snapshots, feedback) },
+    { role: 'user', content: userPrompt(snapshots, feedback, stats, episodes) },
   ]
 
   let result = await callAiRouter(aiRouter, {
@@ -243,6 +319,10 @@ function cleanObservation(raw, now, source, runId, model) {
     hypothesis: String(raw?.hypothesis || '').slice(0, 800),
     confidence,
     needsUserConfirmation: Boolean(raw?.needsUserConfirmation),
+    // Traceerbaarheid (§17.1/§21.4): welke metric/episode/feedback de claim onderbouwt.
+    evidence: Array.isArray(raw?.evidence)
+      ? raw.evidence.map((x) => String(x).slice(0, 200)).filter(Boolean).slice(0, 6)
+      : [],
     acceptedByUser: null,
   }
 }
@@ -265,7 +345,7 @@ function cleanQuestion(raw, now, source, runId, model) {
 
 // Draait één AI-review. `db` is een verbonden MongoDB Db-handle; de aanroeper
 // beheert de connectie. Schrijft alleen weg als dryRun false is.
-export async function runAiReview({ db, aiRouter, dryRun = false, force = false, limit } = {}) {
+export async function runAiReview({ db, aiRouter, dryRun = false, force = false, limit, stats = null, episodes = [] } = {}) {
   if (!aiRouterConfigured(aiRouter)) {
     return {
       ok: true,
@@ -280,8 +360,14 @@ export async function runAiReview({ db, aiRouter, dryRun = false, force = false,
     .limit(reviewLimit(limit))
     .toArray()
 
-  if (!snapshots.length) {
-    return { ok: true, skipped: true, reason: 'Geen relevante recente snapshots.' }
+  // §21 W5: verzacht de skip-conditie. Vroeger sloeg de review volledig over zodra er
+  // geen risico-snapshots waren (een rustige dag → leeg paneel). Nu draait de review
+  // zolang er íets te duiden valt: risico-snapshots, episodes, of bruikbare stats
+  // (genoeg datadekking voor een AGP-overzicht).
+  const hasEpisodes = Array.isArray(episodes) && episodes.length > 0
+  const hasUsableStats = stats && Number(stats.coveragePct) >= COVERAGE_MIN_PCT
+  if (!snapshots.length && !hasEpisodes && !hasUsableStats) {
+    return { ok: true, skipped: true, reason: 'Geen relevante recente snapshots, episodes of bruikbare stats.' }
   }
 
   // Recente gebruikersfeedback meenemen (roadmap 10.1: feedback-lus sluiten).
@@ -291,7 +377,7 @@ export async function runAiReview({ db, aiRouter, dryRun = false, force = false,
     .limit(20)
     .toArray()
 
-  const ai = await callChat(aiRouter, snapshots, feedback)
+  const ai = await callChat(aiRouter, snapshots, feedback, stats, episodes)
   const source = sourceName(ai)
   const now = new Date().toISOString()
   const runId = randomUUID()
