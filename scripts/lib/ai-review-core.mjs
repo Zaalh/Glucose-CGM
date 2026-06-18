@@ -198,6 +198,14 @@ function compactFeedback(f) {
 const SCHEMA_HINT =
   '{"observations":[{"scope":"model_review","summary":"...","hypothesis":"...","confidence":"low|medium|high","needsUserConfirmation":false,"evidence":["welke metric/episode/feedback gebruikt is"]}],"questions":[{"question":"...","reason":"...","relatedEntryIdentifier":null}]}'
 
+// Profielneutrale, data-gegronde guardrail — werkt voor ELKE gebruiker (met of zonder
+// diabetes/insuline). De dataset bevat alleen glucose + afgeleiden, geen behandel-
+// of medicatie-info; zonder deze regel valt het model terug op diabetes-aannames en
+// schrijft het dips ten onrechte toe aan insuline/basaal. Niets over de specifieke
+// gebruiker hard-coderen, juist verbieden om context te verzinnen die er niet is.
+const DATA_GROUNDING_RULE =
+  'Verklaar patronen UITSLUITEND uit wat in de data zit (glucosewaarden en -timing, curvevorm, episodes, gelogde events en feedback). Veronderstel GEEN klinische context die niet is meegegeven — zoals insuline, basaal/bolus, medicatie, diabetestype of behandelregime; die informatie zit niet in deze dataset. Behandel zulke factoren als onbekend en gebruik ze niet als verklaring of als onderwerp van een vraag.'
+
 function systemPrompt() {
   return [
     'Je analyseert CGM hypo-voorspellingen voor een single-user monitor.',
@@ -205,6 +213,7 @@ function systemPrompt() {
     'Je mag NOOIT live alarmbeslissingen nemen, drempels aanpassen of medisch advies geven.',
     'Geef alleen korte uitleg, hypotheses en maximaal drie nuttige vragen voor latere gebruikersfeedback.',
     'Baseer je alleen op de meegegeven samenvatting. Wees voorzichtig bij weinig data.',
+    DATA_GROUNDING_RULE,
     'Gebruik agpSummary (TBR/TIR/CV/perHourLowPct), vulnerableWindow en recentEpisodes om week- en dagpatronen te benoemen, niet alleen losse snapshots.',
     'Herbereken geen getallen en bereken geen nieuwe statistieken; citeer uitsluitend de meegegeven waarden.',
     'Vul per observatie het veld "evidence" met de concrete metric/episode/feedback waarop je je baseert.',
@@ -404,9 +413,10 @@ const AI_REPORT_TYPES = new Set(['daily', 'weekly', 'period', 'episode', 'trigge
 
 function reportSystemPrompt() {
   return [
-    'Je schrijft een kort, feitelijk CGM-overzichtsrapport voor één gebruiker met reactieve hypoglykemie (geen insuline, geen closed-loop).',
+    'Je schrijft een kort, feitelijk CGM-overzichtsrapport voor één gebruiker, op basis van diens CGM-data.',
     'Schrijf in het Nederlands. Wees beschrijvend en voorzichtig: GEEN medisch advies, geen voorschriften, geen alarm-/actiebeslissingen.',
     'Gebruik UITSLUITEND de meegegeven cijfers (statistiek, episodes, feedback). Verzin niets en noem geen waarden die er niet staan.',
+    DATA_GROUNDING_RULE,
     'Benoem concrete patronen: op welke tijdstippen lows clusteren (uit perHour), piek→dal-gedrag uit de episodes, en mogelijke samenhang met gemelde feedback.',
     'Je mag algemeen bekende, niet-persoonlijke context noemen (bv. dat eiwit/vet vóór koolhydraten de piek vertraagt) maar formuleer dit als observatie, niet als instructie.',
     // Safety guardrail (§17): datadekking bepaalt hoe stellig het rapport mag zijn.
@@ -479,10 +489,11 @@ export async function runAiReport({ db, aiRouter, stats, episodes = [], feedback
 // --- Chat: vrije vraag/antwoord gegrond in de data (1 LLM-call per bericht) ----
 function chatSystemPrompt() {
   return [
-    'Je bent een behulpzame assistent die vragen beantwoordt over de CGM-data van één gebruiker met reactieve hypoglykemie (geen insuline, geen closed-loop).',
+    'Je bent een behulpzame assistent die vragen beantwoordt over de CGM-data van één gebruiker.',
     'Schrijf in het Nederlands, kort en concreet.',
     'GEEN medisch advies, geen voorschriften, geen alarm-/actiebeslissingen — de V1/V2-detector blijft de enige alarmbron.',
     'Gebruik de meegegeven datacontext (statistiek, episodes, observaties, feedback) om te antwoorden; verzin geen waarden. Weet je iets niet uit de data, zeg dat eerlijk.',
+    DATA_GROUNDING_RULE,
     'Je mag algemeen bekende, niet-persoonlijke context noemen (bv. dat eiwit/vet vóór koolhydraten de piek vertraagt) maar als observatie, niet als instructie.',
     // Safety guardrails (§17): wees minder stellig bij slechte datakwaliteit en verwijs door bij ernst.
     'Benoem onzekerheid expliciet. Als de datakwaliteit/dekking matig of slecht is, formuleer dan voorzichtig ("lijkt op", "mogelijk") en trek geen harde conclusies.',

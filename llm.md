@@ -1353,6 +1353,15 @@ Wat er daadwerkelijk in de code staat, met de bewuste deltas op 21.3/21.4:
   evidence-schema.
 - **Bestanden (delta op 21.6):** `package.json` (+smoke-script) en
   `scripts/run-ai-review-prompt-smoke.mjs` (nieuw). `getAiPatterns` ongewijzigd.
+- **Profielneutrale data-grounding (post-deploy fix).** De eerste live review op de
+  iMac toonde dat het model dips toeschreef aan **insuline/basaal** — terwijl de dataset
+  geen behandel-/medicatie-info bevat. Oorzaak: de review-`systemPrompt` benoemde het
+  gebruikersprofiel niet, dus het model viel terug op diabetes-aannames. Fix: één
+  gedeelde `DATA_GROUNDING_RULE` (verklaar alleen uit de data; veronderstel geen
+  insuline/medicatie/diabetestype/behandelregime die niet is meegegeven), toegepast op
+  review-, rapport- én chat-prompt. Bewust **profielneutraal** i.p.v. "geen insuline"
+  hard-coderen — de hard-coded `(geen insuline, geen closed-loop)` is daarom uit rapport/
+  chat verwijderd, zodat het voor elke gebruiker klopt (met of zonder diabetes).
 
 **Quota-tradeoff (§21 D) — bewust geaccepteerd.** Door W5 doet de review nu óók op
 rustige dagen een echte LLM-call (vroeger gratis overgeslagen). De min-interval-lock
