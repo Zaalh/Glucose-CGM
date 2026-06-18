@@ -1,9 +1,19 @@
-// §21.5 smoke: bouwt de observatie-review-prompt ZONDER LLM-call en zonder Mongo,
-// en controleert dat de §21-verrijking (AGP-stats, episodes, lost-in-the-middle-
-// volgorde, evidence-schema) daadwerkelijk in de payload zit. Faalt met exit 1 als
-// een invariant breekt, zodat regressies in de prompt-structuur opvallen.
-import { previewReviewPrompt } from './lib/ai-review-core.mjs'
+// §21.5 smoke: verifieert de §21-verrijking van de observatie-review ZONDER LLM-call en
+// ZONDER Mongo. Drie blokken:
+//   1) prompt-structuur (happy-path): AGP-stats, episodes, lost-in-the-middle-volgorde,
+//      evidence-schema zitten in de payload;
+//   2) prompt edge-cases: stats=null, lege/n=0 perHour, ruis-gate, token-strip, cap;
+//   3) skip-conditie (W5) via mock-db: wanneer draait de review en wanneer slaat 'm over,
+//      zonder ooit Ollama te raken.
+// Faalt met exit 1 als een invariant breekt, zodat regressies opvallen.
+import { previewReviewPrompt, runAiReview } from './lib/ai-review-core.mjs'
 
+const failures = []
+function check(cond, msg) {
+  if (!cond) failures.push(msg)
+}
+
+// --- Blok 1: prompt-structuur (happy-path) ---------------------------------------
 const stats = {
   window: { days: 14 },
   coveragePct: 92,
@@ -27,11 +37,6 @@ const { system, user } = previewReviewPrompt({ stats, episodes, snapshots: [], f
 const parsed = JSON.parse(user)
 const keys = Object.keys(parsed)
 
-const failures = []
-function check(cond, msg) {
-  if (!cond) failures.push(msg)
-}
-
 // Lost-in-the-middle: kernsamenvatting boven, kernopdracht als allerlaatste sleutel.
 check(keys[0] === 'agpSummary', `eerste sleutel moet agpSummary zijn, is ${keys[0]}`)
 check(keys[keys.length - 1] === 'task', `laatste sleutel moet task zijn, is ${keys[keys.length - 1]}`)
@@ -50,9 +55,94 @@ check(parsed.recentEpisodes && !('readings' in parsed.recentEpisodes[0]), 'recen
 check(system.includes('"evidence"'), 'system-prompt mist het evidence-schema')
 check(system.includes('agpSummary'), 'system-prompt verwijst niet naar agpSummary')
 
-if (failures.length) {
-  console.error('✗ ai-review-prompt-smoke: ' + failures.length + ' fout(en):')
-  for (const f of failures) console.error('  - ' + f)
-  process.exit(1)
+// --- Blok 2: prompt edge-cases ---------------------------------------------------
+// stats=null (aggregatie gefaald → degraded): geen crash, task blijft laatste sleutel.
+{
+  const u = JSON.parse(previewReviewPrompt({ snapshots: [], feedback: [], stats: null, episodes: [] }).user)
+  check(u.agpSummary === null, 'stats=null → agpSummary moet null zijn')
+  check(u.vulnerableWindow === null, 'stats=null → vulnerableWindow moet null zijn')
+  check(Object.keys(u).pop() === 'task', 'stats=null → task blijft laatste sleutel')
 }
-console.log('✓ ai-review-prompt-smoke: AGP-stats/episodes/evidence + lost-in-the-middle-volgorde aanwezig.')
+// Alle perHour n=0 → perHourLowPct leeg, geen kwetsbaar venster.
+{
+  const s = { window: { days: 14 }, coveragePct: 5, perHour: Array.from({ length: 24 }, (_, h) => ({ hour: h, lowPct: 0, n: 0 })) }
+  const a = JSON.parse(previewReviewPrompt({ stats: s, episodes: [] }).user)
+  check(a.agpSummary.perHourLowPct.length === 0, 'n=0 overal → perHourLowPct leeg')
+  check(a.vulnerableWindow === null, 'n=0 overal → geen kwetsbaar venster')
+}
+// Ruis-gate: een uur met hoge lowPct maar n<10 telt NIET als kwetsbaar venster.
+{
+  const s = { window: { days: 14 }, coveragePct: 50, perHour: Array.from({ length: 24 }, (_, h) => ({ hour: h, lowPct: h === 3 ? 99 : 1, n: h === 3 ? 5 : 40 })) }
+  const vw = JSON.parse(previewReviewPrompt({ stats: s, episodes: [] }).user).vulnerableWindow
+  check(!vw || vw.hour !== 3, 'ruis-gate: uur met n<10 mag geen kwetsbaar venster zijn')
+}
+// Token-budget: heatmap/perWeekday/gmi/per-uur-percentielen worden weggelaten.
+{
+  const s = {
+    window: { days: 14 }, coveragePct: 90, tbr: 4, veryLow: 1, tir: 85, tar: 10, mean: 6, cv: 25, lows: { count: 3 }, gmi: 6.1,
+    heatmap: Array.from({ length: 168 }, () => 1), perWeekday: Array.from({ length: 7 }, () => ({})),
+    perHour: Array.from({ length: 24 }, (_, h) => ({ hour: h, lowPct: 2, n: 40, mean: 6, tir: 85, p10: 4, p25: 5, p50: 6, p75: 7, p90: 8 })),
+  }
+  const a = JSON.parse(previewReviewPrompt({ stats: s, episodes: [] }).user).agpSummary
+  check(a.heatmap === undefined, 'heatmap moet weggelaten zijn')
+  check(a.perWeekday === undefined, 'perWeekday moet weggelaten zijn')
+  check(a.gmi === undefined, 'gmi moet weggelaten zijn')
+  check(a.perHourLowPct.every((p) => Object.keys(p).join(',') === 'hour,lowPct'), 'per-uur percentielen/mean/tir moeten gestript zijn')
+}
+// Episode-cap top-5 + ontbrekende velden → null (geen crash).
+{
+  const many = Array.from({ length: 12 }, (_, i) => ({ peakAt: `2026-06-${10 + i}T11:00:00Z`, readings: [1, 2, 3] }))
+  const u = JSON.parse(previewReviewPrompt({ stats: null, episodes: many }).user)
+  check(u.recentEpisodes.length === 5, '12 episodes → top-5')
+  check(u.recentEpisodes.every((e) => !('readings' in e)), 'episodes mogen geen ruwe readings bevatten')
+  check(u.recentEpisodes[0].peakMmol === null, 'ontbrekend episode-veld → null')
+}
+
+// --- Blok 3: skip-conditie (W5) via mock-db, zonder Ollama -----------------------
+// Een configured-uitziende router passeert de provider-check; een mock-db levert de
+// snapshots en gooit bij de feedback-query een sentinel, zodat "voorbij de skip
+// gekomen" detecteerbaar is ZONDER een echte LLM-call.
+const router = { providers: [{ name: 'mock' }] }
+function makeDb({ snaps = [] } = {}) {
+  const chain = (toArray) => ({ find: () => ({ sort: () => ({ limit: () => ({ toArray }) }) }) })
+  return {
+    collection(name) {
+      if (name === 'user_feedback') return chain(() => { throw new Error('REACHED_FEEDBACK') })
+      return chain(async () => snaps)
+    },
+  }
+}
+async function runState(args) {
+  try {
+    const r = await runAiReview(args)
+    return { skipped: !!r.skipped }
+  } catch (e) {
+    if (e.message === 'REACHED_FEEDBACK') return { proceeded: true }
+    throw e
+  }
+}
+
+async function skipTests() {
+  // A: niets te reviewen → skip
+  check((await runState({ db: makeDb(), aiRouter: router, stats: null, episodes: [] })).skipped === true, 'skip A: niets → skipped')
+  // B: bruikbare stats (coverage>=10) → review draait
+  check((await runState({ db: makeDb(), aiRouter: router, stats: { coveragePct: 50 }, episodes: [] })).proceeded === true, 'skip B: bruikbare stats → draait')
+  // C: episodes aanwezig → review draait
+  check((await runState({ db: makeDb(), aiRouter: router, stats: null, episodes: [{ nadirMmol: 3.3 }] })).proceeded === true, 'skip C: episodes → draait')
+  // D: coverage onder drempel (10) → skip
+  check((await runState({ db: makeDb(), aiRouter: router, stats: { coveragePct: 5 }, episodes: [] })).skipped === true, 'skip D: coverage<10 → skipped')
+  // E: snapshots aanwezig → draait (backward-compat met oude gedrag)
+  check((await runState({ db: makeDb({ snaps: [{ _id: 'a', risk: 'watch' }] }), aiRouter: router, stats: null, episodes: [] })).proceeded === true, 'skip E: snapshots → draait')
+  // F: geen provider → skipped vóór elke db-touch
+  check((await runAiReview({ db: makeDb(), aiRouter: { providers: [] }, stats: null, episodes: [] })).skipped === true, 'skip F: geen provider → skipped')
+}
+
+// --- Rapport ---------------------------------------------------------------------
+skipTests().then(() => {
+  if (failures.length) {
+    console.error('✗ ai-review-prompt-smoke: ' + failures.length + ' fout(en):')
+    for (const f of failures) console.error('  - ' + f)
+    process.exit(1)
+  }
+  console.log('✓ ai-review-prompt-smoke: prompt-structuur + edge-cases + skip-conditie (W5) OK.')
+})
