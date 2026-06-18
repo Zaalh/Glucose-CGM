@@ -932,6 +932,8 @@
       '#cgm-ai-panel .ai-item.open .ai-detail{display:block}',
       '#cgm-ai-panel .ai-d-row{margin-bottom:4px;line-height:1.35}',
       '#cgm-ai-panel .ai-d-row b{opacity:.8}',
+      '#cgm-ai-panel .ai-d-ev{margin:2px 0 0;padding-left:16px}',
+      '#cgm-ai-panel .ai-d-ev li{opacity:.85;line-height:1.3}',
       '#cgm-ai-panel .ai-d-meta{font-size:10px;opacity:.65;margin-top:4px}',
       '#cgm-ai-panel .ai-d-id{font-size:9px;opacity:.4;margin-top:3px;font-family:monospace}',
       '#cgm-ai-panel .ai-curve{margin-top:6px}',
@@ -2482,6 +2484,12 @@
     var rows = [];
     if (o.summary) rows.push('<div class="ai-d-row"><b>Samenvatting:</b> ' + escapeHtml(o.summary) + '</div>');
     if (o.hypothesis) rows.push('<div class="ai-d-row"><b>Hypothese:</b> ' + escapeHtml(o.hypothesis) + '</div>');
+    // Onderbouwing (§21 W4): welke metric/episode/feedback de claim staaft. Vrije tekst
+    // van het model, dus altijd via escapeHtml.
+    if (Array.isArray(o.evidence) && o.evidence.length) {
+      rows.push('<div class="ai-d-row"><b>Onderbouwing:</b><ul class="ai-d-ev">' +
+        o.evidence.map(function (e) { return '<li>' + escapeHtml(String(e)) + '</li>'; }).join('') + '</ul></div>');
+    }
     var meta = [];
     if (o.confidence) meta.push('zekerheid: ' + o.confidence);
     if (o.scope) meta.push('scope: ' + o.scope);

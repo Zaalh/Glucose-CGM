@@ -1341,7 +1341,10 @@ Wat er daadwerkelijk in de code staat, met de bewuste deltas op 21.3/21.4:
   verrijking is geen harde eis, mag de bestaande review niet breken).
 - **`task` is de allerlaatste sleutel (§21 F).** Voor maximale eind-aandacht
   (lost-in-the-middle) staat de kernopdracht ná `constraints`, niet ervoor.
-- **`evidence` gekapt op 6 items** in `cleanObservation`; schema-hint uitgebreid.
+- **`evidence` gekapt op 6 items** in `cleanObservation`; schema-hint uitgebreid. De
+  overlay toont het als "Onderbouwing"-lijst in de observatie-accordion (`aiObsDetailHtml`),
+  dus ook in de run-selector/History (alles loopt via `renderAiLatest`). Gratis: puur
+  uit de al-opgeslagen doc-velden, geen extra LLM-call.
 - **Skip-conditie** verzacht met `COVERAGE_MIN_PCT = 10` (review draait bij snapshots,
   episodes óf bruikbare stats).
 - **Smoke (§21.5):** `previewReviewPrompt` (geëxporteerd, geen LLM/Mongo) +
@@ -1350,6 +1353,16 @@ Wat er daadwerkelijk in de code staat, met de bewuste deltas op 21.3/21.4:
   evidence-schema.
 - **Bestanden (delta op 21.6):** `package.json` (+smoke-script) en
   `scripts/run-ai-review-prompt-smoke.mjs` (nieuw). `getAiPatterns` ongewijzigd.
+
+**Quota-tradeoff (§21 D) — bewust geaccepteerd.** Door W5 doet de review nu óók op
+rustige dagen een echte LLM-call (vroeger gratis overgeslagen). De min-interval-lock
+begrenst handmatige spam, maar als de periodieke loop (`AI_REVIEW_INTERVAL_MINUTES`)
+aanstaat, vuurt die nu vaker. Aanbeveling bij activeren van de loop: verrijkte review
+max ~1×/dag, of knop-getriggerd houden.
+
+**Open follow-ups:** overlay rendert `evidence` nog niet expliciet (additief/veilig);
+`getAiStats(14)` in `runAiReviewOnce` moet 14d blijven zolang `getAiPatterns` hard 14d
+gebruikt (venster-invariant, §21.7 punt 3).
 
 ---
 
