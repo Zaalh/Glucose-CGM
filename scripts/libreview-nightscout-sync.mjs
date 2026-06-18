@@ -1263,18 +1263,23 @@ async function runAiReviewOnce({ model } = {}) {
     // rapport/chat al krijgen (AGP-stats + episodes). Venster vast op 14d, consistent
     // met getAiPatterns (§21.7 invariant). De `reactive`-digest in stats vervangt de
     // losse episode-lijst grotendeels; episodes worden in de core tot top-5 beperkt.
-    const [stats, episodeResult] = await Promise.all([
-      getAiStats(14),
-      getAiEpisodes(20, 14),
-    ])
+    // Best-effort (§21 A): faalt een aggregatie, dan draait de review alsnog op de
+    // snapshots/feedback i.p.v. helemaal te stoppen — de verrijking is geen harde eis.
+    let stats = null
+    let episodes = []
+    try {
+      const [s, episodeResult] = await Promise.all([
+        getAiStats(14),
+        getAiEpisodes(20, 14),
+      ])
+      stats = s
+      episodes = (episodeResult && episodeResult.episodes) || []
+    } catch (err) {
+      console.error(`[libreview-sync] ai-review context-aggregatie faalde, val terug op snapshots: ${formatError(err)}`)
+    }
     client = new MongoClient(config.mongoUri)
     await client.connect()
-    const result = await runAiReview({
-      db: client.db(),
-      aiRouter,
-      stats,
-      episodes: (episodeResult && episodeResult.episodes) || [],
-    })
+    const result = await runAiReview({ db: client.db(), aiRouter, stats, episodes })
     aiReviewLastAt = Date.now()
     return result
   } finally {

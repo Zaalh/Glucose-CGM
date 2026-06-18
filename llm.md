@@ -1325,6 +1325,32 @@ Nadere inspectie van `summarizeReactiveEpisodes` (de bron van `stats.reactive`) 
 code geverifieerd; de open keuzes (episode-cap 5, perHour-reductie, reactive-as-digest)
 zijn beslist.
 
+### 21.9 As-built — afwijkingen t.o.v. het plan (geïmplementeerd & getest)
+
+Wat er daadwerkelijk in de code staat, met de bewuste deltas op 21.3/21.4:
+
+- **Geen `getAiPatterns()`-aanroep.** De structurele bron die patterns zou leveren
+  (`stats.trend`, `stats.reactive`, `stats.highToLowContext` + het afgeleide kwetsbare
+  uur) zit al in `getAiStats`. `runAiReviewOnce` roept dus alléén `getAiStats(14)` +
+  `getAiEpisodes(20, 14)` aan — dit lost de dubbele-stats-zorg (§21.7 punt 2) volledig
+  op en vermijdt het her-narreren van de al-genarreerde card-strings (§21.7 slot).
+  `runAiReview` kreeg gevolg daarvan **geen** `patterns`-parameter; `vulnerableWindow`
+  wordt deterministisch uit `stats.perHour` afgeleid in de core.
+- **Best-effort aggregatie (§21 A).** `runAiReviewOnce` vangt fouten uit
+  `getAiStats`/`getAiEpisodes` op en draait de review dan op snapshots/feedback (de
+  verrijking is geen harde eis, mag de bestaande review niet breken).
+- **`task` is de allerlaatste sleutel (§21 F).** Voor maximale eind-aandacht
+  (lost-in-the-middle) staat de kernopdracht ná `constraints`, niet ervoor.
+- **`evidence` gekapt op 6 items** in `cleanObservation`; schema-hint uitgebreid.
+- **Skip-conditie** verzacht met `COVERAGE_MIN_PCT = 10` (review draait bij snapshots,
+  episodes óf bruikbare stats).
+- **Smoke (§21.5):** `previewReviewPrompt` (geëxporteerd, geen LLM/Mongo) +
+  `scripts/run-ai-review-prompt-smoke.mjs` + `npm run ai:review-smoke`, opgenomen in
+  `npm run ai:check`. Bewaakt payload-volgorde, AGP-mapping, perHour-reductie en het
+  evidence-schema.
+- **Bestanden (delta op 21.6):** `package.json` (+smoke-script) en
+  `scripts/run-ai-review-prompt-smoke.mjs` (nieuw). `getAiPatterns` ongewijzigd.
+
 ---
 
 ## Bronnen

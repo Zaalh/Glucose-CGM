@@ -243,8 +243,6 @@ function userPrompt(snapshots, feedback, stats, episodes) {
       curveHypoCount: 'Aantal curve-top-matches met detector-uitkomst hypo of near_hypo; dit zijn geen door gebruiker bevestigde hypo’s.',
       curveHypoRatio: 'Gewogen fractie van curve-top-matches met detector-uitkomst hypo of near_hypo.',
     },
-    // ONDER — herhaalde kernopdracht.
-    task: 'Benoem week- en dagpatronen op basis van agpSummary, vulnerableWindow en recentEpisodes: wanneer clusteren dips, hoe gedragen piek→dal-episodes zich, en hoe sluit dit aan op recentUserFeedback. Gebruik UITSLUITEND de meegegeven cijfers; herbereken niets.',
     constraints: {
       noAlarmDecision: true,
       noThresholdChanges: true,
@@ -252,6 +250,9 @@ function userPrompt(snapshots, feedback, stats, episodes) {
       maxObservations: 5,
       maxQuestions: 3,
     },
+    // ONDER — herhaalde kernopdracht als allerlaatste sleutel (§21 F): de positie met
+    // de hoogste eind-aandacht (lost-in-the-middle), dus ná de constraints.
+    task: 'Benoem week- en dagpatronen op basis van agpSummary, vulnerableWindow en recentEpisodes: wanneer clusteren dips, hoe gedragen piek→dal-episodes zich, en hoe sluit dit aan op recentUserFeedback. Gebruik UITSLUITEND de meegegeven cijfers; herbereken niets.',
   })
 }
 
