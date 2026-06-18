@@ -5,6 +5,19 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ## [Unreleased]
 
+### Snelheidsvakjes
+
+- **Ontdubbeling van per-minuut-vakjes bij trage feed** (`nightscout-overlay/rate-overlay.js`,
+  `dedupeDisplayRows` in `computeRows`). Wanneer de feed traag binnenkomt (telefoon uit bereik,
+  ~5 min tussen metingen) snapten meerdere minuut-vensters binnen de ±75s-tolerantie op dezelfde
+  fysieke meting en toonden identieke vakjes (de "dubbele metingen"). Nu houdt elke echte meting
+  alleen het venster waarvan het label het dichtst bij de werkelijke leeftijd ligt; de overige
+  minuten worden eerlijk `geen exact punt`. Elk getoond cijfer is dus een unieke, gemeten waarde —
+  bewust niet geïnterpoleerd/geschat. Geldt voor beide standen (verhouding én momentaan). De
+  forecast/alarm zijn ongemoeid: die draaien op de rauwe `calculateRows` (`currentForecastRows`),
+  de dedupe zit alleen in de weergave-laag.
+
+
 > **Live gedeployed (2026-06-14)** op commit `2a3481f`. `episode_vectors` herbouwd
 > (566 vectoren mét curve), `hypo:backtest` + `hypo:tune` op verse data → **V2 is voor
 > het eerst AUTO-GEACTIVEERD**: de M6-gate slaagt op out-of-sample (test recall 1.0 vs

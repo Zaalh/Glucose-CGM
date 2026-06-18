@@ -145,8 +145,26 @@
   }
 
   function sortedReadings(entries) {
-    return entries
+    var byTime = new Map();
+    entries
       .filter(function (entry) { return Number.isFinite(Number(entry.sgv)) && Number.isFinite(readingTime(entry)); })
+      .forEach(function (entry) {
+        var time = readingTime(entry);
+        var existing = byTime.get(time);
+        if (!existing) {
+          byTime.set(time, entry);
+          return;
+        }
+
+        // LibreView/Nightscout can expose the current point twice: once in graphData
+        // and once as glucoseMeasurement. Keep one point per timestamp so rates do
+        // not get duplicated or shifted by repeated measurements.
+        var entryHasDirection = entry.direction && entry.direction !== 'NOT COMPUTABLE';
+        var existingHasDirection = existing.direction && existing.direction !== 'NOT COMPUTABLE';
+        if (entryHasDirection && !existingHasDirection) byTime.set(time, entry);
+      });
+
+    return Array.from(byTime.values())
       .sort(function (a, b) { return readingTime(b) - readingTime(a); });
   }
 
@@ -194,6 +212,7 @@
       return {
         label: minutesBack + 'm',
         actualMinutes: minutesActual,
+        _baseTime: readingTime(baseline),
         rateMgdl: rateMgdl,
         rateMmol: rateMmol,
         deltaMmol: mmol(deltaMgdl),
@@ -233,6 +252,7 @@
       return {
         label: minutesBack + 'm',
         actualMinutes: r.minutes,
+        _baseTime: readingTime(pointEntry),
         rateMgdl: rateMgdl,
         rateMmol: r.rate,
         deltaMmol: r.delta,
@@ -245,10 +265,33 @@
     });
   }
 
+  // Bij een trage feed (telefoon uit bereik) zijn er geen echte per-minuut-punten.
+  // Meerdere minuut-vensters snappen dan binnen de ±75s-tolerantie op dezelfde fysieke
+  // meting en tonen identieke vakjes. Hier houden we per echte meting alleen het venster
+  // waarvan het label het dichtst bij de werkelijke leeftijd ligt; de rest wordt eerlijk
+  // 'geen exact punt'. Zo is elk getoond cijfer een unieke, gemeten waarde — niets geschat.
+  function dedupeDisplayRows(rows) {
+    var bestByTime = new Map();
+    rows.forEach(function (row, idx) {
+      if (!row || row.missing || !Number.isFinite(row._baseTime)) return;
+      var targetMin = Number.parseInt(row.label, 10);
+      var diff = Math.abs(row.actualMinutes - targetMin);
+      var prev = bestByTime.get(row._baseTime);
+      if (!prev || diff < prev.diff) bestByTime.set(row._baseTime, { idx: idx, diff: diff });
+    });
+    var keep = new Set();
+    bestByTime.forEach(function (v) { keep.add(v.idx); });
+    return rows.map(function (row, idx) {
+      if (!row || row.missing || !Number.isFinite(row._baseTime) || keep.has(idx)) return row;
+      return { label: row.label, missing: true };
+    });
+  }
+
   function computeRows(readings, anchorEntry) {
-    return getCalcMode() === 'momentaan'
+    var rows = getCalcMode() === 'momentaan'
       ? calculateMomentRows(readings, anchorEntry)
       : calculateRows(readings, anchorEntry);
+    return dedupeDisplayRows(rows);
   }
 
   function getPrimaryRate(rows) {
