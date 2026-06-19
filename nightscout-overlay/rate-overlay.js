@@ -4596,7 +4596,11 @@
     var t = dotTime(dot);
     if (t !== null) {
       var byTime = nearestChartIndexForTime(t);
-      if (byTime >= 0) return byTime;
+      // Alleen koppelen als de stip binnen ons datavenster valt: de dichtstbijzijnde
+      // meting moet < 10 min weg liggen. Zo levert een klik op een oud punt in de
+      // onderste overzichtslijn (buiten onze ~1-dag fetch) géén misleidend anker op.
+      if (byTime >= 0 && Math.abs(readingTime(chartReadingsAsc[byTime]) - t) <= 600000) return byTime;
+      return -1;
     }
 
     // Fallback: positie-index (werkt alleen als de stippen 1:1 op onze metingen passen).
@@ -4849,19 +4853,22 @@
         : null;
       if (protectedUi) return;
 
-      var dot = event.target && event.target.closest ? event.target.closest('circle.entry-dot') : null;
+      // Elke chart-stip telt (boven- én onderste lijn). pointIndexFromDot koppelt op
+      // tijd en geeft -1 voor een punt buiten ons datavenster, dus zo'n klik valt
+      // automatisch in de "naast de lijn"-tak.
+      var dot = event.target && event.target.closest ? event.target.closest('circle') : null;
+      var index = dot ? pointIndexFromDot(dot) : -1;
+      var entry = index >= 0 ? chartReadingsAsc[index] : null;
       var tooltip = ensurePointTooltip();
-      if (!dot) {
-        // Klik naast de lijn: tooltip weg en (als je een punt bekeek) terug naar live.
+      if (!entry) {
+        // Geen bruikbaar datapunt onder de klik: tooltip weg en (als je een punt bekeek) terug naar live.
         tooltip.style.display = 'none';
         if (selectedReadingTime !== null) applyHistoryAnchor(null);
         return;
       }
-      // Klik op een bolletje: de vakjes springen meteen naar dat punt (geen modus nodig,
+      // Klik op een stip: de vakjes springen meteen naar dat punt (geen modus nodig,
       // geen herladen). Het alarm/forecast blijft live via refresh's basis-rijen.
-      var index = pointIndexFromDot(dot);
-      var entry = chartReadingsAsc[index];
-      if (entry) applyHistoryAnchor(readingTime(entry));
+      applyHistoryAnchor(readingTime(entry));
       showPointTooltip(dot, event);
     }, true);
 
