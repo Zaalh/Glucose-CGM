@@ -88,12 +88,15 @@ export function analyze(entries) {
     totalEntries: sorted.length,
     peaks: peaks.length,
     candidates: 0,
+    artifactRejected: 0, // afgekeurd als sensor-spike/compressie-low (1-sample dip / implausibele rate)
+    candidatesTrueHypo: 0, // bodem < 3.9 (klinisch Level-1) — de subset die er echt toe doet
     caught: 0,
     missed: 0,
     missedMildDrop: 0, // dal >= 4.5 en drop < 2 -> klassieke blinde vlek
     missedSlowOrLate: 0, // drop >= 2 maar niet snel / > 45 min
-    windowMissesLeadingDip: 0, // dip ligt voor piek-20m -> buiten opgeslagen curve
+    dipOutsideWindow: 0, // dip-tijd voor piek-20m -> buiten opgeslagen curve
   }
+  const dipMinutesBeforePeak = [] // verdeling: hoe ver voor de piek ligt de dip echt
 
   for (const peak of peaks) {
     const peakMmol = mmol(peak)
@@ -109,7 +112,17 @@ export function analyze(entries) {
 
     const isDipRiseDrop = dipDepth >= DIP_MMOL && riseToPeak >= RISE_MMOL && dropFromPeak >= DROP_MMOL
     if (!isDipRiseDrop) continue
+
+    // Artefact-gate: een echte fysiologische dip is door >=2 metingen bevestigd en de
+    // in-/uit-rate is plausibel. Een 1-sample dip of |rate| > 0.6 mmol/min is verdacht
+    // (sensor-spike / compressie-low) en hoort niet als dip->rise->drop te tellen.
+    const nearTrough = sorted.filter((e) => Math.abs(e.date - leadingTrough.date) <= 6 * MS_PER_MIN && mmol(e) <= troughMmol + 0.4)
+    const troughIdx = sorted.indexOf(leadingTrough)
+    const troughRate = troughIdx > 0 ? Math.abs(rateTo(sorted, troughIdx, 5) ?? 0) : 0
+    if (nearTrough.length < 2 || troughRate > 0.6) { out.artifactRejected += 1; continue }
+
     out.candidates += 1
+    if (nadirMmol < 3.9) out.candidatesTrueHypo += 1
 
     const minutesPeakToNadir = (nadir.date - peak.date) / MS_PER_MIN
     const nadirIdx = sorted.indexOf(nadir)
@@ -122,10 +135,17 @@ export function analyze(entries) {
       if (nadirMmol >= 4.5 && dropFromPeak < 2) out.missedMildDrop += 1
       else if (dropFromPeak >= 2) out.missedSlowOrLate += 1
     }
-    // window-blinde-vlek: ligt de leidende dip voor piek-20m? dan staat hij niet in
-    // de opgeslagen 24-punts curve, ook als het event wel werd vastgelegd.
-    if ((peak.date - leadingTrough.date) / MS_PER_MIN > WINDOW_PRE_MIN) out.windowMissesLeadingDip += 1
+    const dipBefore = (peak.date - leadingTrough.date) / MS_PER_MIN
+    dipMinutesBeforePeak.push(dipBefore)
+    if (dipBefore > WINDOW_PRE_MIN) out.dipOutsideWindow += 1
   }
+
+  // Mediaan hoe ver de dip voor de piek ligt — maakt de window-bevinding concreet
+  // (i.p.v. een triviale "stijging duurt >20m"). Bepaalt hoeveel het venster moet groeien.
+  dipMinutesBeforePeak.sort((a, b) => a - b)
+  out.dipMedianMinBeforePeak = dipMinutesBeforePeak.length
+    ? Math.round(dipMinutesBeforePeak[Math.floor(dipMinutesBeforePeak.length / 2)])
+    : null
 
   out.caughtPct = out.candidates ? Math.round((out.caught / out.candidates) * 100) : null
   out.missedPct = out.candidates ? Math.round((out.missed / out.candidates) * 100) : null
@@ -166,12 +186,11 @@ async function main() {
     const res = analyze(entries)
     console.log(JSON.stringify(res, null, 2))
     console.log('\n--- duiding ---')
-    console.log(`dip->rise->drop kandidaten in ruwe data: ${res.candidates}`)
-    console.log(`door selector gevangen (kan geleerd worden): ${res.caught} (${res.caughtPct}%)`)
-    console.log(`GEMIST (blinde vlek, wordt nooit geleerd):  ${res.missed} (${res.missedPct}%)`)
-    console.log(`  - milde daling (dal>=4.5 & drop<2):       ${res.missedMildDrop}`)
-    console.log(`  - traag/laat (drop>=2 maar niet snel):    ${res.missedSlowOrLate}`)
-    console.log(`window-blinde-vlek (dip voor piek-20m, niet in opgeslagen curve): ${res.windowMissesLeadingDip}`)
+    console.log(`kandidaten (na artefact-gate): ${res.candidates}  (afgekeurd als artefact: ${res.artifactRejected})`)
+    console.log(`  waarvan ECHT hypo (bodem<3.9): ${res.candidatesTrueHypo}`)
+    console.log(`selector-blinde vlek: gemist ${res.missed}/${res.candidates} (${res.missedPct}%) — milde daling ${res.missedMildDrop}, traag/laat ${res.missedSlowOrLate}`)
+    console.log(`window: dip ligt mediaan ${res.dipMedianMinBeforePeak} min voor de piek; ${res.dipOutsideWindow} buiten [piek-20m].`)
+    console.log('  NB: een dip >20m voor de piek is deels verwacht (maaltijdstijging duurt >20m); de mediaan zegt hoeveel het venster moet groeien.')
   } finally {
     await client.close()
   }

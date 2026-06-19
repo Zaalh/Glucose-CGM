@@ -16,10 +16,16 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   selectie-biased. Metriek is base-rate-gecalibreerd (lift/onderscheid i.p.v. absolute ratio).
   Plan + open punten in `dynamische-patroonherkenning-plan.md`.
 - **Blinde-vlek-meting** (`scripts/measure-dip-rise-drop-blindspot.mjs`). Alleen-lezen diagnose op
-  de ruwe entries: van 846 dip→rise→drop-vormen wordt 36% nooit geleerd (selector-poort mist milde
-  reactieve dalingen), en 92% heeft de leidende dip vóór piek−20m → buiten het opgeslagen curve-
-  venster. Gevolg: de dip zit structureel niet in de vector; fix zit upstream (curve-venster +
-  event-selector verbreden), niet in de matcher.
+  de ruwe entries, met artefact-gate (verwerpt 1-sample dips / compressie-lows). 318 echte
+  kandidaten (529 artefact-afgekeurd), waarvan 75 echte hypo (<3.9); selector mist 41%; dip ligt
+  mediaan 36 min vóór de piek (buiten [piek−20m]).
+- **Correctie na senior/medische review.** De eerste validatie-run leek signaal te tonen
+  (separation +0.13). Na vijf fixes — episode-dedupe (808→275, ~65% duplicaten), klinische drempel
+  <3.9 i.p.v. <4.5 (base-rate 0.90→0.40), outcome-lekkage verwijderd, gelijke populaties voor
+  recall/vals-alarm, artefact-gate — **valt het signaal weg**: vroege prefix separation 0.01
+  (geen signaal bovenop base-rate). Curve-vorm-similarity normaliseert het niveau weg, terwijl
+  niveau de sterkste hypo-voorspeller is. Conclusie: **niet op vorm-similarity bouwen**; vroege
+  waarschuwing hoort op niveau + daalsnelheid + context te steunen. Details in het plan-md.
 
 ### Grafiek-interactie
 

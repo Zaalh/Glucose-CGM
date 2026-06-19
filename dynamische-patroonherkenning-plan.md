@@ -45,25 +45,31 @@ beslist op **vaste drempels** en herkent een gemiddelde maaltijd, niet specifiek
 > al (tonen + forecast-correctie). Het probleem is niet "niet bedraad" maar "te laat
 > door de gate" + "badge-risk ongevoed".
 
-## Meetresultaten Fase 0 (echte data, N=1, 808 episode_vectors / 31k entries)
+## Meetresultaten Fase 0 (echte data, N=1) — GECORRIGEERD na senior/medische review
 
-**Vorm draagt signaal — maar niet de dip.** Base-rate-gecalibreerde leave-one-out
-(`scripts/validate-dip-rise-drop.mjs`): buurt-ratio hypo-doelen 0.93 vs stabiele 0.80,
-onderscheid **+0.13** (base-rate 0.90); vroege prefix even goed (recall 0.69, vals-alarm 0.13,
-weinig no-neighbours) → vroege waarschuwing lijkt haalbaar. Caveat: corpus is selectie-biased,
-dus de vals-alarm-kost is optimistisch tot meting op representatieve data.
+> Een eerste, niet-gecorrigeerde run leek signaal te tonen (separation +0.13). Na vijf
+> methodologische fixes (episode-dedupe, klinische drempel <3.9 i.p.v. <4.5, outcome-lekkage
+> verwijderd, gelijke populaties, artefact-gate) **valt dat signaal weg**. De eerste conclusie
+> was een artefact van duplicaten + losse drempel + lekkage.
 
-**Blinde-vlek-meting** (`scripts/measure-dip-rise-drop-blindspot.mjs`) — 846 dip→rise→drop-
-kandidaten in de ruwe data:
+**Vorm draagt GEEN aantoonbaar signaal.** Schoon gemeten (`scripts/validate-dip-rise-drop.mjs`):
+- Dedupe: 808 → **275** episodes (~65% waren bijna-duplicaten → leave-one-out lekte).
+- Base-rate bij <3.9: **0.40** (was 0.90 met <4.5).
+- **Vroege prefix (eerlijk, vóór de daling): separation 0.01, lift 1.05 → GEEN signaal bovenop
+  base-rate.** De volledige-curve separation 0.10 telt niet (outcome-lekkage).
+- Oorzaak: de curve-similarity normaliseert het **niveau** weg, terwijl absoluut niveau de
+  sterkste hypo-voorspeller is. Vorm-alleen gooit de meest voorspellende info weg.
 
-- **64% gevangen** door de selector (leerbaar), **36% gemist** (nooit geleerd) — vrijwel
-  allemaal *milde* reactieve dalingen (bodem ≥4.5 & val <2 mmol): juist de vroege/subtiele gevallen.
-- **92% heeft de leidende dip vóór piek−20m**, dus buiten het opgeslagen 24-punts curve-venster.
-  → De dip zit structureel NIET in de vector. Het Fase 0-signaal kwam uit stijging+daling, niet
-  uit de dip. De dip-voorspellende waarde is dus nog onbewezen, want nog nooit vastgelegd.
+**Blinde-vlek-meting** (`scripts/measure-dip-rise-drop-blindspot.mjs`), na artefact-gate:
+- **529 van 846 kandidaten waren artefacten** (1-sample dip / compressie-low). 318 echt, waarvan
+  maar **75 echte hypo (<3.9)**.
+- Selector-blinde vlek: 41% gemist (milde dalingen + traag/laat) — reëel maar kleiner corpus.
+- Window: dip ligt mediaan **36 min** vóór de piek → [piek−20m] mist hem echt.
 
-**Prioriteit gedraaid:** de fix zit upstream (window + selector), niet in de matcher. Beide
-universeel/profielneutraal.
+**Conclusie (gewijzigd): NIET op curve-vorm-similarity bouwen.** Er is geen aangetoond
+vorm-signaal om te vangen. Vroege waarschuwing, indien nagestreefd, hoort op **niveau +
+daalsnelheid + context (tijd-van-dag/maaltijd)** te steunen, niet op genormaliseerde vorm.
+N=1, één methode — het bewijst niet dat het patroon zinloos is, wel dat deze aanpak niet werkt.
 
 ## Aanpak — validatie eerst, dan live bedraden
 

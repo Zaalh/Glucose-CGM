@@ -65,8 +65,44 @@ export function classifyShape(curve) {
   }
 }
 
-function isHypoOutcome(outcome) {
-  return outcome === 'hypo' || outcome === 'near_hypo'
+// Klinische hypo-drempel. Level-1 hypoglykemie = 3.9 mmol/L; de opgeslagen
+// `outcome`-labels gebruiken <4.5 ('near_hypo') wat klinisch nog euglykemisch is en
+// de base-rate kunstmatig opblaast. We her-labelen daarom uit featureVector.minMmolAfter60
+// tegen HYPO_MMOL (default 3.9) zodat doel-label, buren-stem en base-rate consistent zijn.
+const HYPO_MMOL = num('HYPO_MMOL', 3.9)
+
+function outcomeIsHypo(v) {
+  const nadir = v?.featureVector?.minMmolAfter60
+  if (Number.isFinite(nadir)) return nadir < HYPO_MMOL
+  // Fallback als de feature ontbreekt: alleen de strenge 'hypo'-label (<4.0), niet near_hypo.
+  return v?.outcome === 'hypo'
+}
+
+// Bijna-duplicaten van dezelfde fysiologische episode (zelfde piek, ander event-type of
+// naburige piek) ondermijnen leave-one-out: de naaste buur is dan je eigen kopie. Dedupe
+// op piek-tijd-cluster (1 representant per 30-min bucket, ergste nadir wint).
+function dedupeEpisodes(vectors, windowMin = 30) {
+  const withTime = vectors
+    .map((v) => ({ v, ms: Date.parse(v?.peakDate) }))
+    .sort((a, b) => (Number.isFinite(a.ms) && Number.isFinite(b.ms) ? a.ms - b.ms : 0))
+  const kept = []
+  let lastMs = -Infinity
+  let lastNadir = Infinity
+  for (const { v, ms } of withTime) {
+    const nadir = v?.featureVector?.minMmolAfter60
+    if (Number.isFinite(ms) && ms - lastMs < windowMin * 60_000) {
+      // zelfde cluster: houd de representant met de laagste nadir (meest informatief)
+      if (Number.isFinite(nadir) && nadir < lastNadir) {
+        kept[kept.length - 1] = v
+        lastNadir = nadir
+      }
+      continue
+    }
+    kept.push(v)
+    lastMs = Number.isFinite(ms) ? ms : lastMs
+    lastNadir = Number.isFinite(nadir) ? nadir : Infinity
+  }
+  return kept
 }
 
 // Zero-mean unit-norm (zelfde als episode-similarity.normalize, hier lokaal zodat
@@ -91,27 +127,25 @@ const HYPO_RATIO_GATE = num('HYPO_RATIO_GATE', 0.5)
 const MIN_RELIABLE_EPISODES = num('MIN_RELIABLE_EPISODES', 8)
 
 function evaluate(vectors, { prefixPoints = null, label = 'volledige curve' } = {}) {
-  const usable = vectors.filter((v) => Array.isArray(v.vector) && v.vector.length >= 8)
-  // Base-rate van (near-)hypo in het corpus. Cruciaal: episode_vectors zijn
-  // gecureerde events, dus de base-rate is hoog. Een absolute ratio-drempel meet dan
-  // niets — we meten ONDERSCHEID t.o.v. deze base-rate (lift).
-  const baseRate = usable.length ? usable.filter((v) => isHypoOutcome(v.outcome)).length / usable.length : 0
+  // Dedupe fysiologische bijna-duplicaten + her-label outcome op de klinische drempel,
+  // zodat doel-label, buren-stem en base-rate allemaal dezelfde hypo-definitie gebruiken.
+  const usable = dedupeEpisodes(vectors.filter((v) => Array.isArray(v.vector) && v.vector.length >= 8))
+    .map((v) => ({ ...v, outcome: outcomeIsHypo(v) ? 'hypo' : 'stable' }))
+  const baseRate = usable.length ? usable.filter((v) => v.outcome === 'hypo').length / usable.length : 0
 
-  let dipCount = 0
-  let dipHypo = 0
-  // Buurt-hypo-ratio per doel, gesplitst op werkelijke uitkomst. Als de vorm-match
-  // onderscheidt, krijgen hypo-doelen een HOGERE buurt-ratio dan stabiele doelen.
+  let dipCount = 0 // beschrijvend: hoeveel doelen dip-vormig zijn (dip BINNEN venster)
+  // Buurt-hypo-ratio per doel, gesplitst op werkelijke uitkomst (corpus-breed, GELIJKE
+  // populatie voor recall en vals-alarm). Als de vorm onderscheidt, krijgen hypo-doelen
+  // een hogere buurt-ratio dan stabiele.
   const hypoTargetRatios = []
   const stableTargetRatios = []
   let noNeighbours = 0
-  // Gecalibreerde gate = buurt-ratio boven de base-rate (relatief, niet absoluut 0.5).
-  const stats = { flaggedHypo: 0, missedHypo: 0, falseAlarm: 0, stableSeen: 0 }
+  const stats = { flaggedHypo: 0, missedHypo: 0, falseAlarm: 0, hypoSeen: 0, stableSeen: 0 }
 
   for (const target of usable) {
     const shape = classifyShape(target.vector)
-    const isDip = shape && shape.isDipRiseDrop
-    if (isDip) dipCount += 1
-    if (isDip && isHypoOutcome(target.outcome)) dipHypo += 1
+    if (shape && shape.isDipRiseDrop) dipCount += 1
+    const isHypo = target.outcome === 'hypo'
 
     const others = usable.filter((v) => v !== target)
     let live = target.vector
@@ -120,16 +154,19 @@ function evaluate(vectors, { prefixPoints = null, label = 'volledige curve' } = 
 
     if (!match || match.count < 3) {
       noNeighbours += 1
-      if (isDip && isHypoOutcome(target.outcome)) stats.missedHypo += 1
+      if (isHypo) { stats.hypoSeen += 1; stats.missedHypo += 1 }
+      else stats.stableSeen += 1
       continue
     }
     const ratio = match.hypoRatio
-    // Relatieve, base-rate-gecalibreerde gate i.p.v. absolute 0.5.
-    const wouldFlag = ratio >= baseRate + (1 - baseRate) * (HYPO_RATIO_GATE)
+    // Base-rate-gecalibreerde gate i.p.v. absolute 0.5.
+    const wouldFlag = ratio >= baseRate + (1 - baseRate) * HYPO_RATIO_GATE
 
-    if (isHypoOutcome(target.outcome)) {
+    if (isHypo) {
       hypoTargetRatios.push(ratio)
-      if (isDip) { if (wouldFlag) stats.flaggedHypo += 1; else stats.missedHypo += 1 }
+      stats.hypoSeen += 1
+      if (wouldFlag) stats.flaggedHypo += 1
+      else stats.missedHypo += 1
     } else {
       stableTargetRatios.push(ratio)
       stats.stableSeen += 1
@@ -140,21 +177,20 @@ function evaluate(vectors, { prefixPoints = null, label = 'volledige curve' } = 
   const mean = (xs) => (xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : null)
   const meanRatioHypo = mean(hypoTargetRatios)
   const meanRatioStable = mean(stableTargetRatios)
-  // Onderscheid: hoeveel hoger is de buurt-ratio voor hypo-doelen dan voor stabiele.
-  // > 0 = de vorm draagt signaal; ~0 = de vorm zegt niets bovenop de base-rate.
   const separation = meanRatioHypo !== null && meanRatioStable !== null ? meanRatioHypo - meanRatioStable : null
   const liftHypo = meanRatioHypo !== null && baseRate > 0 ? meanRatioHypo / baseRate : null
-  const recall = dipHypo > 0 ? stats.flaggedHypo / dipHypo : null
+  // recall en vals-alarm op DEZELFDE populatie (corpus-breed: alle hypo vs alle stabiel).
+  const recall = stats.hypoSeen > 0 ? stats.flaggedHypo / stats.hypoSeen : null
   const falseAlarmRate = stats.stableSeen > 0 ? stats.falseAlarm / stats.stableSeen : null
-  const reliablePerPerson = dipHypo >= MIN_RELIABLE_EPISODES
+  const reliablePerPerson = stats.hypoSeen >= MIN_RELIABLE_EPISODES
   const r2 = (x) => (x === null ? null : Math.round(x * 100) / 100)
   return {
     label,
     prefixPoints,
-    totalUsable: usable.length,
+    hypoThresholdMmol: HYPO_MMOL,
+    totalEpisodesDeduped: usable.length,
     baseRate: r2(baseRate),
-    dipRiseDropEpisodes: dipCount,
-    dipRiseDropHypo: dipHypo,
+    dipInWindowEpisodes: dipCount,
     reliablePerPerson,
     minReliableEpisodes: MIN_RELIABLE_EPISODES,
     meanNeighbourRatioHypo: r2(meanRatioHypo),
@@ -187,8 +223,17 @@ function syntheticVectors() {
     return c.map((v) => v / norm)
   }
   const out = []
-  for (let i = 0; i < 8; i += 1) out.push({ vector: curve({ dip: 1.2, drop: 5.5 }), outcome: 'hypo' })
-  for (let i = 0; i < 4; i += 1) out.push({ vector: curve({ dip: 1.1, drop: 2.0 }), outcome: 'stable' })
+  // Pieken >30m uit elkaar (anders dedupet de cluster ze samen) + featureVector.minMmolAfter60
+  // consistent met de bedoelde uitkomst (hypo <3.9, stable >=3.9).
+  let t = Date.UTC(2026, 0, 1, 0, 0, 0)
+  for (let i = 0; i < 10; i += 1) {
+    out.push({ vector: curve({ dip: 1.2, drop: 5.5 }), peakDate: new Date(t).toISOString(), featureVector: { minMmolAfter60: 3.4 } })
+    t += 45 * 60_000
+  }
+  for (let i = 0; i < 6; i += 1) {
+    out.push({ vector: curve({ dip: 1.1, drop: 2.0 }), peakDate: new Date(t).toISOString(), featureVector: { minMmolAfter60: 4.8 } })
+    t += 45 * 60_000
+  }
   return out
 }
 
@@ -197,7 +242,8 @@ async function main() {
     const vectors = syntheticVectors()
     const full = evaluate(vectors, { label: 'self-test volledige curve' })
     console.log(JSON.stringify(full, null, 2))
-    const ok = full.dipRiseDropEpisodes >= 8 && full.recall !== null && full.totalUsable === 12
+    const ok = full.totalEpisodesDeduped === 16 && full.baseRate > 0.5 && full.baseRate < 0.7 &&
+      full.separation !== null && full.separation > 0
     console.log(`\n${ok ? 'SELF-TEST OK' : 'SELF-TEST FAIL'}`)
     process.exit(ok ? 0 : 1)
   }
@@ -215,30 +261,24 @@ async function main() {
 
     console.log(`episode_vectors geladen: ${vectors.length}\n`)
 
-    // #3 steekproef + #1 recall/vals-alarm op de volledige curve
-    const full = evaluate(vectors, { label: 'volledige curve (piek+daling bekend)' })
-    // vroege-waarschuwing: alleen de aanloop t/m ~piek (eerste 10 punten = ~piek-20..+5m)
+    // REFERENTIE — bevat outcome-lekkage (de curve omvat de daling die de outcome bepaalt).
+    const full = evaluate(vectors, { label: 'volledige curve (REFERENTIE, outcome-lekkage)' })
+    // EERLIJK bewijs — alleen de aanloop t/m ~piek (eerste 10 punten), vóór de daling.
     const early = evaluate(vectors, { prefixPoints: 10, label: 'vroege prefix (10 pt, ~t/m piek)' })
 
     console.log(JSON.stringify({ full, early }, null, 2))
 
     console.log('\n--- duiding ---')
-    console.log(`dip->rise->drop episodes: ${full.dipRiseDropEpisodes} (waarvan ${full.dipRiseDropHypo} (near-)hypo)`)
-    if (full.dipRiseDropEpisodes < 3) {
-      console.log('LET OP: < 3 zulke episodes — vorm-match kan principieel niet vuren (risico #3). Stop hier.')
+    console.log(`hypo-drempel: <${full.hypoThresholdMmol} mmol/L (klinisch Level-1) | episodes na dedupe: ${full.totalEpisodesDeduped} | base-rate hypo: ${full.baseRate}`)
+    if (!early.reliablePerPerson) {
+      console.log(`COLD-START: < ${early.minReliableEpisodes} echte hypo-episodes — per-persoon signaal niet betrouwbaar; live hoort terug te vallen op de universele regel-detector.`)
     }
-    if (!full.reliablePerPerson) {
-      console.log(`COLD-START: < ${full.minReliableEpisodes} (near-)hypo dip-episodes — per-persoon signaal nog niet betrouwbaar.`)
-      console.log('  Live hoort hier terug te vallen op de universele regel-detector (werkt zo ook voor nieuwe gebruikers).')
-    }
-    console.log(`base-rate (near-)hypo in corpus: ${full.baseRate}  <- absolute ratio meet hierboven niets`)
     console.log('ONDERSCHEID = buurt-ratio hypo-doelen minus stabiele-doelen (>0 = vorm draagt signaal):')
-    console.log(`  volledige curve: hypo=${full.meanNeighbourRatioHypo} stable=${full.meanNeighbourRatioStable} -> separation=${full.separation} (lift=${full.liftHypo})`)
-    console.log(`  vroege prefix:   hypo=${early.meanNeighbourRatioHypo} stable=${early.meanNeighbourRatioStable} -> separation=${early.separation} (lift=${early.liftHypo})`)
+    console.log(`  volledige curve (REFERENTIE/lekkage): separation=${full.separation} (negeren als bewijs)`)
+    console.log(`  vroege prefix (EERLIJK):              separation=${early.separation} (lift=${early.liftHypo})`)
     const verdict = (s) => (s === null ? 'onbepaald' : s >= 0.1 ? 'BRUIKBAAR signaal' : s >= 0.03 ? 'zwak signaal' : 'GEEN signaal bovenop base-rate')
-    console.log(`oordeel volledige curve: ${verdict(full.separation)}`)
-    console.log(`oordeel vroege prefix:   ${verdict(early.separation)}`)
-    console.log(`(base-rate-gecalibreerde gate) volledige: recall=${full.recall} vals-alarm=${full.falseAlarmRate}`)
+    console.log(`OORDEEL (alleen prefix telt): ${verdict(early.separation)}`)
+    console.log(`  prefix recall=${early.recall} vals-alarm=${early.falseAlarmRate} (zelfde populatie; vals-alarm optimistisch door selectie-bias)`)
   } finally {
     await client.close()
   }
