@@ -1312,9 +1312,9 @@
     button.id = 'cgm-rate-view-toggle';
     button.type = 'button';
     button.addEventListener('click', function () {
-      var next = getViewMode() === 'live' ? 'history' : 'live';
-      localStorage.setItem(RATE_VIEW_KEY, next);
-      if (next === 'live') selectedReadingTime = null;
+      // Eén actie: terug naar de nieuwste meting (zoals de pagina herladen).
+      if (selectedReadingTime === null) return;
+      selectedReadingTime = null;
       refresh();
     });
     document.body.appendChild(button);
@@ -1331,10 +1331,7 @@
     button.addEventListener('click', function () {
       var next = CALC_ORDER[(CALC_ORDER.indexOf(getCalcMode()) + 1) % CALC_ORDER.length];
       localStorage.setItem(RATE_CALC_KEY, next);
-      // A calc-mode tap is meant to compare the current live rate cards.
-      // If history had an old chart point selected, the hypo block kept
-      // updating live while the cards appeared frozen on that old point.
-      localStorage.setItem(RATE_VIEW_KEY, 'live');
+      // Een calc-wissel vergelijkt de live rate-vakjes: zet een geankerd inspectiepunt terug naar live.
       selectedReadingTime = null;
       scheduleRefresh(0, true);
     });
@@ -1383,13 +1380,15 @@
     refresh();
   }
 
-  // Lichte re-anchor zonder data opnieuw te laden: zet de vakjes op een historisch punt.
-  // Gebruikt voor scrubben (muis over de grafiek) in history-modus.
+  // Lichte re-anchor zonder data opnieuw te laden: zet alleen de rate-vakjes op een
+  // gekozen punt (klik of scrub over de grafiek). Het hypo-alarm, de forecast en de
+  // grote glucosewaarde blijven bewust live — inspecteren mag de veiligheid niet bevriezen.
   function applyHistoryAnchor(anchorTime) {
     if (!currentReadings.length) return;
     selectedReadingTime = anchorTime;
-    var anchorEntry = currentReadings.find(function (entry) { return readingTime(entry) === anchorTime; }) || null;
-    currentForecastRows = forecastBasisRows(currentReadings, anchorEntry);
+    var anchorEntry = anchorTime === null
+      ? null
+      : (currentReadings.find(function (entry) { return readingTime(entry) === anchorTime; }) || null);
     render(computeRows(currentReadings, anchorEntry));
   }
 
@@ -2234,9 +2233,10 @@
     return mode === 'classic' || mode === 'all' ? mode : 'compact';
   }
 
+  // Geen aparte opgeslagen modus meer: de vakjes zijn 'live' tenzij je een punt in de
+  // grafiek hebt aangeklikt (dan staat selectedReadingTime gezet). Herladen = altijd live.
   function getViewMode() {
-    var mode = localStorage.getItem(RATE_VIEW_KEY);
-    return mode === 'history' ? 'history' : 'live';
+    return selectedReadingTime === null ? 'live' : 'history';
   }
 
   function visibleRows(rows) {
@@ -2267,11 +2267,12 @@
     var mode = getMode();
     button.textContent = mode === 'compact' ? 'compact' : mode === 'classic' ? 'klassiek' : mode === 'all' ? 'alles' : 'uit';
     button.title = 'Vakjes-weergave: ' + button.textContent + '. compact = 8 vensters · klassiek = 13 · alles = alle minuten · uit = verbergen. Klik om te wisselen.';
-    var view = getViewMode();
-    viewButton.textContent = view === 'history' ? 'history' : 'live';
-    viewButton.title = view === 'history'
-      ? 'HISTORY — de vakjes staan op een gekozen punt in de grafiek (scrub met de muis). Klik → terug naar live.'
-      : 'LIVE — de vakjes volgen de nieuwste meting. Klik → history (terugkijken in de grafiek).';
+    var anchored = selectedReadingTime !== null;
+    viewButton.textContent = anchored ? '↩ live · ' + formatClock(selectedReadingTime) : 'live';
+    viewButton.style.opacity = anchored ? '1' : '0.55';
+    viewButton.title = anchored
+      ? 'Je bekijkt een eerder punt in de grafiek (' + formatClock(selectedReadingTime) + '). Klik → terug naar de nieuwste meting.'
+      : 'De vakjes volgen de nieuwste meting. Klik op een bolletje in de grafiek om een eerder punt te bekijken; het alarm blijft altijd live.';
     var calcButton = ensureCalcToggle();
     var calc = getCalcMode();
     calcButton.textContent = calcLabel(calc);
@@ -2279,30 +2280,11 @@
     calcButton.title = (CALC_HELP[calc] || '') + '\nKlik → ' + calcLabel(nextCalc) + '.';
   }
 
+  // De oude ← ouder / nieuwer → blader-nav is vervangen door bolletjes aanklikken +
+  // de live-knop. We houden 'm permanent verborgen (geen dubbele bedienelementen).
   function updateHistoryNav() {
-    var nav = ensureHistoryNav();
-    var view = getViewMode();
-    if (view !== 'history') {
-      nav.style.display = 'none';
-      return;
-    }
-
-    nav.style.display = 'flex';
-    var current = currentReadings.find(function (entry) {
-      return readingTime(entry) === selectedReadingTime;
-    }) || null;
-    if (!current && currentReadings.length) {
-      current = currentReadings[0];
-      selectedReadingTime = readingTime(current);
-    }
-
-    var idx = current ? currentReadings.findIndex(function (entry) { return readingTime(entry) === readingTime(current); }) : -1;
-    var prevBtn = nav.querySelector('button[data-dir="1"]');
-    var nextBtn = nav.querySelector('button[data-dir="-1"]');
-    var timeLabel = nav.querySelector('.hist-time');
-    if (timeLabel) timeLabel.textContent = current ? formatClock(readingTime(current)) : '--:--';
-    if (prevBtn) prevBtn.disabled = idx < 0 || idx >= currentReadings.length - 1;
-    if (nextBtn) nextBtn.disabled = idx <= 0;
+    var nav = document.getElementById('cgm-rate-history-nav');
+    if (nav) nav.style.display = 'none';
   }
 
   function escapeHtml(s) {
@@ -4877,22 +4859,22 @@
       var dot = event.target && event.target.closest ? event.target.closest('circle.entry-dot') : null;
       var tooltip = ensurePointTooltip();
       if (!dot) {
+        // Klik naast de lijn: tooltip weg en (als je een punt bekeek) terug naar live.
         tooltip.style.display = 'none';
-        if (getViewMode() === 'history') selectedReadingTime = null;
-        refresh();
+        if (selectedReadingTime !== null) applyHistoryAnchor(null);
         return;
       }
+      // Klik op een bolletje: de vakjes springen meteen naar dat punt (geen modus nodig,
+      // geen herladen). Het alarm/forecast blijft live via refresh's basis-rijen.
       var index = pointIndexFromDot(dot);
       var entry = chartReadingsAsc[index];
-      if (getViewMode() === 'history') {
-        selectedReadingTime = entry ? readingTime(entry) : null;
-      }
-      refresh();
+      if (entry) applyHistoryAnchor(readingTime(entry));
       showPointTooltip(dot, event);
     }, true);
 
-    // History-scrub: in history-modus volgen de vakjes het meetpunt onder de muis.
-    // Vegen over de grafiek i.p.v. stap-voor-stap bladeren. rAF-throttle tegen jank.
+    // Scrub: pas nádat je een bolletje hebt aangeklikt (= geankerd) volgen de vakjes het
+    // meetpunt onder de muis, zodat je kunt fijnvegen. Live blijft de muis genegeerd.
+    // rAF-throttle tegen jank.
     var scrubRaf = null;
     var pendingScrubTime = null;
     document.addEventListener('mousemove', function (event) {
@@ -5009,28 +4991,25 @@
         chartReadingsAsc = readings.slice().reverse();
         calibrateFromHistory(readings);
         calibrateMealFromHistory(readings);
+        // anchorEntry stuurt ALLEEN de rate-vakjes (inspecteren van een eerder punt).
         var anchorEntry = null;
-        if (getViewMode() === 'history' && selectedReadingTime !== null) {
-          // If history mode was still following the previously-latest point,
-          // keep it live instead of freezing the rate cards on an old minute.
+        if (selectedReadingTime !== null) {
+          // Volgde je nog het nieuwste punt? Dan meeschuiven met de nieuwe meting i.p.v.
+          // op een oude minuut blijven hangen (voelt dan als live).
           if (previousLatestTime !== null && selectedReadingTime === previousLatestTime) {
             selectedReadingTime = readingTime(readings[0]);
           }
           anchorEntry = readings.find(function (entry) {
             return readingTime(entry) === selectedReadingTime;
           }) || null;
-          if (!anchorEntry) selectedReadingTime = null;
-        }
-        if (getViewMode() === 'history' && selectedReadingTime === null && readings.length) {
-          selectedReadingTime = readingTime(readings[0]);
-          anchorEntry = readings[0];
+          if (!anchorEntry) selectedReadingTime = null; // gekozen punt verdwenen → live
         }
         var rows = computeRows(readings, anchorEntry);
-        // Forecast/risk altijd uit de basis-rijen (regressie als REG_FEEDS_ALARMS aan),
-        // los van de weergave-toggle.
-        currentForecastRows = forecastBasisRows(readings, anchorEntry);
+        // Forecast/risk/grote waarde ALTIJD live: een geankerd inspectiepunt mag het
+        // hypo-alarm nooit bevriezen. Daarom hier readings[0] / null, niet anchorEntry.
+        currentForecastRows = forecastBasisRows(readings, null);
         latestReading = readings[0] || null;
-        renderCurrentGlucose(anchorEntry || readings[0]);
+        renderCurrentGlucose(readings[0]);
         renderCurrentDelta();
         currentHypoRisk = calculateHypoRisk(readings, currentForecastRows);
         var peakSignal = detectPeakDropSignal(readings);
@@ -5041,7 +5020,7 @@
             var fallbackPrimary = getPrimaryRate(currentForecastRows);
             trendRate = fallbackPrimary ? fallbackPrimary.rateMmol : 0;
           }
-          var nowMmol = mmol(Number((anchorEntry || readings[0]).sgv));
+          var nowMmol = mmol(Number(readings[0].sgv));
           // Never escalate to URGENT from peak pattern when trend is rising/flat.
           var canEscalateUrgent = Number.isFinite(trendRate) && trendRate < -0.01 && Number.isFinite(nowMmol) && nowMmol <= 5.2;
           if (peakSignal.severity === 'urgent' && canEscalateUrgent) {

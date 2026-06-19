@@ -5,6 +5,20 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ## [Unreleased]
 
+### Grafiek-interactie
+
+- **Bolletjes aanklikken zet de vakjes op dat punt; "live"-knop springt terug** (`nightscout-overlay/rate-overlay.js`).
+  De aparte live/history-modus is weg. Eén toestand: `selectedReadingTime` (leeg = live, gezet = je bekijkt een
+  punt). `getViewMode()` is nu daarvan afgeleid i.p.v. localStorage → **herladen = altijd live**. Klik op een
+  bolletje → de rate-vakjes springen direct naar dat moment (geen modus, geen herladen, via `applyHistoryAnchor`);
+  klik naast de lijn of op de **live-knop** → terug naar de nieuwste meting. De oude ← ouder / nieuwer →
+  blader-nav wordt niet meer getoond (`updateHistoryNav` houdt 'm verborgen). Scrubben (muis volgen) werkt pas
+  nádat je een punt hebt aangeklikt.
+- **Veiligheid: alarm/forecast/grote waarde blijven altijd live** bij het inspecteren van een punt. Voorheen
+  bevroor een geankerd punt ook het hypo-alarm (en mengde het zelfs een live waarde met een geankerde snelheid).
+  Nu sturen alleen de rate-vakjes op het gekozen punt; `currentForecastRows`, `renderCurrentGlucose` en de
+  peak-escalatie draaien op `readings[0]` / `null`.
+
 ### Snelheidsvakjes
 
 - **Hover-uitleg op de toggle-knoppen** (`updateToggleLabel`, `CALC_HELP`). De drie knoppen
