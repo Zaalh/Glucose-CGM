@@ -9,7 +9,6 @@
   var COMPACT_WINDOWS_MINUTES = [1, 2, 3, 4, 5, 10, 15, 30];
   var CLASSIC_WINDOWS_MINUTES = [1, 2, 3, 4, 5, 10, 15, 20, 30, 45, 60, 90, 120];
   var RATE_MODE_KEY = 'cgm-rate-overlay-mode';
-  var RATE_VIEW_KEY = 'cgm-rate-overlay-view';
   var RATE_CALC_KEY = 'cgm-rate-overlay-calc';
   // Regressie-modus: tijd-gewogen kleinste-kwadraten helling i.p.v. 2-punts verschil.
   // Gebruikt alle metingen in het venster, dempt de kwantisatie-ruis van hele-mg/dL-feeds
@@ -999,11 +998,6 @@
       '#cgm-rate-toggle{left:50%;transform:translateX(-50%);top:174px}',
       '#cgm-rate-view-toggle{top:174px}',
       '#cgm-rate-toggle:hover,#cgm-rate-view-toggle:hover,#cgm-rate-calc-toggle:hover{background:rgba(30,30,30,.9);color:#fff}',
-      '#cgm-rate-history-nav{position:absolute!important;z-index:10003!important;display:none;align-items:center;gap:6px;border:1px solid rgba(255,255,255,.25);border-radius:5px;background:rgba(0,0,0,.72);padding:3px 6px;color:#ddd;font:700 11px Arial,Helvetica,sans-serif;white-space:nowrap}',
-      '#cgm-rate-history-nav button{border:1px solid rgba(255,255,255,.25);background:rgba(30,30,30,.6);color:#ddd;border-radius:4px;padding:2px 6px;font:700 11px Arial,Helvetica,sans-serif;cursor:pointer}',
-      '#cgm-rate-history-nav button:hover:not(:disabled){background:rgba(60,60,60,.9);color:#fff}',
-      '#cgm-rate-history-nav button:disabled{opacity:.45;cursor:not-allowed}',
-      '#cgm-rate-history-nav .hist-time{min-width:40px;text-align:center}',
       '#cgm-mobile-dock{display:none}',
       '.primary,.bgStatus.current{overflow:visible!important}',
       '#cgm-rate-overlay .rate-card{position:relative;border:1px solid rgba(255,255,255,.22);border-radius:5px;background:rgba(9,9,9,.82);color:#ddd;padding:4px 25px 4px 7px;text-align:left;box-shadow:0 -1px 6px rgba(0,0,0,.45);min-width:0;box-sizing:border-box}',
@@ -1346,38 +1340,6 @@
 
   function calcLabel(mode) {
     return mode === 'momentaan' ? 'momentaan' : mode === 'regressie' ? 'regressie' : 'verhouding';
-  }
-
-  function ensureHistoryNav() {
-    var existing = document.getElementById('cgm-rate-history-nav');
-    if (existing) return existing;
-
-    var nav = document.createElement('div');
-    nav.id = 'cgm-rate-history-nav';
-    nav.innerHTML = [
-      '<button type="button" data-dir="1">← ouder</button>',
-      '<span class="hist-time">--:--</span>',
-      '<button type="button" data-dir="-1">nieuwer →</button>'
-    ].join('');
-
-    nav.addEventListener('click', function (event) {
-      var btn = event.target && event.target.closest ? event.target.closest('button[data-dir]') : null;
-      if (!btn) return;
-      var dir = Number(btn.getAttribute('data-dir'));
-      stepHistory(dir);
-    });
-
-    document.body.appendChild(nav);
-    return nav;
-  }
-
-  function stepHistory(direction) {
-    if (!currentReadings.length) return;
-    var idx = currentReadings.findIndex(function (entry) { return readingTime(entry) === selectedReadingTime; });
-    if (idx < 0) idx = 0;
-    var nextIdx = Math.max(0, Math.min(currentReadings.length - 1, idx + direction));
-    selectedReadingTime = readingTime(currentReadings[nextIdx]);
-    refresh();
   }
 
   // Lichte re-anchor zonder data opnieuw te laden: zet alleen de rate-vakjes op een
@@ -2278,13 +2240,6 @@
     calcButton.textContent = calcLabel(calc);
     var nextCalc = CALC_ORDER[(CALC_ORDER.indexOf(calc) + 1) % CALC_ORDER.length];
     calcButton.title = (CALC_HELP[calc] || '') + '\nKlik → ' + calcLabel(nextCalc) + '.';
-  }
-
-  // De oude ← ouder / nieuwer → blader-nav is vervangen door bolletjes aanklikken +
-  // de live-knop. We houden 'm permanent verborgen (geen dubbele bedienelementen).
-  function updateHistoryNav() {
-    var nav = document.getElementById('cgm-rate-history-nav');
-    if (nav) nav.style.display = 'none';
   }
 
   function escapeHtml(s) {
@@ -4334,7 +4289,6 @@
     var buttonTop = chartTop - buttonHeight - 6;
     var containerTop = chartTop + 4;
     var alertTop = chartTop + 4;
-    var nav = ensureHistoryNav();
     if (bgValue && clock) {
       var bgRect = bgValue.getBoundingClientRect();
       var clockRect = clock.getBoundingClientRect();
@@ -4359,9 +4313,8 @@
       dock.appendChild(viewButton);
       dock.appendChild(calcButton);
       dock.appendChild(container);
-      if (nav.parentElement !== dock) dock.appendChild(nav);
 
-      [alert, button, viewButton, calcButton, nav, container].forEach(function (el) {
+      [alert, button, viewButton, calcButton, container].forEach(function (el) {
         el.style.setProperty('position', 'static', 'important');
         el.style.setProperty('left', 'auto', 'important');
         el.style.setProperty('top', 'auto', 'important');
@@ -4377,7 +4330,6 @@
       button.style.setProperty('margin', '0 6px 0 0', 'important');
       viewButton.style.setProperty('margin', '0', 'important');
       calcButton.style.setProperty('margin', '0 6px 0 0', 'important');
-      nav.style.setProperty('margin', '0', 'important');
       statsPanel.style.removeProperty('display');
       var topElements = [
         document.querySelector('.currentBG, #currentBG, [data-current-bg]'),
@@ -4403,8 +4355,7 @@
       if (viewButton.parentElement !== document.body) document.body.appendChild(viewButton);
       if (calcButton.parentElement !== document.body) document.body.appendChild(calcButton);
       if (container.parentElement !== document.body) document.body.appendChild(container);
-      if (nav.parentElement !== document.body) document.body.appendChild(nav);
-      [alert, button, viewButton, calcButton, nav, container].forEach(function (el) {
+      [alert, button, viewButton, calcButton, container].forEach(function (el) {
         el.style.removeProperty('position');
         el.style.removeProperty('box-sizing');
       });
@@ -4443,9 +4394,6 @@
         stackTop += h + stackGap;
       });
     }
-    var buttonRect = button.getBoundingClientRect();
-    nav.style.top = Math.max(0, Math.round(buttonRect.bottom + window.scrollY + 6)) + 'px';
-    nav.style.left = Math.round(window.scrollX + buttonRect.left) + 'px';
     alert.style.top = Math.max(0, Math.round(alertTop)) + 'px';
     container.style.top = Math.max(0, Math.round(containerTop)) + 'px';
     if (window.innerWidth > 700) {
@@ -4503,7 +4451,6 @@
     var container = ensureContainer();
     if (!container) return;
     currentRows = rows;
-    updateHistoryNav();
     updateToggleLabel();
     renderHypoAlert(currentHypoRisk);
     removeCurrentAverageRate();
@@ -4852,7 +4799,7 @@
 
     document.addEventListener('click', function (event) {
       var protectedUi = event.target && event.target.closest
-        ? event.target.closest('#cgm-rate-history-nav, #cgm-rate-toggle, #cgm-rate-view-toggle, #cgm-rate-calc-toggle')
+        ? event.target.closest('#cgm-rate-toggle, #cgm-rate-view-toggle, #cgm-rate-calc-toggle')
         : null;
       if (protectedUi) return;
 
@@ -4898,7 +4845,7 @@
     var target = mutation.target;
     if (!target || !target.closest) return false;
     return Boolean(target.closest(
-      '#cgm-rate-overlay, #cgm-hypo-alert, #cgm-carb-advice, #cgm-rate-toggle, #cgm-rate-view-toggle, #cgm-rate-history-nav, #cgm-stats-panel, #cgm-point-rate-tooltip'
+      '#cgm-rate-overlay, #cgm-hypo-alert, #cgm-carb-advice, #cgm-rate-toggle, #cgm-rate-view-toggle, #cgm-stats-panel, #cgm-point-rate-tooltip'
     ));
   }
 
