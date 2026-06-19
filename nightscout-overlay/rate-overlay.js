@@ -2254,15 +2254,29 @@
     });
   }
 
+  // Hover-uitleg per snelheid-modus (wat het is + wat de volgende klik doet).
+  var CALC_HELP = {
+    verhouding: 'VERHOUDING — gemiddelde helling van nu t.o.v. N min geleden (2-punts). Stabiel, maar loopt iets achter.',
+    momentaan: 'MOMENTAAN — helling van elke losse minuut (2-punts). Fijnste tijd-detail, maar ruisig: reageert op één meetpunt.',
+    regressie: 'REGRESSIE — gewogen trend over álle punten in het venster. Gladst en nauwkeurigst voor de snelheid; voedt het hypo-alarm.'
+  };
+
   function updateToggleLabel() {
     var button = ensureToggle();
     var viewButton = ensureViewToggle();
     var mode = getMode();
     button.textContent = mode === 'compact' ? 'compact' : mode === 'classic' ? 'klassiek' : mode === 'all' ? 'alles' : 'uit';
+    button.title = 'Vakjes-weergave: ' + button.textContent + '. compact = 8 vensters · klassiek = 13 · alles = alle minuten · uit = verbergen. Klik om te wisselen.';
     var view = getViewMode();
     viewButton.textContent = view === 'history' ? 'history' : 'live';
+    viewButton.title = view === 'history'
+      ? 'HISTORY — de vakjes staan op een gekozen punt in de grafiek (scrub met de muis). Klik → terug naar live.'
+      : 'LIVE — de vakjes volgen de nieuwste meting. Klik → history (terugkijken in de grafiek).';
     var calcButton = ensureCalcToggle();
-    calcButton.textContent = calcLabel(getCalcMode());
+    var calc = getCalcMode();
+    calcButton.textContent = calcLabel(calc);
+    var nextCalc = CALC_ORDER[(CALC_ORDER.indexOf(calc) + 1) % CALC_ORDER.length];
+    calcButton.title = (CALC_HELP[calc] || '') + '\nKlik → ' + calcLabel(nextCalc) + '.';
   }
 
   function updateHistoryNav() {

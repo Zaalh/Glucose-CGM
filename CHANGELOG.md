@@ -7,6 +7,12 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ### Snelheidsvakjes
 
+- **Hover-uitleg op de toggle-knoppen** (`updateToggleLabel`, `CALC_HELP`). De drie knoppen
+  (calc-modus, live/history, vakjes-weergave) krijgen een `title`-tooltip die meebeweegt met de
+  huidige stand: wat de modus betekent én wat de volgende klik doet. Bv. de calc-knop legt uit dat
+  regressie de gewogen trend over alle punten is (gladst, voedt het alarm) vs momentaan = ruisige
+  losse minuut. Geen extra CSS — native browser-tooltip op hover.
+
 - **Regressie-modus: tijd-gewogen kleinste-kwadraten helling** (`nightscout-overlay/rate-overlay.js`,
   `regressionSlope` + `calculateRegressionRows`). De bestaande standen (`momentaan`, `verhouding`)
   berekenen de snelheid als **2-punts verschil** (`delta / minuten`). Omdat `sgv` een heel getal
