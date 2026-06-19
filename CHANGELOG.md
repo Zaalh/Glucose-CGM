@@ -15,6 +15,11 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   episode-selector (`analyze-patterns.mjs`) is een gedeelde blinde vlek en het corpus is
   selectie-biased. Metriek is base-rate-gecalibreerd (lift/onderscheid i.p.v. absolute ratio).
   Plan + open punten in `dynamische-patroonherkenning-plan.md`.
+- **Blinde-vlek-meting** (`scripts/measure-dip-rise-drop-blindspot.mjs`). Alleen-lezen diagnose op
+  de ruwe entries: van 846 dip→rise→drop-vormen wordt 36% nooit geleerd (selector-poort mist milde
+  reactieve dalingen), en 92% heeft de leidende dip vóór piek−20m → buiten het opgeslagen curve-
+  venster. Gevolg: de dip zit structureel niet in de vector; fix zit upstream (curve-venster +
+  event-selector verbreden), niet in de matcher.
 
 ### Grafiek-interactie
 

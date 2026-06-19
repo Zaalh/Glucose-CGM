@@ -45,6 +45,26 @@ beslist op **vaste drempels** en herkent een gemiddelde maaltijd, niet specifiek
 > al (tonen + forecast-correctie). Het probleem is niet "niet bedraad" maar "te laat
 > door de gate" + "badge-risk ongevoed".
 
+## Meetresultaten Fase 0 (echte data, N=1, 808 episode_vectors / 31k entries)
+
+**Vorm draagt signaal — maar niet de dip.** Base-rate-gecalibreerde leave-one-out
+(`scripts/validate-dip-rise-drop.mjs`): buurt-ratio hypo-doelen 0.93 vs stabiele 0.80,
+onderscheid **+0.13** (base-rate 0.90); vroege prefix even goed (recall 0.69, vals-alarm 0.13,
+weinig no-neighbours) → vroege waarschuwing lijkt haalbaar. Caveat: corpus is selectie-biased,
+dus de vals-alarm-kost is optimistisch tot meting op representatieve data.
+
+**Blinde-vlek-meting** (`scripts/measure-dip-rise-drop-blindspot.mjs`) — 846 dip→rise→drop-
+kandidaten in de ruwe data:
+
+- **64% gevangen** door de selector (leerbaar), **36% gemist** (nooit geleerd) — vrijwel
+  allemaal *milde* reactieve dalingen (bodem ≥4.5 & val <2 mmol): juist de vroege/subtiele gevallen.
+- **92% heeft de leidende dip vóór piek−20m**, dus buiten het opgeslagen 24-punts curve-venster.
+  → De dip zit structureel NIET in de vector. Het Fase 0-signaal kwam uit stijging+daling, niet
+  uit de dip. De dip-voorspellende waarde is dus nog onbewezen, want nog nooit vastgelegd.
+
+**Prioriteit gedraaid:** de fix zit upstream (window + selector), niet in de matcher. Beide
+universeel/profielneutraal.
+
 ## Aanpak — validatie eerst, dan live bedraden
 
 ### Fase 0 — Valideren of de vorm-match dit patroon vangt (meten vóór bouwen)
@@ -52,15 +72,12 @@ beslist op **vaste drempels** en herkent een gemiddelde maaltijd, niet specifiek
 Doel: bewijzen dat curve-/episode-similarity jouw dip→rise→drop-episodes daadwerkelijk
 aan elkaar koppelt, vóór we iets live zetten.
 
-- [ ] Identificeer in de historische data de echte episodes met de dip→stijging→daling-vorm.
-      Hergebruik `scripts/build-reactive-hypo-episodes.mjs` / `build-episode-vectors.mjs`.
-- [ ] Leave-one-out backtest: voor elke zulke episode, vindt `findCurveMatches()` /
-      `findSimilarEpisodes()` de andere voorkomens? Meet recall + hoeveel matches
-      daadwerkelijk in (near-)hypo eindigden.
-- [ ] Schrijf dit als smoke-script (`scripts/run-...-check.mjs`) + npm-script, conform de
-      bestaande check-conventie.
-- **Beslispunt:** als de match de vorm niet vangt → eerst features/curve-lengte bijstellen,
-      niet live gaan.
+- [x] Leave-one-out validatie `scripts/validate-dip-rise-drop.mjs` (+ npm-scripts). Base-rate-
+      gecalibreerd. Uitkomst: zie meetresultaten hierboven (vorm draagt signaal, dip niet vastgelegd).
+- [x] Blinde-vlek-meting `scripts/measure-dip-rise-drop-blindspot.mjs`. Uitkomst: 36% selector-
+      blinde vlek, 92% window-blinde vlek.
+- **Beslispunt (gehaald):** de matcher is niet de bottleneck; window + selector wel. Eerst die
+      verbreden (Fase 1) vóór er iets live bijdraagt.
 
 ### Fase 1 — Vroege fase mee laten tellen (de dip + rise-onset)
 
