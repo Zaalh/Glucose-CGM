@@ -5,6 +5,17 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ## [Unreleased]
 
+### Onderzoek: dynamische patroonherkenning (dip → stijging → daling)
+
+- **Fase 0-validatie van de vorm-/curve-match** (`scripts/validate-dip-rise-drop.mjs`, `npm run
+  dip-rise-drop:validate` / `:check`). Meet leave-one-out of de bestaande curve-similarity het
+  patroon dip→harde stijging→harde daling onderscheidt. Verandert niets aan de live-flow.
+  Bevinding op echte data (N=1, 808 episodes): vorm draagt signaal (onderscheid +0.13 t.o.v. een
+  base-rate van 0.90; vroege prefix even goed → vroege waarschuwing haalbaar), maar de
+  episode-selector (`analyze-patterns.mjs`) is een gedeelde blinde vlek en het corpus is
+  selectie-biased. Metriek is base-rate-gecalibreerd (lift/onderscheid i.p.v. absolute ratio).
+  Plan + open punten in `dynamische-patroonherkenning-plan.md`.
+
 ### Grafiek-interactie
 
 - **Bolletjes aanklikken zet de vakjes op dat punt; "live"-knop springt terug** (`nightscout-overlay/rate-overlay.js`).
