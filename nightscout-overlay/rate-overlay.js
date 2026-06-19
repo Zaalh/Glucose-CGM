@@ -4553,7 +4553,53 @@
     return label + ' ' + signed(avgRate, 3) + '/min';
   }
 
+  // Tijdstempel uit de D3-data die Nightscout aan een stip hangt (__data__).
+  // Robuust tegen verschillende Nightscout-vormen: object met mills/date/x, een
+  // Date-object, of een [datum, waarde]-array. Alleen echte epoch-ms (>1e12) tellen,
+  // zodat we geen mg/dL- of pixelwaarde voor een tijd aanzien.
+  function dotTime(dot) {
+    var d = dot && dot.__data__;
+    if (d == null) return null;
+    if (Array.isArray(d)) d = d[0];
+    if (d == null) return null;
+    if (typeof d !== 'object') {
+      var n0 = Number(d);
+      return Number.isFinite(n0) && n0 > 1e12 ? n0 : null;
+    }
+    var cands = [d.mills, d.date, d.x, d.time];
+    for (var i = 0; i < cands.length; i++) {
+      var n = Number(cands[i]);
+      if (Number.isFinite(n) && n > 1e12) return n;
+    }
+    if (d.dateString) {
+      var p = Date.parse(d.dateString);
+      if (Number.isFinite(p)) return p;
+    }
+    return null;
+  }
+
+  function nearestChartIndexForTime(t) {
+    if (!Number.isFinite(t) || !chartReadingsAsc.length) return -1;
+    var best = -1;
+    var bestDiff = Infinity;
+    for (var i = 0; i < chartReadingsAsc.length; i++) {
+      var diff = Math.abs(readingTime(chartReadingsAsc[i]) - t);
+      if (diff < bestDiff) { bestDiff = diff; best = i; }
+    }
+    return best;
+  }
+
   function pointIndexFromDot(dot) {
+    // Voorkeur: koppel op TIJD uit de stip-data → dichtstbijzijnde meting. Dit is
+    // ongevoelig voor een aantal-verschil tussen Nightscout's stippen en onze fetch
+    // (de oorzaak dat klikken eerder niet ankerde).
+    var t = dotTime(dot);
+    if (t !== null) {
+      var byTime = nearestChartIndexForTime(t);
+      if (byTime >= 0) return byTime;
+    }
+
+    // Fallback: positie-index (werkt alleen als de stippen 1:1 op onze metingen passen).
     var dots = Array.prototype.slice.call(document.querySelectorAll('circle.entry-dot')).filter(function (el) {
       return Number.isFinite(Number(el.getAttribute('cx')));
     }).sort(function (a, b) {
