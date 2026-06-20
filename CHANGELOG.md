@@ -35,9 +35,18 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   **niveau + daalsnelheid is het beste** (ROC-AUC ~0.74, PR-AUC ~0.42, lead ~10 min); bestaande
   rise-features én RIG voegen niets toe (PR-AUC daalt licht). Positieve controle (synthetisch)
   geslaagd → geen kapotte pijplijn.
-- **Onderzoeksrapport** `reactieve-hypo-onderzoeksrapport.md`: bundelt vorm-similarity (geen signaal),
-  blinde-vlek-meting en de RIG-test. Conclusie: met CGM-alleen features ligt het plafond ~ROC-AUC 0.74;
-  niet op vorm/RIG bouwen; enige hefboom = externe context (maaltijd/activiteit).
+- **Detector-vergelijking** (`scripts/compare-detectors.mjs`, `npm run detectors:compare`/`detectors:check`).
+  V1 vs V2 vs referentie (niveau+rate, OOF) op dezelfde punten/label. V1 ROC-AUC 0.78, V2 0.77, A 0.74:
+  het huidige systeem zit al aan/boven de simpele lijn. Opvallend: **V2 verslaat V1 niet** (PR-AUC 0.35
+  vs 0.41), terwijl V2 de live primaire alarmbron is.
+- **Feature-extensie-test** (`scripts/evaluate-feature-extensions.mjs`, `npm run features:extend`/`features:check`).
+  Test of glycemische variabiliteit + tijd-van-dag + recent-low het CGM-only beter maken, met striktere
+  10-min sustained-definitie. Uitkomst: ROC-AUC stijgt (+0.045) maar **PR-AUC en sensitiviteit@spec dalen**
+  → geen operationele winst voor een zeldzaam-event-alarm (overfit). Met de striktere definitie zakt de
+  referentie-AUC van 0.74→0.69 (eerdere 2-punts-label was te zwak).
+- **Onderzoeksrapport** `reactieve-hypo-onderzoeksrapport.md`: bundelt alle tests (vorm, RIG, V1/V2-vergelijking,
+  feature-extensies). Conclusie: niet op extra CGM-features bouwen (alle getest, geen operationele winst);
+  V1/V2 zit al dicht bij het praktische plafond; enige hefboom = externe context (maaltijd/activiteit).
 
 ### Grafiek-interactie
 

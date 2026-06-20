@@ -21,14 +21,20 @@ drempel <3.9 sustained, artefact-gate, positieve controle):
    *slechter*. De positieve controle (synthetisch) bewijst dat de pijplijn signaal vindt als het
    er is — het is er op deze data niet.
 
-**Conclusie:** met CGM-alleen features zit de voorspelbaarheid voor deze persoon rond
-**ROC-AUC 0.74, ~10 min lead**, en dat plafond wordt al benaderd door **niveau + actuele
-daalsnelheid** — precies wat de bestaande regel/V2-detector gebruikt. Meer CGM-afgeleide features
-(vorm, RIG, rise-dynamiek) helpen niet. De enige plausibele hefboom is **externe context**
-(maaltijd-timing/-inhoud, activiteit), die nu niet beschikbaar is.
+**Conclusie:** met CGM-alleen features ligt de voorspelbaarheid voor deze persoon rond
+**ROC-AUC ~0.69–0.78** (label-afhankelijk) met **~9–11 min lead**. Het huidige systeem (V1/V2) zit
+daar al aan/boven; meer CGM-afgeleide features helpen niet operationeel:
+- **Vorm/RIG** (Seo et al.): geen signaal.
+- **Variabiliteit + tijd-van-dag + recent-low** (literatuur): verhogen ROC-AUC maar **verlágen
+  PR-AUC en sensitiviteit@spec** — geen winst in de precisie-kritische alarmzone (overfit op ~77
+  onafhankelijke episodes).
+De enige plausibele hefboom is **externe context** (maaltijd-timing/-inhoud, activiteit). Een zwaar
+sequentie-model (LSTM, lit. AUC>0.97) vereist een veel grotere/andere populatie en overfit hier.
 
-**Aanbeveling:** geen RIG/vorm-laag bouwen. Bevestig dat de huidige detector dit plafond haalt;
-investeer alleen verder als er context-data bijkomt.
+**Aanbeveling (empirisch onderbouwd):** geen extra CGM-feature-laag bouwen. Het bestaande V1/V2
+haalt het praktische plafond al. Apart aandachtspunt: **V2 verslaat V1 niet** (lagere PR-AUC),
+terwijl V2 de live primaire alarmbron is — overweeg dat te heroverwegen. Investeer alleen in een
+rijker model als er context-data bijkomt.
 
 ---
 
@@ -108,6 +114,43 @@ rise-features (`riseFromBaseline`, `riseRate15m`); **C** = B + **RIG** (= (piek�
 
 **RIG voegt niets toe; de rise-features evenmin.** Niveau + daalsnelheid is het beste.
 
+## 6b. Vergelijking met het huidige systeem (V1 / V2)
+
+`scripts/compare-detectors.mjs`. V1 (`legacy-risk-v1`) en V2 (`reactive-hypo-detector`) met de
+huidige code gescoord op dezelfde punten/label als referentie A. V1/V2 = vaste functies (directe
+AUC); A = honest OOF. (Caveat: V2 is op deze persoon getuned → in-sample licht optimistisch; V2
+hier zonder de — eerder verwaarloosbaar gebleken — pattern-component.)
+
+| (allPoints) | ROC-AUC | PR-AUC | sens@spec90 | lead |
+|---|---|---|---|---|
+| V1 (regelmodel) | 0.775 | 0.411 | 0.53 | 9m |
+| V2 (live primair) | 0.767 | 0.352 | 0.51 | 9m |
+| A (niveau+rate, OOF) | 0.739 | 0.404 | 0.52 | 9m |
+
+**V1/V2 zitten al aan/boven de simpele lijn** → het systeem laat geen gat ónder zich. **V2 verslaat
+V1 niet** — op de imbalance-relevante PR-AUC is V2 zelfs slechter (0.35 vs 0.41). Aandachtspunt,
+want V2 is de live primaire alarmbron.
+
+## 6c. Kan het CGM-only beter? (variabiliteit + tijd-van-dag + recent-low)
+
+`scripts/evaluate-feature-extensions.mjs`, met de **striktere sustained-definitie (10 min)**.
+A=niveau+rate; D=+glycemische variabiliteit (SD/CV 60m); E=+tijd-van-dag (sin/cos) + recent-low
+(min sinds laatste <3.9, #lows 6u).
+
+| (allPoints, sustain 10m) | ROC-AUC | PR-AUC | sens@spec90 |
+|---|---|---|---|
+| A | 0.69 | **0.273** | 0.47 |
+| D (+variabiliteit) | 0.735 (Δ+0.045) | **0.173** ↓ | 0.35 ↓ |
+| E (+tijd+recent-low) | 0.731 | **0.172** ↓ | 0.35 ↓ |
+
+**Discordantie:** variabiliteit/tijd verhogen ROC-AUC maar **verlagen PR-AUC en sensitiviteit@spec**.
+Voor een zeldzaam-event-alarm (base-rate 0.07) zijn PR-AUC/sens@spec leidend → **geen operationele
+winst**, eerder verlies (overfit op weinig onafhankelijke episodes). De literatuur-AUC>0.97 (LSTM)
+geldt voor grotere T1DM-cohorten; hier zou zo'n model overfitten.
+
+**NB label-gevoeligheid:** met de striktere 10-min sustained-definitie zakt A van ROC 0.74 → 0.69.
+De absolute getallen zijn dus soft; de *vergelijking* tussen modellen (zelfde label) is robuust.
+
 ## 7. Methodologische waarborgen
 
 - **Positieve controle:** op synthetische data waar hypo bewust ná steile spikes komt, tilt
@@ -140,20 +183,26 @@ het hangt af van populatie en of er een betrouwbaar maaltijd-anker is. Zie ook D
 
 ## 10. Conclusie & aanbeveling
 
-- **Niet bouwen:** curve-vorm-similarity (geen signaal) en RIG/extra rise-features (geen winst).
-- **Bevestigen:** dat de bestaande regel/V2-detector het plafond (~0.74 ROC-AUC, ~10 min lead) al
-  benadert met niveau + daalsnelheid. Zo niet, is dáár de kleine winst te halen — niet in nieuwe features.
-- **Voorwaarde voor échte verbetering:** context-data toevoegen (maaltijd/activiteit). Pas dan is
-  een rijker model zinvol.
-- **Profielneutraal:** de bevinding "niveau+rate is genoeg, vorm/RIG niet" is universeel — geen
-  persoonlijke tuning nodig; cold-start valt sowieso terug op de regel-detector.
+- **Niet bouwen (alle getest):** curve-vorm-similarity (geen signaal), RIG/rise-features (geen
+  winst), én variabiliteit/tijd-van-dag/recent-low (verhogen ROC maar verlagen PR-AUC/sensitiviteit).
+- **Bevestigd:** het bestaande V1/V2 zit al aan/boven de simpele referentie en dicht bij het
+  praktische CGM-only plafond (ROC-AUC ~0.69–0.78 label-afhankelijk, lead ~9–11 min).
+- **Aandachtspunt V2 vs V1:** V2 (live primair) verslaat V1 niet; op PR-AUC zelfs slechter. Apart
+  van dit onderzoek de moeite waard om te heroverwegen.
+- **Voorwaarde voor échte verbetering:** externe context (maaltijd/activiteit). Pas dan is een
+  rijker model (of een sequentie-model met meer data) zinvol.
+- **Profielneutraal:** de bevinding "niveau+rate is genoeg; extra CGM-features niet" is universeel —
+  geen persoonlijke tuning nodig; cold-start valt sowieso terug op de regel-detector.
 
 ## 11. Beperkingen
 
 - **N=1** en CGM-alleen; cross-persoon-generalisatie onbewezen (al is de richting universeel).
-- Eenvoudig logistisch model; een complexer model zou marginaal meer kunnen halen, maar de
-  positieve controle maakt de richting betrouwbaar.
+- Eenvoudig logistisch model; een complexer/sequentie-model zou met méér data meer kunnen halen,
+  maar overfit hier (de positieve controle maakt de richting betrouwbaar).
 - RIG via CGM-dal-proxy is ruisiger dan met een echte maaltijd-melding.
+- **Label-definitie is gevoelig:** het eerste 2-punts-"sustained" (~2 min bij 1-min data) was te zwak;
+  de striktere 10-min-definitie verlaagt de absolute AUC's (0.74→0.69 voor A). Modelvergelijkingen
+  (zelfde label) blijven robuust; absolute getallen zijn soft.
 - Sensorlag/MARD in de lage range blijven label-ruis ondanks de sustained-definitie.
 
 ## 12. Reproduceerbaarheid
@@ -166,9 +215,13 @@ node scripts/evaluate-rig-contribution.mjs --self-test
 
 # echte data (in libreview-sync container op de iMac)
 npm run dip-rise-drop:validate
-docker compose -f docker-compose.nightscout.yml --profile libre run --rm \
-  libreview-sync node scripts/measure-dip-rise-drop-blindspot.mjs
-npm run rig:contribution
+docker compose ... run --rm libreview-sync node scripts/measure-dip-rise-drop-blindspot.mjs
+npm run rig:contribution                # RIG-bijdrage
+npm run detectors:compare               # V1 vs V2 vs referentie
+npm run features:extend                 # variabiliteit + tijd-van-dag + recent-low
 ```
+
+Scripts: `validate-dip-rise-drop.mjs`, `measure-dip-rise-drop-blindspot.mjs`,
+`evaluate-rig-contribution.mjs`, `compare-detectors.mjs`, `evaluate-feature-extensions.mjs`.
 
 Plan & open punten: `dynamische-patroonherkenning-plan.md`.
