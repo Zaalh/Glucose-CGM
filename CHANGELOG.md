@@ -27,6 +27,18 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   niveau de sterkste hypo-voorspeller is. Conclusie: **niet op vorm-similarity bouwen**; vroege
   waarschuwing hoort op niveau + daalsnelheid + context te steunen. Details in het plan-md.
 
+### Onderzoek: RIG-bijdrage getest + samenvattend rapport
+
+- **RIG A/B-test** (`scripts/evaluate-rig-contribution.mjs`, `npm run rig:contribution` / `rig:check`).
+  Grouped-CV per dag, klinisch label (<3.9 sustained, 30m), L2-logistische regressie. Meet of RIG
+  (rate of increase to peak, Seo et al.) iets toevoegt bovenop niveau+rate. Uitkomst op echte data:
+  **niveau + daalsnelheid is het beste** (ROC-AUC ~0.74, PR-AUC ~0.42, lead ~10 min); bestaande
+  rise-features én RIG voegen niets toe (PR-AUC daalt licht). Positieve controle (synthetisch)
+  geslaagd → geen kapotte pijplijn.
+- **Onderzoeksrapport** `reactieve-hypo-onderzoeksrapport.md`: bundelt vorm-similarity (geen signaal),
+  blinde-vlek-meting en de RIG-test. Conclusie: met CGM-alleen features ligt het plafond ~ROC-AUC 0.74;
+  niet op vorm/RIG bouwen; enige hefboom = externe context (maaltijd/activiteit).
+
 ### Grafiek-interactie
 
 - **Bolletjes aanklikken zet de vakjes op dat punt; "live"-knop springt terug** (`nightscout-overlay/rate-overlay.js`).

@@ -28,7 +28,11 @@ beslist op **vaste drempels** en herkent een gemiddelde maaltijd, niet specifiek
 - `episode_vectors` bevat de volledige curve (`vector: shape`, `build-episode-vectors.mjs:152`)
   en `liveCurveShape` wordt gebouwd in `hypo-features.mjs:471` — curve-match is dus voedbaar.
 
-## De echte gaten (na code-toetsing)
+> NB: de secties hieronder ("De echte gaten", "Risico's & ontwerpcorrecties", "Generalisatie")
+> beschrijven het **verlaten vorm-similarity-pad** en zijn HISTORISCH. De actuele aanpak staat
+> onder "HERZIENE AANPAK — feature-based postprandiale hypo-predictor".
+
+## De echte gaten (na code-toetsing) — HISTORISCH (verlaten pad)
 
 1. **HOOFDGAT — drop-context-gate blokkeert de vroege fase.**
    `patternFromFeatures()` geeft `null` tenzij
@@ -79,41 +83,120 @@ Doel: bewijzen dat curve-/episode-similarity jouw dip→rise→drop-episodes daa
 aan elkaar koppelt, vóór we iets live zetten.
 
 - [x] Leave-one-out validatie `scripts/validate-dip-rise-drop.mjs` (+ npm-scripts). Base-rate-
-      gecalibreerd. Uitkomst: zie meetresultaten hierboven (vorm draagt signaal, dip niet vastgelegd).
-- [x] Blinde-vlek-meting `scripts/measure-dip-rise-drop-blindspot.mjs`. Uitkomst: 36% selector-
-      blinde vlek, 92% window-blinde vlek.
-- **Beslispunt (gehaald):** de matcher is niet de bottleneck; window + selector wel. Eerst die
-      verbreden (Fase 1) vóór er iets live bijdraagt.
+      gecalibreerd + dedupe + klinische drempel. Uitkomst (schoon): **geen vorm-signaal** (prefix
+      separation 0.01) — zie meetresultaten hierboven.
+- [x] Blinde-vlek-meting `scripts/measure-dip-rise-drop-blindspot.mjs` (met artefact-gate). Uitkomst:
+      318 echte kandidaten (529 artefact), 75 echte hypo; selector mist 41%; dip mediaan 36m vóór piek.
+- **Beslispunt (gehaald):** vorm-similarity is GEEN bruikbaar signaal → verlaten. Overgestapt op de
+      feature-based predictor (zie HERZIENE AANPAK).
 
-### Fase 1 — Vroege fase mee laten tellen (de dip + rise-onset)
+## UPDATE 2026-06-20 — RIG getest en VERWORPEN; zie onderzoeksrapport
 
-- [ ] Verzacht/verlaag de `isDropContext`-gate in `patternFromFeatures()` zodat een
-      terugkerende vorm vroeger signaleert (bijv. lagere `dropFromPeakMmol`-drempel of een
-      aparte rise-onset-tak), zonder ruis-stijgingen te laten vuren.
-- [ ] Roep `mealPatternFromState()` aan in de sync voor de `rising`/`plateau`-fase, zodat
-      ook de aanloop tegen eigen episodes wordt gematcht.
-- [ ] Leg de leidende dip vast als onderdeel van de episode-memory (`updateMealEpisodeMemory`)
-      zodat de hele vorm (dip→rise→drop) één gematchte signatuur is.
-- [ ] Borg met fixtures: nieuwe `meal-fixtures/` voor dip→rise→drop; houd `npm run meal:check` groen.
+> A/B-test (`scripts/evaluate-rig-contribution.mjs`, grouped-CV per dag, klinisch <3.9 sustained):
+> **niveau + daalsnelheid is het beste** (ROC-AUC ~0.74, PR-AUC ~0.42, lead ~10 min); de bestaande
+> rise-features én RIG voegen niets toe (PR-AUC daalt zelfs licht). Positieve controle geslaagd
+> → geen kapotte pijplijn. De milestones M1–M5 hieronder (die aannamen dat RIG hielp) zijn dus
+> **niet uitgevoerd**: er is geen feature-winst te halen met CGM-alleen. Volledige uitwerking +
+> cijfers in `reactieve-hypo-onderzoeksrapport.md`. Echte hefboom = externe context (maaltijd/
+> activiteit), nu niet beschikbaar. M1–M5 blijven hieronder als historische context.
 
-### Fase 2 — Pattern in de badge-risk (smaller dan eerst gedacht)
+## HERZIENE AANPAK — feature-based postprandiale hypo-predictor (senior-dev + medisch uitgewerkt) — HISTORISCH
 
-> De overlay leest en toont `pattern` al en voedt de forecast. Resteert alleen: de
-> maaltijd-badge-escalatie meevoeden.
+### Literatuur-onderbouwing
 
-- [ ] Laat `scoreReactiveMealRisk()` het pattern als score-bijsturing gebruiken
-      (niet als phase-beslissing) — conform stap 6 in `mealdetectie.md`.
-- [ ] Profielneutraal houden: geen hard-coded klinische aannames; drempels configureerbaar
-      (zie `feedback-profile-neutral-ai`).
+- **Seo et al. 2019** (BMC Med Inform, PMC6833234) — postprandiale hypo (<3.9, horizon 30m) uit CGM
+  met 3 scalaire features: **huidig niveau**, **GRC** (rate of change), **RIG** = (piek − maaltijd) /
+  tijd-tot-piek. RIG is de sleutelfeature (weglaten → instorten). Random Forest AUC 0.966.
+- **Dave et al.** (PMC8258517) — feature-based real-time >91% sens/spec op 30/60m.
+- **Meta-analyse 2025** (Springer s40200-025-01820-4) — CGM-ML hypo-predictie werkt (T1DM).
 
-### Fase 3 — Validatie & uitrol
+### Medische kanttekeningen (de literatuur is NIET 1:1 overdraagbaar)
 
-- [ ] Backtest op echte data: vals-alarm-ratio en lead-time vóór/na, m.n. voor deze vorm.
-- [ ] Achter omkeerbare flag uitrollen (zoals `REG_FEEDS_ALARMS`), force-recreate
-      `nightscout-ui` (zie deploy-notitie `mealdetectie.md`).
-- [ ] CHANGELOG + statusdocs bijwerken.
+1. **Gebruiker is niet-diabeet met reactieve/postprandiale hypoglykemie** — de meeste studies zijn
+   T1DM. Maar de fysiologie hier (exagereerde insulinerespons op een snelle glucosestijging →
+   overshoot-daling) maakt **RIG juist mechanistisch passend**: snelle stijging voorspelt de reactieve val.
+2. **Klinische outcome-definitie aanscherpen.** Level-1 hypo = <3.9 mmol/L, Level-2 (klinisch
+   significant) = <3.0. Gebruik een **sustained-event** (bijv. ≥15 min, ≥2 opeenvolgende metingen
+   <3.9) i.p.v. één losse meting — sluit aan op ADA/internationaal consensus en weert sensorruis.
+   De huidige `evaluate-predictions.mjs` labelt op losse `min30 < 4.0/4.5` → **aanpassen naar <3.9
+   sustained**.
+3. **CGM-beperkingen zijn label-ruis:** hogere MARD in de lage range, **sensorlag 5–15 min**,
+   **compressie-lows** (vooral 's nachts). Pas de artefact-gate uit `measure-...-blindspot.mjs` ook
+   op de labels toe; overweeg de horizon vanaf de fysiologische i.p.v. gemeten daling.
+4. **Postprandiaal isoleren van nocturnaal** — andere fysiologie. Conditioneer op het maaltijd-anker
+   (`detectMealState`) en/of tijd-van-dag; rapporteer apart.
+5. **Alarmmoeheid is een klinische schade.** Een waarschuwing die te vaak vals vuurt wordt genegeerd
+   (en dan mis je de echte). Kies een werkpunt met **hoge sensitiviteit binnen een vals-alarm-budget**,
+   niet maximale sensitiviteit. En een **minimale lead-time (~≥10–15 min)** — eerder is niet
+   actiehbaar (koolhydraten innemen kost tijd).
 
-## Risico's & ontwerpcorrecties (senior review)
+### Integratie met bestaande infra (NIET parallel bouwen)
+
+De stack heeft dit grotendeels al:
+- `scripts/lib/hypo-features.mjs` — featureset (currentMmol, blendedRate, rate5/10/15m, riseFromBaseline,
+  riseRate15m, minutesSincePeak, maxFallRate…). **RIG hier toevoegen.**
+- `scripts/lib/reactive-hypo-detector.mjs` — V2 component-score (currentScore, rateScore, reactiveScore,
+  forecastScore, mealOnsetScore, patternScore…). **RIG wordt een nieuwe/uitgebreide component**, geen los model.
+- `train-risk-model.mjs` → `model_state` → `risk-model-state.json` (thresholds/calibration/metrics) +
+  `retrain-and-export-model.mjs` (TRAIN_POLICY balanced/precision). **Hergebruiken voor (her)training.**
+- `evaluate-predictions.mjs` (30m-horizon outcome-labeling) + `prediction_snapshots.outcomeEvaluated`.
+  **Hergebruiken voor shadow-evaluatie**; alleen de drempel/sustained-definitie aanscherpen.
+
+### Statistische realiteitscheck (vóór modelleren)
+
+Blindspot mat ~**75 echte hypo-events (<3.9)** in de hele historie (N=1). Dat is een **kleine positieve
+klasse**. Gevolg: hou het model **klein** (logistische regressie of ondiepe RF, ~3–5 features, sterke
+regularisatie); verwacht **brede betrouwbaarheidsintervallen**; rapporteer **PR-AUC** (niet alleen
+ROC-AUC) wegens imbalance. Als de events na postprandiaal-gating < ~30–40 zijn, is een persoonlijk
+model niet betrouwbaar → dan een **universele regel met RIG-drempel** i.p.v. een geleerd model.
+
+### Milestones
+
+**M1 — RIG-feature + pariteit.**
+- [ ] `RIG = riseFromBaseline / minutesSincePeak` (guarded; null bij geen geldige piek) in
+      `hypo-features.mjs`. Plus GRC = bestaande `rate5m/10m`.
+- [ ] Train/serve-pariteit: identieke berekening offline (sync/backtest) en live; borg met een check
+      (zie bestaande `meal:parity`-aanpak).
+
+**M2 — Klinische labels + eerlijke evaluatie.**
+- [ ] `evaluate-predictions.mjs`: target naar **<3.9 sustained (≥2 metingen / ≥15m)**, plus aparte
+      <3.0-telling; artefact-gate op labels.
+- [ ] `scripts/evaluate-postprandial-hypo.mjs`: walk-forward / **grouped CV per dag of per episode**
+      (NOOIT willekeurige split — voorkomt de duplicaat-lekkage uit Fase 0). Conditioneer op
+      maaltijd-venster (5m–3,5u na onset). Self-test + npm-script, conform conventie.
+
+**M3 — Model trainen & vergelijken tegen baselines.**
+- [ ] Train via bestaande pipeline; voeg RIG-component toe aan V2.
+- [ ] **Baselines die verslagen moeten worden:** (a) huidige regel-detector V1/V2, (b) triviale
+      "niveau + rate"-drempel. Geen claim zonder baseline.
+- [ ] Metrics: PR-AUC, sensitiviteit @ vast vals-alarm-budget, **lead-time-verdeling**,
+      kalibratie (Brier), met CI's.
+- **Beslispunt:** alleen door als het de baselines verslaat op vals-alarm bij gelijke sensitiviteit
+      én klinisch bruikbare lead-time.
+
+**M4 — Shadow-mode (meten in productie, geen alarm).**
+- [ ] Predictor-score meeschrijven in `prediction_snapshots` (zoals V2 shadow nu), `evaluate-predictions`
+      vergelijkt met werkelijke uitkomst. ≥2–4 weken live observeren vóór het iets mag laten afgaan.
+
+**M5 — Promotie achter omkeerbare flag.**
+- [ ] RIG-component meelaten wegen in de alarm-score (niet als harde beslissing). Env-flag (zoals
+      `REG_FEEDS_ALARMS`), `--force-recreate nightscout-ui`. Cold-start-terugval op de regel-detector.
+- [ ] CHANGELOG + statusdocs (`hypo.md`/`predict.md`) bijwerken.
+
+### Stop-condities / faalmodi
+
+- Te weinig events na gating (<~30) → geen geleerd model; val terug op universele RIG-drempel.
+- Geen winst op vals-alarm bij gelijke sensitiviteit t.o.v. baseline → niet promoten.
+- Lead-time < ~10 min → niet actiehbaar, niet promoten.
+- Kalibratie slecht / instabiel over CV-folds → model te complex voor de data, simplificeer.
+
+### Verlaten pad (waarom)
+
+Curve-vorm-similarity / het venster of de selector verbreden om de "dip" te leren is **verlaten**:
+Fase 0 (schoon gemeten) toonde geen vorm-signaal, en de literatuur gebruikt niveau+rate+RIG, niet
+vorm. Het venster verbreden lost een blinde vlek op zonder aantoonbaar signaal om te vangen.
+
+## Risico's & ontwerpcorrecties (senior review — m.b.t. het verlaten vorm-pad, historisch)
 
 1. **De gate bestaat niet voor niets — valse alarmen.** Het hele recente werk optimaliseerde
    op *minder valse alarmen* (zie `research-rate-estimator-pattern`). `dropFromPeakMmol >= 2`
@@ -146,5 +229,6 @@ De aanpak voldoet hieraan omdat hij intrinsiek per-persoon leert, mits:
 ## Niet-doelen
 
 - Geen closed-loop/insuline-tooling (gebruiker = reactieve hypo, geen diabetes).
-- Geen nieuw ML-model; we benutten de bestaande similarity-laag.
+- Geen zwaar deep-learning-model: klein en uitlegbaar (logistisch/RF op ~3–5 features),
+  bij voorkeur als extra V2-component i.p.v. een los model.
 - V2-detector / §21 ongemoeid tenzij expliciet.

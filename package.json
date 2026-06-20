@@ -34,6 +34,8 @@
     "rebound:eval": "docker compose -f docker-compose.nightscout.yml --profile libre run --rm libreview-sync node scripts/evaluate-rebound-forecast.mjs",
     "dip-rise-drop:validate": "docker compose -f docker-compose.nightscout.yml --profile libre run --rm libreview-sync node scripts/validate-dip-rise-drop.mjs",
     "dip-rise-drop:check": "node --check scripts/validate-dip-rise-drop.mjs && node scripts/validate-dip-rise-drop.mjs --self-test",
+    "rig:contribution": "docker compose -f docker-compose.nightscout.yml --profile libre run --rm libreview-sync node scripts/evaluate-rig-contribution.mjs",
+    "rig:check": "node --check scripts/evaluate-rig-contribution.mjs && node scripts/evaluate-rig-contribution.mjs --self-test",
     "ai:review": "node --env-file-if-exists=.env.ai scripts/ai-review.mjs",
     "detector:fixtures": "node scripts/run-detector-fixtures.mjs",
     "meal:fixtures": "node scripts/run-meal-fixtures.mjs",
