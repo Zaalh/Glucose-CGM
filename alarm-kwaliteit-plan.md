@@ -58,19 +58,28 @@ een expliciet **vals-alarm-budget** — zonder nieuwe features, zonder de live-f
 - **Beslispunt: JA, vals-alarm/dag is te hoog (~13/dag, precisie ~0.14) → door naar M3.** Ruimte is er:
       hoge recall + 23m lead laat zich inruilen voor veel minder valse alarmen.
 
-**M3 — Operating-point op een vals-alarm-budget.**
-- [ ] Kies per detector de score-drempel die de recall maximaliseert binnen een doel-vals-alarm-budget
-      (bv. ≤X events/dag). Rapporteer recall + lead-time bij dat budget.
-- [ ] Profielneutraal: budget configureerbaar, geen persoonlijke hard-coding.
+**M3 — Operating-point op een vals-alarm-budget. [GEDAAN]**
+- [x] `scripts/tune-alarm-threshold.mjs` (`npm run alarm:tune`). Veegt event-niveau over drempels per
+      detector. Resultaat (70,7 dagen, 53 events):
+      - **V2 ≫ V1 budget-beperkt:** V2 ≤3/dag recall 0.85 lead 6m; ≤5/dag recall 0.98 lead 6m. V1 haalt
+        recall alleen met lead 1m (detecteren, niet voorspellen) → V2-als-primair herbevestigd.
+      - **Harde frontier:** lange lead (30m) komt mét ~29 valse alarmen/dag; terug naar ~4/dag laat de
+        lead instorten naar ~6m. Vroege waarschuwing = dezelfde lage-confidence-signalen als de valse
+        alarmen. Met CGM-alleen kun je NIET tegelijk weinig vals-alarmeren én vroeg waarschuwen.
+- **Gevolg:** dit bevestigt waarom context-data de enige echte hefboom is. Bruikbaar CGM-only werkpunt:
+      V2 ≤5/dag (recall 0.98, lead 6m). Caveat: drempel op recompute-schaal (DEFAULT_PARAMS, geen
+      pattern), niet 1:1 de live-config — de frontier-vorm is leidend, niet het exacte getal.
+- Profielneutraal: budget configureerbaar, geen persoonlijke hard-coding.
 
 **M4 — Recall-vangnet (V2 mist iets meer dan V1).**
 - [ ] Test **V1 ∨ V2-unie** of een recall-ondergrens, zodat V2's vals-alarm-winst geen echte hypo's
       kost. Vergelijk op event-niveau tegen V2-alleen.
 
-**M5 (optioneel) — Gegradeerde waarschuwing.**
-- [ ] Vroege zachte "let op" (lagere drempel, langere lead) vs late "urgent" (hogere drempel),
-      i.p.v. één binaire drempel. Meet of dit de bruikbare lead vergroot zonder de vals-alarm/dag te
-      overschrijden.
+**M5 — Gegradeerde waarschuwing. [AANBEVOLEN na M3]**
+- [ ] M3 toont dat lead en weinig-valse-alarmen elkaar uitsluiten bij één drempel. Een gegradeerd
+      alarm lost dat op: lage drempel = vroege zachte "let op" (lange lead, meer vals, niet-indringend)
+      vs hoge drempel = "urgent" (weinig vals, korte lead, indringend). Meet de twee niveaus apart op
+      event-niveau. Dit is de logische manier om de frontier te benutten i.p.v. één compromis.
 
 ## Risico's & waarborgen (senior)
 

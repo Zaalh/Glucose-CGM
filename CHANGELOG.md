@@ -63,6 +63,12 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   14,4 valse alarmen/dag, lead 23m. Recall is hoog (beter dan punt-niveau suggereerde) en V1≈V2 op event-niveau;
   de **alarmlast (~13/dag, precisie ~0.14) is het echte probleem**. Plan + vervolg (M3: drempel op vals-alarm-budget)
   in `alarm-kwaliteit-plan.md`.
+- **Drempel-tuning op vals-alarm-budget (M3)** (`scripts/tune-alarm-threshold.mjs`, `npm run alarm:tune`/`alarm:tune-check`).
+  Event-niveau drempelveeg per detector. V2 ≫ V1 budget-beperkt (V2 ≤5/dag: recall 0.98 lead 6m; V1 haalt
+  recall alleen met lead 1m → V2-als-primair herbevestigd). Harde frontier: lange lead (30m) komt mét
+  ~29 valse alarmen/dag; terug naar ~4/dag laat de lead instorten naar ~6m. Met CGM-alleen kun je niet
+  tegelijk weinig vals-alarmeren én vroeg waarschuwen → bevestigt context-data als enige echte hefboom.
+  Vervolg: M5 (gegradeerd alarm) in `alarm-kwaliteit-plan.md`.
 
 ### Grafiek-interactie
 

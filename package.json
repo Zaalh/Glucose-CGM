@@ -44,6 +44,8 @@
     "v1v2:check": "node --check scripts/compare-v1-v2-deployed.mjs && node scripts/compare-v1-v2-deployed.mjs --self-test",
     "alarm:quality": "docker compose -f docker-compose.nightscout.yml --profile libre run --rm libreview-sync node scripts/evaluate-alarm-quality.mjs",
     "alarm:check": "node --check scripts/lib/eval-metrics.mjs && node --check scripts/evaluate-alarm-quality.mjs && node scripts/evaluate-alarm-quality.mjs --self-test",
+    "alarm:tune": "docker compose -f docker-compose.nightscout.yml --profile libre run --rm libreview-sync node scripts/tune-alarm-threshold.mjs",
+    "alarm:tune-check": "node --check scripts/tune-alarm-threshold.mjs && node scripts/tune-alarm-threshold.mjs --self-test",
     "ai:review": "node --env-file-if-exists=.env.ai scripts/ai-review.mjs",
     "detector:fixtures": "node scripts/run-detector-fixtures.mjs",
     "meal:fixtures": "node scripts/run-meal-fixtures.mjs",
