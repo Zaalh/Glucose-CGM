@@ -32,9 +32,11 @@ De enige plausibele hefboom is **externe context** (maaltijd-timing/-inhoud, act
 sequentie-model (LSTM, lit. AUC>0.97) vereist een veel grotere/andere populatie en overfit hier.
 
 **Aanbeveling (empirisch onderbouwd):** geen extra CGM-feature-laag bouwen. Het bestaande V1/V2
-haalt het praktische plafond al. Apart aandachtspunt: **V2 verslaat V1 niet** (lagere PR-AUC),
-terwijl V2 de live primaire alarmbron is — overweeg dat te heroverwegen. Investeer alleen in een
-rijker model als er context-data bijkomt.
+haalt het praktische plafond al. **V2 als primaire alarmbron is terecht:** bij de werkelijk
+gedeployede beslissingen heeft V2 hogere precisie (0.30 vs 0.24), ~30% minder valse alarmen en
+betere F1 (0.42 vs 0.36) dan V1, tegen een kleine recall-daling (0.70 vs 0.73) — zie §6d. (Een
+eerder ruw recompute-cijfer suggereerde het tegendeel; dat was niet de getunede live-config.)
+Investeer alleen in een rijker model als er context-data bijkomt.
 
 ---
 
@@ -151,6 +153,24 @@ geldt voor grotere T1DM-cohorten; hier zou zo'n model overfitten.
 **NB label-gevoeligheid:** met de striktere 10-min sustained-definitie zakt A van ROC 0.74 → 0.69.
 De absolute getallen zijn dus soft; de *vergelijking* tussen modellen (zelfde label) is robuust.
 
+## 6d. V2 vs V1 zoals werkelijk gedeployed (correctie op §6b)
+
+`scripts/compare-v1-v2-deployed.mjs`. De recompute in §6b draaide V2 met DEFAULT_PARAMS en zónder
+pattern-component, en beoordeelde op threshold-vrije PR-AUC → onderschatte V2. De eerlijke toets
+gebruikt de **werkelijk getoonde alarmbeslissingen** uit `prediction_snapshots` (getunede live-config)
+tegen de echte uitkomst (`actualMinMmol_30m < 3.9`). Subset: V2-actieve, geëvalueerde snapshots
+(n=9.286, base-rate 0.16 — verhoogd omdat V2 auto-activeert in risico-context).
+
+| Zoals gedeployed | recall | precision | F1 | vals-alarm | alarmrate | ROC-AUC |
+|---|---|---|---|---|---|---|
+| V1 (alarm = high/urgent) | 0.73 | 0.24 | 0.36 | 0.44 | 0.49 | 0.745 |
+| **V2 (live primair)** | 0.70 | **0.30** | **0.42** | **0.31** | 0.37 | 0.749 |
+
+**V2 is op het operationele punt de betere alarmbron:** ~30% minder valse alarmen, hogere precisie en
+betere F1, tegen een kleine recall-daling. Threshold-vrij (ROC) zijn ze gelijk (~0.75). De eerdere
+"V2 verslaat V1 niet" wordt hiermee **ingetrokken** voor de gedeployede configuratie. (Punt-niveau
+metriek; event-niveau zou alarmen consolideren. Alarmrate ~0.4 is hoog op punt-niveau, gelijk voor beide.)
+
 ## 7. Methodologische waarborgen
 
 - **Positieve controle:** op synthetische data waar hypo bewust ná steile spikes komt, tilt
@@ -187,8 +207,9 @@ het hangt af van populatie en of er een betrouwbaar maaltijd-anker is. Zie ook D
   winst), én variabiliteit/tijd-van-dag/recent-low (verhogen ROC maar verlagen PR-AUC/sensitiviteit).
 - **Bevestigd:** het bestaande V1/V2 zit al aan/boven de simpele referentie en dicht bij het
   praktische CGM-only plafond (ROC-AUC ~0.69–0.78 label-afhankelijk, lead ~9–11 min).
-- **Aandachtspunt V2 vs V1:** V2 (live primair) verslaat V1 niet; op PR-AUC zelfs slechter. Apart
-  van dit onderzoek de moeite waard om te heroverwegen.
+- **V2 vs V1 (uitgezocht):** V2 als primaire alarmbron is terecht — bij de gedeployede beslissingen
+  hogere precisie, ~30% minder valse alarmen, betere F1, kleine recall-daling (§6d). De eerdere
+  "V2 niet beter"-zorg was een recompute-artefact en is ingetrokken.
 - **Voorwaarde voor échte verbetering:** externe context (maaltijd/activiteit). Pas dan is een
   rijker model (of een sequentie-model met meer data) zinvol.
 - **Profielneutraal:** de bevinding "niveau+rate is genoeg; extra CGM-features niet" is universeel —

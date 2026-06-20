@@ -44,9 +44,14 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   10-min sustained-definitie. Uitkomst: ROC-AUC stijgt (+0.045) maar **PR-AUC en sensitiviteit@spec dalen**
   → geen operationele winst voor een zeldzaam-event-alarm (overfit). Met de striktere definitie zakt de
   referentie-AUC van 0.74→0.69 (eerdere 2-punts-label was te zwak).
-- **Onderzoeksrapport** `reactieve-hypo-onderzoeksrapport.md`: bundelt alle tests (vorm, RIG, V1/V2-vergelijking,
-  feature-extensies). Conclusie: niet op extra CGM-features bouwen (alle getest, geen operationele winst);
-  V1/V2 zit al dicht bij het praktische plafond; enige hefboom = externe context (maaltijd/activiteit).
+- **V2 vs V1 zoals gedeployed** (`scripts/compare-v1-v2-deployed.mjs`, `npm run v1v2:deployed`/`v1v2:check`).
+  Leest de werkelijke alarmbeslissingen uit `prediction_snapshots` (getunede live-config) tegen de echte
+  uitkomst. V2 heeft hogere precisie (0.30 vs 0.24), ~30% minder valse alarmen en betere F1 (0.42 vs 0.36)
+  dan V1, tegen kleine recall-daling (0.70 vs 0.73). **V2 als primaire alarmbron is terecht**; een eerder
+  ruw recompute-cijfer (DEFAULT_PARAMS, zonder pattern) dat het tegendeel suggereerde is ingetrokken.
+- **Onderzoeksrapport** `reactieve-hypo-onderzoeksrapport.md`: bundelt alle tests (vorm, RIG, V1/V2-vergelijking
+  + gedeployed, feature-extensies). Conclusie: niet op extra CGM-features bouwen (alle getest, geen operationele
+  winst); V1/V2 zit al dicht bij het praktische plafond; enige hefboom = externe context (maaltijd/activiteit).
 
 ### Grafiek-interactie
 
