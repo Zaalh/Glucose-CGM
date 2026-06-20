@@ -75,11 +75,17 @@ een expliciet **vals-alarm-budget** — zonder nieuwe features, zonder de live-f
 - [ ] Test **V1 ∨ V2-unie** of een recall-ondergrens, zodat V2's vals-alarm-winst geen echte hypo's
       kost. Vergelijk op event-niveau tegen V2-alleen.
 
-**M5 — Gegradeerde waarschuwing. [AANBEVOLEN na M3]**
-- [ ] M3 toont dat lead en weinig-valse-alarmen elkaar uitsluiten bij één drempel. Een gegradeerd
-      alarm lost dat op: lage drempel = vroege zachte "let op" (lange lead, meer vals, niet-indringend)
-      vs hoge drempel = "urgent" (weinig vals, korte lead, indringend). Meet de twee niveaus apart op
-      event-niveau. Dit is de logische manier om de frontier te benutten i.p.v. één compromis.
+**M5 — Gegradeerde waarschuwing. [GEMETEN — werkt; bouwen = tiers kalibreren]**
+- [x] `scripts/evaluate-graded-alarm.mjs` (`npm run alarm:graded`). Resultaat (70,8 dagen, 55 events):
+      **WATCH** (≤12/dag, zacht) recall 1.0, lead 19m; **URGENT** (≤3/dag, indringend) recall 0.855,
+      lead 6m; 47/55 events escaleren, WATCH waarschuwt mediaan 8m eerder. Lost het M3-dilemma op:
+      geen keuze nodig tussen vroeg en weinig-vals.
+- **Bouwen ≠ from scratch:** de V2-detector heeft al `watch/high/urgent`. De ingreep is die tiers
+      kalibreren op deze werkpunten **en de WATCH-UI passief maken** (subtiele kleur/badge, geen
+      geluid/push) — de hele winst hangt op niet-indringende WATCH (anders 12/dag = moeheid).
+- **Aandacht:** URGENT mist ~15% (escaleert niet), maar die events krijgen wél WATCH (recall 1.0),
+      dus niets wordt volledig gemist. Drempels (10/20) zijn recompute-schaal → live mappen/kalibreren.
+- **Open (bouwfase, live-wijziging):** achter omkeerbare flag, shadow-meten, `--force-recreate nightscout-ui`.
 
 ## Risico's & waarborgen (senior)
 

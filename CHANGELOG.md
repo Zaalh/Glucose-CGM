@@ -69,6 +69,10 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   ~29 valse alarmen/dag; terug naar ~4/dag laat de lead instorten naar ~6m. Met CGM-alleen kun je niet
   tegelijk weinig vals-alarmeren én vroeg waarschuwen → bevestigt context-data als enige echte hefboom.
   Vervolg: M5 (gegradeerd alarm) in `alarm-kwaliteit-plan.md`.
+- **Gegradeerd alarm gemeten (M5)** (`scripts/evaluate-graded-alarm.mjs`, `npm run alarm:graded`/`alarm:graded-check`).
+  Twee-niveau schema lost het M3-dilemma op: WATCH (zacht, ≤12/dag) recall 1.0 + lead 19m; URGENT
+  (indringend, ≤3/dag) recall 0.855 + lead 6m; 47/55 events escaleren (WATCH ~8m eerder). Werkt, mits
+  WATCH passief is. Bouwen = de bestaande V2 watch/high/urgent-tiers kalibreren, niet from scratch.
 
 ### Grafiek-interactie
 
