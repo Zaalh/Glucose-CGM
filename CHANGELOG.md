@@ -53,6 +53,17 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   + gedeployed, feature-extensies). Conclusie: niet op extra CGM-features bouwen (alle getest, geen operationele
   winst); V1/V2 zit al dicht bij het praktische plafond; enige hefboom = externe context (maaltijd/activiteit).
 
+### Alarm-kwaliteit: event-niveau evaluatie (M1+M2)
+
+- **Gedeelde eval-metrics** (`scripts/lib/eval-metrics.mjs`): klinisch hypo-event (<3.9, ≥15m sustained),
+  alarm-event-consolidatie (merge-gap), event-scoring met detectie-tolerantie (sensorlag), lead-time +
+  ranking-helpers. Eén bron tegen drift.
+- **Event-niveau nulmeting V1/V2** (`scripts/evaluate-alarm-quality.mjs`, `npm run alarm:quality`/`alarm:check`).
+  Over 14,8 dagen / 39 echte hypo-events: V1 recall 0.97, 12,8 valse alarmen/dag, lead 23m; V2 recall 0.97,
+  14,4 valse alarmen/dag, lead 23m. Recall is hoog (beter dan punt-niveau suggereerde) en V1≈V2 op event-niveau;
+  de **alarmlast (~13/dag, precisie ~0.14) is het echte probleem**. Plan + vervolg (M3: drempel op vals-alarm-budget)
+  in `alarm-kwaliteit-plan.md`.
+
 ### Grafiek-interactie
 
 - **Bolletjes aanklikken zet de vakjes op dat punt; "live"-knop springt terug** (`nightscout-overlay/rate-overlay.js`).
