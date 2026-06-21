@@ -1586,9 +1586,14 @@ async function getAiStats(days) {
       artHour[h].eps++
       if (flags.includes('single_point_low') || flags.includes('possible_compression_low')) artHour[h].art++
     }
+    // Fail-safe (medische review): een per-uur artefact-% op te weinig episodes is ruis en
+    // kan vals geruststellen (bv. artefactPct=0 op 2 episodes in een nacht-uur → de
+    // nacht-/compressie-voorzichtigheid ten onrechte loslaten). Onder deze drempel laten we
+    // artefactPct null, zodat het model terugvalt op de aggregaat- en nacht-guardrails.
+    const ARTEFACT_MIN_EPISODES = 5
     for (let h = 0; h < 24; h++) {
       perHour[h].episodeN = artHour[h].eps
-      perHour[h].artefactPct = artHour[h].eps ? round((artHour[h].art / artHour[h].eps) * 100, 0) : null
+      perHour[h].artefactPct = artHour[h].eps >= ARTEFACT_MIN_EPISODES ? round((artHour[h].art / artHour[h].eps) * 100, 0) : null
     }
     // Wanneer draaide de episode-builder voor het laatst? Elke build zet updatedAt
     // op alle episodes, dus de hoogste updatedAt = laatste build. Hiermee meten we
