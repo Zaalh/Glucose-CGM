@@ -117,12 +117,16 @@ check(system.includes('agpSummary'), 'system-prompt verwijst niet naar agpSummar
 {
   const lowObs = { summary: 'Kwetsbaar venster rond 06:00 met hoge lage-percentages', hypothesis: 'verhoogd risico op dalingen', needsUserConfirmation: false }
   const highObs = { summary: 'TIR is 93% met stabiel profiel', hypothesis: 'gunstige variabiliteit', needsUserConfirmation: false }
+  const confirmedObs = { summary: 'Eén bevestigde hypo (3.607 mmol/L) gemeld door gebruiker', hypothesis: 'reële episode', needsUserConfirmation: false }
   const artefact = { reactive: { pctPostprandialCandidate: 0, medianRecoveryMin: 2, pctPoorQuality: 23 } }
   const healthy = { reactive: { pctPostprandialCandidate: 60, medianRecoveryMin: 25, pctPoorQuality: 5 } }
   check(enforceLowConfirmation([lowObs], artefact)[0].needsUserConfirmation === true, 'hardening: artefact-data + low → needsConfirm geforceerd')
   check(enforceLowConfirmation([highObs], artefact)[0].needsUserConfirmation === false, 'hardening: artefact-data + niet-low → ongemoeid')
   check(enforceLowConfirmation([lowObs], healthy)[0].needsUserConfirmation === false, 'hardening: gezonde data → geen override')
-  check(enforceLowConfirmation([lowObs], artefact, [{ type: 'fingerstick_confirmed' }])[0].needsUserConfirmation === false, 'hardening: fingerprik bevestigd → override opgeheven')
+  // Lift is PER OBSERVATIE: een obs die zelf naar bevestiging verwijst is vrijgesteld...
+  check(enforceLowConfirmation([confirmedObs], artefact)[0].needsUserConfirmation === false, 'hardening: obs die bevestiging citeert → vrijgesteld')
+  // ...maar dat mag de backstop voor de óverige artefact-low-obs niet uitschakelen (regressie #1).
+  check(enforceLowConfirmation([confirmedObs, lowObs], artefact)[1].needsUserConfirmation === true, 'hardening: bevestigde obs schakelt backstop voor andere low-obs NIET uit')
   check(lowsNeedConfirmation({ reactive: { pctPostprandialCandidate: 60, medianRecoveryMin: 3, pctPoorQuality: 5 } }) === true, 'hardening: snel herstel (3min) triggert')
   check(enforceLowConfirmation([lowObs], null)[0].needsUserConfirmation === false, 'hardening: stats=null → veilig ongemoeid')
   const orig = { ...lowObs }; enforceLowConfirmation([lowObs], artefact); check(lowObs.needsUserConfirmation === orig.needsUserConfirmation, 'hardening: puur (origineel onaangetast)')

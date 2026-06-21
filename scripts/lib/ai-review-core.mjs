@@ -332,26 +332,31 @@ function sourceName(aiResult) {
 // postprandiale koppeling, zeer snel herstel, veel slechte kwaliteit, geen fingerprik-
 // bevestiging), forceren we needsUserConfirmation=true op elke LOW-gerelateerde observatie.
 const LOW_TERMS = /(hypo|laag|lage|low|daling|dip|nadir|kwetsbaar|onder\s*3|<\s*3)/i
+// Een observatie die zélf naar bevestiging verwijst (een gemelde/fingerprik-bevestigde hypo)
+// is geen onbevestigde claim → die hoeft de override niet. De lift is dus PER OBSERVATIE,
+// niet globaal: één historisch bevestigde hypo mag de backstop voor de overige (artefact-)
+// low-observaties niet uitschakelen.
+const CONFIRMED_TERMS = /(bevestigd|fingerprik|vingerprik|gemeld|confirmed)/i
 
-export function lowsNeedConfirmation(stats, feedback = []) {
+// Heeft de dataset artefact-/onbevestigd-laag-kenmerken? (geen postprandiale koppeling,
+// zeer snel herstel, of veel slechte kwaliteit.)
+export function lowsNeedConfirmation(stats) {
   const r = stats?.reactive
   if (!r) return false
   const noPostprandial = (r.pctPostprandialCandidate ?? 0) <= 5
   const fastRecovery = r.medianRecoveryMin != null && r.medianRecoveryMin <= 5
   const poorQuality = (r.pctPoorQuality ?? 0) >= 20
-  const fingerstickConfirmed = Array.isArray(feedback)
-    && feedback.some((f) => f && (f.type === 'fingerstick_confirmed' || f.type === 'confirmed'))
-  // Bevestigde fingerprik heft de override op (dan is er échte grond).
-  return (noPostprandial || fastRecovery || poorQuality) && !fingerstickConfirmed
+  return noPostprandial || fastRecovery || poorQuality
 }
 
-// Forceert needsUserConfirmation op low-gerelateerde observaties wanneer de data dat eist.
-// Puur/zonder side-effects → unit-testbaar zonder LLM.
-export function enforceLowConfirmation(observations, stats, feedback = []) {
-  if (!lowsNeedConfirmation(stats, feedback)) return observations
+// Forceert needsUserConfirmation op low-gerelateerde observaties wanneer de data dat eist,
+// behalve op observaties die zélf naar bevestiging verwijzen. Puur → unit-testbaar zonder LLM.
+export function enforceLowConfirmation(observations, stats) {
+  if (!lowsNeedConfirmation(stats)) return observations
   return observations.map((o) => {
     const text = `${o?.summary || ''} ${o?.hypothesis || ''}`
-    return LOW_TERMS.test(text) ? { ...o, needsUserConfirmation: true } : o
+    if (!LOW_TERMS.test(text) || CONFIRMED_TERMS.test(text)) return o
+    return { ...o, needsUserConfirmation: true }
   })
 }
 
@@ -435,7 +440,7 @@ export async function runAiReview({ db, aiRouter, dryRun = false, force = false,
     : []
   // Deterministische veiligheids-override op de LLM-output (residu #1): bevestiging eisen
   // op low-observaties wanneer de data artefact-/onbevestigd is.
-  const observations = enforceLowConfirmation(cleanedObservations, stats, feedback)
+  const observations = enforceLowConfirmation(cleanedObservations, stats)
   const questions = Array.isArray(ai.parsed?.questions)
     ? ai.parsed.questions.map((q) => cleanQuestion(q, now, source, runId, ai.model)).filter((q) => q.question).slice(0, 3)
     : []
