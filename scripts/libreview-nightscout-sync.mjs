@@ -78,6 +78,18 @@ const AI_REVIEW_MIN_INTERVAL_MS = Math.max(0, Number(process.env.AI_REVIEW_MIN_I
 let aiReviewRunning = false
 let aiReviewLastAt = 0
 let aiModelsCache = { at: 0, models: null }
+// Event-driven cadans (cadans-onderzoek: hybride — detector per minuut, LLM getriggerd).
+// De verrijkte review draait wanneer er íets gebeurt (risico-escalatie naar watch+ of een
+// nieuwe episode), met een eigen ruime min-interval tegen spam; plus 1 dag-digest/dag.
+// Alles fire-and-forget: de sync-loop wacht nooit op de LLM-call. Uit te zetten met
+// AI_EVENT_REVIEW=0 / AI_DAILY_DIGEST=0.
+const AI_EVENT_REVIEW = String(process.env.AI_EVENT_REVIEW ?? '1') !== '0'
+const AI_EVENT_MIN_INTERVAL_MS = Math.max(0, Number(process.env.AI_EVENT_MIN_INTERVAL_MINUTES ?? 30)) * 60_000
+const AI_DAILY_DIGEST = String(process.env.AI_DAILY_DIGEST ?? '1') !== '0'
+let lastAlarmRank = 0      // hoogste alarm-rang vorige cyclus (escalatie-detectie)
+let lastEventReviewAt = 0
+let lastEpisodeCount = null // episode-telling vorige build (nieuwe-episode-detectie)
+let lastDigestDay = null   // YYYY-MM-DD van het laatste dag-digest
 // Korte cache: source-health wordt bij het openen van het paneel meermaals opgevraagd
 // (banner + reminders + patterns). 15s is ruim binnen de meet-resolutie (minuten).
 let sourceHealthCache = { at: 0, data: null }
@@ -107,6 +119,7 @@ async function runForever() {
     await maybeBuildEpisodes().catch((err) => {
       console.error(`[libreview-sync] episode-build: ${formatError(err)}`)
     })
+    maybeDailyDigest() // fire-and-forget: 1 dag-digest per kalenderdag
     await sleep(readConfig(false).intervalSeconds * 1000)
   }
 }
@@ -124,10 +137,61 @@ async function maybeBuildEpisodes() {
     episodesBuildLastAt = Date.now()
     if (result && result.ok) {
       console.log(`[libreview-sync] episodes herbouwd: ${result.episodes} episode(s) uit ${result.scannedEntries} entries`)
+      // Nieuwe episode gesloten sinds de vorige build → event-driven review.
+      if (lastEpisodeCount != null && result.episodes > lastEpisodeCount) fireEventReview('nieuwe-episode')
+      lastEpisodeCount = result.episodes
     }
   } finally {
     episodesBuildRunning = false
   }
+}
+
+// Rang van een alarm-niveau voor escalatie-detectie. V2 'likely' telt als 'high'.
+function alarmRank(level) {
+  switch (level) {
+    case 'urgent': return 3
+    case 'high':
+    case 'likely': return 2
+    case 'watch': return 1
+    default: return 0
+  }
+}
+
+// Vuurt de verrijkte review fire-and-forget. Lock + eigen min-interval voorkomen
+// spam/overlap; NOOIT await in de sync-loop (de LLM-call mag de volgende minuut-sync
+// niet vertragen).
+function fireEventReview(reason) {
+  if (!AI_EVENT_REVIEW || aiReviewRunning) return
+  const now = Date.now()
+  if (lastEventReviewAt && now - lastEventReviewAt < AI_EVENT_MIN_INTERVAL_MS) return
+  if (!aiRouterConfigured(resolveAiRouterConfig())) return
+  lastEventReviewAt = now
+  runAiReviewOnce()
+    .then((r) => console.log(`[libreview-sync] event-review (${reason}): ${JSON.stringify({ skipped: r.skipped, obs: r.observations?.length })}`))
+    .catch((err) => console.error(`[libreview-sync] event-review (${reason}): ${formatError(err)}`))
+}
+
+// Risico-escalatie: review wanneer het effectieve alarm (V1 of V2) naar watch+ klimt
+// vanaf een lager niveau. Geen review bij gelijk blijven of dalen (tegen spam).
+function onRiskComputed(snapResult) {
+  if (!snapResult) return
+  const rank = Math.max(alarmRank(snapResult.risk), alarmRank(snapResult.v2Risk))
+  const escalated = rank >= alarmRank('watch') && rank > lastAlarmRank
+  lastAlarmRank = rank
+  if (escalated) fireEventReview('risico-escalatie')
+}
+
+// Dagelijkse digest: één narratief dagrapport per kalenderdag (batch/historische duiding
+// hoort 1×/dag, niet per minuut). Fire-and-forget; draait ook één keer kort na (her)start.
+function maybeDailyDigest() {
+  if (!AI_DAILY_DIGEST || aiReviewRunning) return
+  const today = new Date().toISOString().slice(0, 10)
+  if (lastDigestDay === today) return
+  if (!aiRouterConfigured(resolveAiRouterConfig())) return
+  lastDigestDay = today
+  runAiReportOnce({ type: 'daily' })
+    .then((r) => console.log(`[libreview-sync] dag-digest: ${JSON.stringify({ skipped: r.skipped })}`))
+    .catch((err) => console.error(`[libreview-sync] dag-digest: ${formatError(err)}`))
 }
 
 async function syncOnce() {
@@ -158,7 +222,8 @@ async function syncOnce() {
   }
 
   await uploadEntries(entries)
-  await writePredictionSnapshots(entries, previousEntries)
+  const snapResult = await writePredictionSnapshots(entries, previousEntries)
+  onRiskComputed(snapResult)
   console.log(`[libreview-sync] ${entries.length} metingen naar Nightscout geschreven. ${debugInfo}`)
   return {
     success: true,
@@ -419,6 +484,10 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
   } finally {
     if (client) await client.close().catch(() => undefined)
   }
+  // Nieuwste snapshot teruggeven zodat de loop een risico-escalatie kan detecteren
+  // (event-driven review). Risico's worden ook bij een write-fout berekend.
+  const newest = snapshots.length ? snapshots[snapshots.length - 1] : null
+  return newest ? { risk: newest.risk ?? null, v2Risk: newest.shadowRisk ?? null } : null
 }
 
 // V2-niveau -> alarm-vocabulaire van de overlay/V1 ('likely' bestaat daar niet).
