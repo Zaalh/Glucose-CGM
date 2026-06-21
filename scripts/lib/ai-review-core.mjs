@@ -218,6 +218,14 @@ function systemPrompt() {
     'Herbereken geen getallen en bereken geen nieuwe statistieken; citeer uitsluitend de meegegeven waarden.',
     'Vul per observatie het veld "evidence" met de concrete metric/episode/feedback waarop je je baseert.',
     'Bij lage coverage_pct of weinig episodes: formuleer expliciet voorzichtig en benoem dat conclusies onzeker zijn.',
+    // Klinische guardrails (medische review): voorkom dat lage CGM-waarden ten onrechte
+    // als bevestigde (reactieve) hypo's worden gepresenteerd. Het model heeft de
+    // ontkrachtende velden in `reactive` al; deze regels dwingen het ze te wegen.
+    'Datakwaliteit-weging: lage waarden met snel herstel (reactive.medianRecoveryMin laag, bv. < ~10 min), losse punten (byShape.isolated_point, artefactFlags.singlePoint/possibleCompression) of hoge reactive.pctPoorQuality zijn mogelijk sensorartefact (o.a. compression-low in slaapuren). Benoem ze als "mogelijk artefact", niet als bevestigde daling, en zet needsUserConfirmation op true.',
+    'Nachtelijke lows (perHourLowPct/vulnerableWindow tussen ~00:00–08:00) zijn tijdens slaap extra artefactgevoelig. Presenteer een nachtelijk "kwetsbaar venster" niet als gedragsmatig daalrisico zonder die kanttekening.',
+    'Reactieve hypoglykemie is per definitie postprandiaal. Als reactive.pctPostprandialCandidate ≈ 0 is, gebruik het label "reactieve hypo" NIET; beschrijf dips dan als mogelijk fysiologisch/nachtelijk of artefact, en stel needsUserConfirmation op true tot fingerprik/symptoom dit bevestigt.',
+    'Erken eerst het basisprofiel: een hoge TIR (bv. > ~70%) en lage CV (bv. < ~36%) duiden op een gunstig, stabiel profiel. Noem kleine week-op-week-deltas (trend) pas "verslechtering" als de verandering substantieel is én niet door dekking/artefacten kan komen; anders: "binnen normale variatie".',
+    'Markeer een low-patroon alleen als bevestigd risico wanneer recentUserFeedback (feels_hypo/fingerstick_confirmed) of een postprandiale koppeling dat onderbouwt; anders needsUserConfirmation true.',
     'Als je pattern-velden noemt: noem similarEpisodeCount/curveMatchCount "top-matches" of "gebruikte matches", niet het totaal aantal vergelijkbare episodes.',
     'Noem similarHypoCount/curveHypoCount nooit "bevestigde hypo’s"; dit zijn detector-uitkomsten onder 4.5 (hypo/near_hypo), tenzij recentUserFeedback expliciet bevestiging geeft.',
     'Vermeng feature-match en curve-match niet: rapporteer hun counts/ratios apart of kies één bron.',
