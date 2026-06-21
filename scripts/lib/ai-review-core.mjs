@@ -152,6 +152,11 @@ function compactStats(stats) {
     mean_mmol: stats.mean ?? null,
     cv_pct: stats.cv ?? null,
     lows_count: stats.lows?.count ?? null,
+    // #2 Dag/nacht-TBR (nacht = artefactgevoelig) en #3 betrouwbaarheid van de dataset.
+    dayNight: stats.dayNight ?? null,
+    dataSufficiency: stats.dataSufficiency ?? null,
+    // #1 Artefact-gecorrigeerde hypo-belasting: schone vs artefact-episodes + burden.
+    hypoBurden: stats.hypoBurden ?? null,
     trend: stats.trend ?? null,
     // De reactieve-episode-digest is de meest use-case-relevante samenvatting.
     reactive: stats.reactive ?? null,
@@ -226,6 +231,7 @@ function systemPrompt() {
     'Datakwaliteit-weging: lage waarden met snel herstel (reactive.medianRecoveryMin laag, bv. < ~10 min), losse punten (byShape.isolated_point, artefactFlags.singlePoint/possibleCompression) of hoge reactive.pctPoorQuality zijn mogelijk sensorartefact (o.a. compression-low in slaapuren). Benoem ze als "mogelijk artefact", niet als bevestigde daling, en zet needsUserConfirmation op true.',
     'Gebruik perHourLowPct[].artefactPct als data-gedreven artefact-signaal per uur: is dat hoog (bv. > ~50%), dan zijn de lows in dat uur grotendeels artefact (single-point/compressie) — presenteer dat uur dan niet als bevestigd daalrisico. ONTBREEKT artefactPct (te weinig episodes voor een betrouwbaar cijfer), trek dan GEEN conclusie dat het uur "echt" is; leun op de aggregaat-artefactsignalen en op het feit dat nachtelijke uren (~00:00–08:00) sowieso artefactgevoelig zijn (slaap/compressie).',
     'Reactieve hypoglykemie is per definitie postprandiaal. Als reactive.pctPostprandialCandidate ≈ 0 is, gebruik het label "reactieve hypo" NIET; beschrijf dips dan als mogelijk fysiologisch/nachtelijk of artefact, en stel needsUserConfirmation op true tot fingerprik/symptoom dit bevestigt.',
+    'Beschrijf de hypo-belasting eerlijk met hypoBurden: noem de schone belasting (cleanEpisodes / areaBelow3_9Clean) náást het totaal, zodat artefact-episodes het beeld niet opblazen. Gebruik dayNight (nacht-TBR vs dag-TBR) om nacht vs dag te scheiden. Is dataSufficiency.reliable=false, formuleer dan expliciet voorzichtig.',
     'Erken eerst het basisprofiel: een hoge TIR (bv. > ~70%) en lage CV (bv. < ~36%) duiden op een gunstig, stabiel profiel. Noem kleine week-op-week-deltas (trend) pas "verslechtering" als de verandering substantieel is én niet door dekking/artefacten kan komen; anders: "binnen normale variatie".',
     'Markeer een low-patroon alleen als bevestigd risico wanneer recentUserFeedback (feels_hypo/fingerstick_confirmed) of een postprandiale koppeling dat onderbouwt; anders needsUserConfirmation true.',
     'Als je pattern-velden noemt: noem similarEpisodeCount/curveMatchCount "top-matches" of "gebruikte matches", niet het totaal aantal vergelijkbare episodes.',
@@ -473,6 +479,7 @@ function reportSystemPrompt() {
     'Datakwaliteit-weging: lage waarden met snel herstel (reactive.medianRecoveryMin laag), losse punten (byShape.isolated_point, artefactFlags.singlePoint/possibleCompression) of hoge reactive.pctPoorQuality zijn mogelijk sensorartefact (o.a. compression-low in slaapuren). Benoem ze als "mogelijk artefact", niet als bevestigde daling.',
     'Gebruik perHour[].artefactPct: een uur met hoog artefactPct (bv. > ~50%) bevat vooral artefact-lows (single-point/compressie) — presenteer dat uur niet als bevestigd daalrisico. Ontbreekt artefactPct (te weinig episodes), concludeer dan NIET dat het uur "echt" is; nachtelijke uren (00:00–08:00) blijven sowieso artefactgevoelig.',
     'Beweer samenhang met maaltijden ALLEEN als reactive.pctPostprandialCandidate dat steunt. Is die ≈ 0, stel dan NIET dat dalingen "postprandiaal" of maaltijdgerelateerd zijn; beschrijf ze als mogelijk fysiologisch/nachtelijk of artefact.',
+    'Gebruik hypoBurden voor een eerlijke belasting (schone cleanEpisodes/areaBelow3_9Clean náást het totaal) en dayNight (nacht-TBR vs dag-TBR) om nacht/dag te scheiden. Bij dataSufficiency.reliable=false: formuleer expliciet voorzichtig.',
     'Erken een gunstig basisprofiel (hoge TIR, lage CV) en noem kleine week-op-week-deltas pas "verslechtering" als de verandering substantieel is én niet door dekking/artefacten kan komen.',
     'Antwoord UITSLUITEND met geldige JSON: {"title":"...","body":"..."}. body = 3–6 korte zinnen of bullets in platte tekst (geen markdown-koppen).',
   ].join('\n')

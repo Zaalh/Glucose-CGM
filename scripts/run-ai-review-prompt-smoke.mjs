@@ -104,6 +104,20 @@ check(system.includes('agpSummary'), 'system-prompt verwijst niet naar agpSummar
   check(h6 && h6.artefactPct === 80, 'uur met artefactPct → meegegeven ({hour,lowPct,artefactPct})')
   check(h14 && !('artefactPct' in h14), 'uur met artefactPct=null → veld weggelaten')
 }
+// Verbeterde statistiek (#1 burden, #2 dag/nacht, #3 sufficiency) stromen door compactStats.
+{
+  const s = {
+    window: { days: 14 }, coveragePct: 85, tbr: 4.9, veryLow: 0.6, tir: 93,
+    hypoBurden: { episodes: 70, artefactEpisodes: 16, cleanEpisodes: 54, artefactPct: 23, areaBelow3_9: 176, areaBelow3_9Clean: 120 },
+    dayNight: { night: { n: 5000, tbr: 8.0, tir: 90 }, day: { n: 12000, tbr: 3.7, tir: 94 } },
+    dataSufficiency: { reliable: true, days: 14, coveragePct: 85, standard: '≥14d & ≥70% dekking' },
+    perHour: [],
+  }
+  const a = JSON.parse(previewReviewPrompt({ stats: s, episodes: [] }).user).agpSummary
+  check(a.hypoBurden && a.hypoBurden.cleanEpisodes === 54 && a.hypoBurden.areaBelow3_9Clean === 120, 'hypoBurden (#1) stroomt door')
+  check(a.dayNight && a.dayNight.night.tbr === 8.0 && a.dayNight.day.tbr === 3.7, 'dayNight (#2) stroomt door')
+  check(a.dataSufficiency && a.dataSufficiency.reliable === true, 'dataSufficiency (#3) stroomt door')
+}
 // Episode-cap top-5 + ontbrekende velden → null (geen crash).
 {
   const many = Array.from({ length: 12 }, (_, i) => ({ peakAt: `2026-06-${10 + i}T11:00:00Z`, readings: [1, 2, 3] }))

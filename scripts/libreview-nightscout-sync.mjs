@@ -1577,14 +1577,29 @@ async function getAiStats(days) {
     // data-gedreven artefact-signaal per uur i.p.v. de grove "00–08u"-vuistregel. Zelfde
     // timezone-bucketing (hourFmt) als perHour, zodat de uren één-op-één matchen.
     const artHour = Array.from({ length: 24 }, () => ({ eps: 0, art: 0 }))
+    // #1 Artefact-gecorrigeerde hypo-belasting: scheid episodes met een artefact-flag
+    // (single-point / mogelijke compressie) van de "schone" episodes, zodat de eerlijke
+    // burden los van waarschijnlijke sensorartefacten te zien is.
+    let burdenEpsArt = 0, areaAll = 0, areaClean = 0
     for (const e of reactiveEpisodes) {
       const t = e.nadirAt || e.peakAt
       if (!t) continue
       const h = Number(hourFmt.format(new Date(t))) % 24
       if (!Number.isInteger(h) || h < 0 || h > 23) continue
       const flags = Array.isArray(e.qualityFlags) ? e.qualityFlags : []
+      const isArtefact = flags.includes('single_point_low') || flags.includes('possible_compression_low')
+      const area = Number(e.areaBelow3_9) || 0
+      areaAll += area
       artHour[h].eps++
-      if (flags.includes('single_point_low') || flags.includes('possible_compression_low')) artHour[h].art++
+      if (isArtefact) { artHour[h].art++; burdenEpsArt++ } else { areaClean += area }
+    }
+    const hypoBurden = {
+      episodes: reactiveEpisodes.length,
+      artefactEpisodes: burdenEpsArt,
+      cleanEpisodes: reactiveEpisodes.length - burdenEpsArt,
+      artefactPct: reactiveEpisodes.length ? round((burdenEpsArt / reactiveEpisodes.length) * 100, 0) : 0,
+      areaBelow3_9: round(areaAll, 1),
+      areaBelow3_9Clean: round(areaClean, 1),
     }
     // Fail-safe (medische review): een per-uur artefact-% op te weinig episodes is ruis en
     // kan vals geruststellen (bv. artefactPct=0 op 2 episodes in een nacht-uur → de
@@ -1602,17 +1617,29 @@ async function getAiStats(days) {
       .find({}, { projection: { _id: 0, updatedAt: 1 } })
       .sort({ updatedAt: -1 }).limit(1).toArray()
     const episodesBuiltAt = lastBuilt.length ? lastBuilt[0].updatedAt : null
+    // #2 Dag/nacht-split: nacht 00:00–07:59 (slaap/artefactgevoelig) vs dag 08:00–23:59.
+    // Uit de ruwe per-uur-tellingen (hourAgg) zodat TBR/TIR exact zijn.
+    const aggRange = (h0, h1) => {
+      let nn = 0, lo = 0, ir = 0
+      for (let h = h0; h <= h1; h++) { nn += hourAgg[h].n; lo += hourAgg[h].low; ir += hourAgg[h].inRange }
+      return { n: nn, tbr: nn ? round((lo / nn) * 100, 1) : null, tir: nn ? round((ir / nn) * 100, 1) : null }
+    }
+    const dayNight = { night: aggRange(0, 7), day: aggRange(8, 23) }
+    // #3 Data-sufficiency (AGP-standaard: ≥14 dagen én ≥70% dekking voor betrouwbare conclusies).
+    const coveragePct = round(Math.min(100, expected ? (n / expected) * 100 : 0), 0)
+    const dataSufficiency = { reliable: days >= 14 && coveragePct >= 70, days, coveragePct, standard: '≥14d & ≥70% dekking' }
     return {
       window: { days, from: new Date(from).toISOString(), to: new Date(to).toISOString() },
       count: n,
       latestEntryAt: rows.length ? new Date(rows[rows.length - 1].date).toISOString() : null,
       episodesBuiltAt,
-      coveragePct: round(Math.min(100, expected ? (n / expected) * 100 : 0), 0),
+      coveragePct,
       mean: n ? round(mean, 1) : null, sd: n ? round(sd, 1) : null, cv: mean ? round((sd / mean) * 100, 0) : null,
-      gmi, median: q(0.5), p25: q(0.25), p75: q(0.75),
+      gmi, gmiClinicalRelevance: 'low', median: q(0.5), p25: q(0.25), p75: q(0.75),
       tir: pct(inRange), tbr: pct(below), veryLow: pct(veryLow), tar: pct(above), veryHigh: pct(veryHigh),
       min: n ? round(min, 1) : null, max: n ? round(max, 1) : null,
       lows: { count: lowEpisodes, longestMin: round(longestLowMin, 0) },
+      hypoBurden, dayNight, dataSufficiency,
       perHour, perWeekday, heatmap, trend, reactive, highToLowContext,
     }
   } finally {
