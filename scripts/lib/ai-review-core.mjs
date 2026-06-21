@@ -132,12 +132,14 @@ function compactSnapshot(s) {
 // narreert, rekent niet — alle waarden komen deterministisch uit getAiStats.
 // Eenheid-in-sleutel + TBR-first (de hoofdmetric bij reactieve hypo zonder insuline).
 // `heatmap`/`perWeekday`/`gmi` en de per-uur-percentielen worden bewust weggelaten om
-// het token-budget te bewaken; `perHour` wordt gereduceerd tot {hour, lowPct} (precies
-// wat "wanneer dip ik" nodig heeft).
+// het token-budget te bewaken; `perHour` wordt gereduceerd tot {hour, lowPct, artefactPct}
+// (wanneer dip ik + hoe artefactgevoelig is dat uur, §21 #4).
 function compactStats(stats) {
   if (!stats) return null
   const perHourLowPct = Array.isArray(stats.perHour)
-    ? stats.perHour.filter((p) => p && p.n).map((p) => ({ hour: p.hour, lowPct: p.lowPct }))
+    ? stats.perHour
+        .filter((p) => p && p.n)
+        .map((p) => (p.artefactPct != null ? { hour: p.hour, lowPct: p.lowPct, artefactPct: p.artefactPct } : { hour: p.hour, lowPct: p.lowPct }))
     : []
   return {
     window_days: stats.window?.days ?? null,
@@ -222,7 +224,7 @@ function systemPrompt() {
     // als bevestigde (reactieve) hypo's worden gepresenteerd. Het model heeft de
     // ontkrachtende velden in `reactive` al; deze regels dwingen het ze te wegen.
     'Datakwaliteit-weging: lage waarden met snel herstel (reactive.medianRecoveryMin laag, bv. < ~10 min), losse punten (byShape.isolated_point, artefactFlags.singlePoint/possibleCompression) of hoge reactive.pctPoorQuality zijn mogelijk sensorartefact (o.a. compression-low in slaapuren). Benoem ze als "mogelijk artefact", niet als bevestigde daling, en zet needsUserConfirmation op true.',
-    'Nachtelijke lows (perHourLowPct/vulnerableWindow tussen ~00:00–08:00) zijn tijdens slaap extra artefactgevoelig. Presenteer een nachtelijk "kwetsbaar venster" niet als gedragsmatig daalrisico zonder die kanttekening.',
+    'Gebruik perHourLowPct[].artefactPct als data-gedreven artefact-signaal per uur: is dat hoog (bv. > ~50%), dan zijn de lows in dat uur grotendeels artefact (single-point/compressie) — presenteer dat uur dan niet als bevestigd daalrisico. Nachtelijke uren (~00:00–08:00) zijn sowieso artefactgevoelig (slaap/compressie).',
     'Reactieve hypoglykemie is per definitie postprandiaal. Als reactive.pctPostprandialCandidate ≈ 0 is, gebruik het label "reactieve hypo" NIET; beschrijf dips dan als mogelijk fysiologisch/nachtelijk of artefact, en stel needsUserConfirmation op true tot fingerprik/symptoom dit bevestigt.',
     'Erken eerst het basisprofiel: een hoge TIR (bv. > ~70%) en lage CV (bv. < ~36%) duiden op een gunstig, stabiel profiel. Noem kleine week-op-week-deltas (trend) pas "verslechtering" als de verandering substantieel is én niet door dekking/artefacten kan komen; anders: "binnen normale variatie".',
     'Markeer een low-patroon alleen als bevestigd risico wanneer recentUserFeedback (feels_hypo/fingerstick_confirmed) of een postprandiale koppeling dat onderbouwt; anders needsUserConfirmation true.',
@@ -432,7 +434,7 @@ function reportSystemPrompt() {
     // Klinische guardrails (gelijk aan de observatie-review): voorkom over-confidence op
     // mogelijk artefactueel lage waarden en verzonnen postprandiale samenhang.
     'Datakwaliteit-weging: lage waarden met snel herstel (reactive.medianRecoveryMin laag), losse punten (byShape.isolated_point, artefactFlags.singlePoint/possibleCompression) of hoge reactive.pctPoorQuality zijn mogelijk sensorartefact (o.a. compression-low in slaapuren). Benoem ze als "mogelijk artefact", niet als bevestigde daling.',
-    'Nachtelijke lows (perHour 00:00–08:00) zijn tijdens slaap extra artefactgevoelig; presenteer een nachtelijk daalpatroon niet als gedragsmatig risico zonder die kanttekening.',
+    'Gebruik perHour[].artefactPct: een uur met hoog artefactPct (bv. > ~50%) bevat vooral artefact-lows (single-point/compressie) — presenteer dat uur niet als bevestigd daalrisico. Nachtelijke uren (00:00–08:00) zijn sowieso artefactgevoelig.',
     'Beweer samenhang met maaltijden ALLEEN als reactive.pctPostprandialCandidate dat steunt. Is die ≈ 0, stel dan NIET dat dalingen "postprandiaal" of maaltijdgerelateerd zijn; beschrijf ze als mogelijk fysiologisch/nachtelijk of artefact.',
     'Erken een gunstig basisprofiel (hoge TIR, lage CV) en noem kleine week-op-week-deltas pas "verslechtering" als de verandering substantieel is én niet door dekking/artefacten kan komen.',
     'Antwoord UITSLUITEND met geldige JSON: {"title":"...","body":"..."}. body = 3–6 korte zinnen of bullets in platte tekst (geen markdown-koppen).',

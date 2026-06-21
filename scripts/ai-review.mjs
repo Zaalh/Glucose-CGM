@@ -2,6 +2,29 @@ import { MongoClient } from 'mongodb'
 import { aiRouterConfigured, resolveAiRouterConfig, runAiReview } from './lib/ai-review-core.mjs'
 
 const DEFAULT_MONGO_URI = 'mongodb://nightscout-mongo:27017/nightscout'
+// CLI gelijktrekken met de server-review (§21 #5): haal dezelfde AGP-verrijking
+// (stats + episodes) op via de bestaande HTTP-endpoints van de draaiende server, zodat
+// `npm run ai:review` dezelfde verrijkte review draait zonder getAiStats/getAiEpisodes uit
+// het server-bestand te kopiëren. Onbereikbaar → nette fallback naar de dunne review.
+const DEFAULT_SERVER_URL = 'http://localhost:8787'
+
+async function fetchReviewEnrichment(baseUrl) {
+  try {
+    const [statsRes, epsRes] = await Promise.all([
+      fetch(`${baseUrl}/ai-review/stats?days=14`),
+      fetch(`${baseUrl}/ai-review/episodes?limit=20&days=14`),
+    ])
+    if (!statsRes.ok || !epsRes.ok) return null
+    const statsJson = await statsRes.json()
+    const epsJson = await epsRes.json()
+    return {
+      stats: statsJson && statsJson.ok !== false ? statsJson : null,
+      episodes: epsJson && Array.isArray(epsJson.episodes) ? epsJson.episodes : [],
+    }
+  } catch {
+    return null
+  }
+}
 
 function readCliArg(name) {
   const inline = process.argv.find((a) => a.startsWith(`--${name}=`))
@@ -36,7 +59,16 @@ async function main() {
   try {
     client = new MongoClient(mongoUri)
     await client.connect()
-    const result = await runAiReview({ db: client.db(), aiRouter, dryRun, force, limit })
+    // Verrijking ophalen van de server (zelfde context als de knop/loop); lukt dat niet,
+    // dan draait de review dunner op snapshots/feedback (stats=null, episodes=[]).
+    const serverUrl = process.env.AI_REVIEW_SERVER_URL ?? DEFAULT_SERVER_URL
+    const enrichment = await fetchReviewEnrichment(serverUrl)
+    if (!enrichment) console.error(`[ai-review] geen server-verrijking via ${serverUrl}; dunne review (snapshots/feedback).`)
+    const result = await runAiReview({
+      db: client.db(), aiRouter, dryRun, force, limit,
+      stats: enrichment?.stats ?? null,
+      episodes: enrichment?.episodes ?? [],
+    })
 
     if (result.skipped) {
       console.log(JSON.stringify({ ok: true, skipped: true, reason: result.reason }))

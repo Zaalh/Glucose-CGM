@@ -1572,6 +1572,24 @@ async function getAiStats(days) {
       .toArray()
     const highToLowContext = buildHighToLowContext(buildHighEpisodes(rows), reactiveEpisodes)
     const reactive = summarizeReactiveEpisodes(reactiveEpisodes)
+    // Per-uur artefact-aandeel (§21 #4): welk deel van de episodes met nadir in dat uur
+    // draagt een artefact-flag (single-point / mogelijke compressie). Geeft het model een
+    // data-gedreven artefact-signaal per uur i.p.v. de grove "00–08u"-vuistregel. Zelfde
+    // timezone-bucketing (hourFmt) als perHour, zodat de uren één-op-één matchen.
+    const artHour = Array.from({ length: 24 }, () => ({ eps: 0, art: 0 }))
+    for (const e of reactiveEpisodes) {
+      const t = e.nadirAt || e.peakAt
+      if (!t) continue
+      const h = Number(hourFmt.format(new Date(t))) % 24
+      if (!Number.isInteger(h) || h < 0 || h > 23) continue
+      const flags = Array.isArray(e.qualityFlags) ? e.qualityFlags : []
+      artHour[h].eps++
+      if (flags.includes('single_point_low') || flags.includes('possible_compression_low')) artHour[h].art++
+    }
+    for (let h = 0; h < 24; h++) {
+      perHour[h].episodeN = artHour[h].eps
+      perHour[h].artefactPct = artHour[h].eps ? round((artHour[h].art / artHour[h].eps) * 100, 0) : null
+    }
     // Wanneer draaide de episode-builder voor het laatst? Elke build zet updatedAt
     // op alle episodes, dus de hoogste updatedAt = laatste build. Hiermee meten we
     // staleness van de BUILD (loopt achter op de data), niet "geen recente daling".

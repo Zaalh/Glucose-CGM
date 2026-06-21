@@ -87,7 +87,22 @@ check(system.includes('agpSummary'), 'system-prompt verwijst niet naar agpSummar
   check(a.heatmap === undefined, 'heatmap moet weggelaten zijn')
   check(a.perWeekday === undefined, 'perWeekday moet weggelaten zijn')
   check(a.gmi === undefined, 'gmi moet weggelaten zijn')
-  check(a.perHourLowPct.every((p) => Object.keys(p).join(',') === 'hour,lowPct'), 'per-uur percentielen/mean/tir moeten gestript zijn')
+  check(a.perHourLowPct.every((p) => Object.keys(p).join(',') === 'hour,lowPct'), 'per-uur percentielen/mean/tir moeten gestript zijn (geen artefactPct → {hour,lowPct})')
+}
+// Per-uur artefact-rate (§21 #4): aanwezig artefactPct stroomt mee; afwezig → weggelaten.
+{
+  const s = {
+    window: { days: 14 }, coveragePct: 80,
+    perHour: [
+      { hour: 6, lowPct: 11, artefactPct: 80, n: 50 },
+      { hour: 14, lowPct: 4, artefactPct: null, n: 50 },
+    ],
+  }
+  const ph = JSON.parse(previewReviewPrompt({ stats: s, episodes: [] }).user).agpSummary.perHourLowPct
+  const h6 = ph.find((p) => p.hour === 6)
+  const h14 = ph.find((p) => p.hour === 14)
+  check(h6 && h6.artefactPct === 80, 'uur met artefactPct → meegegeven ({hour,lowPct,artefactPct})')
+  check(h14 && !('artefactPct' in h14), 'uur met artefactPct=null → veld weggelaten')
 }
 // Episode-cap top-5 + ontbrekende velden → null (geen crash).
 {
