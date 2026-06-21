@@ -6,7 +6,7 @@
 //   3) skip-conditie (W5) via mock-db: wanneer draait de review en wanneer slaat 'm over,
 //      zonder ooit Ollama te raken.
 // Faalt met exit 1 als een invariant breekt, zodat regressies opvallen.
-import { previewReviewPrompt, runAiReview } from './lib/ai-review-core.mjs'
+import { previewReviewPrompt, runAiReview, enforceLowConfirmation, lowsNeedConfirmation } from './lib/ai-review-core.mjs'
 
 const failures = []
 function check(cond, msg) {
@@ -111,6 +111,21 @@ check(system.includes('agpSummary'), 'system-prompt verwijst niet naar agpSummar
   check(u.recentEpisodes.length === 5, '12 episodes → top-5')
   check(u.recentEpisodes.every((e) => !('readings' in e)), 'episodes mogen geen ruwe readings bevatten')
   check(u.recentEpisodes[0].peakMmol === null, 'ontbrekend episode-veld → null')
+}
+
+// --- Blok 2b: deterministische low-confirmation hardening (residu #1) -------------
+{
+  const lowObs = { summary: 'Kwetsbaar venster rond 06:00 met hoge lage-percentages', hypothesis: 'verhoogd risico op dalingen', needsUserConfirmation: false }
+  const highObs = { summary: 'TIR is 93% met stabiel profiel', hypothesis: 'gunstige variabiliteit', needsUserConfirmation: false }
+  const artefact = { reactive: { pctPostprandialCandidate: 0, medianRecoveryMin: 2, pctPoorQuality: 23 } }
+  const healthy = { reactive: { pctPostprandialCandidate: 60, medianRecoveryMin: 25, pctPoorQuality: 5 } }
+  check(enforceLowConfirmation([lowObs], artefact)[0].needsUserConfirmation === true, 'hardening: artefact-data + low → needsConfirm geforceerd')
+  check(enforceLowConfirmation([highObs], artefact)[0].needsUserConfirmation === false, 'hardening: artefact-data + niet-low → ongemoeid')
+  check(enforceLowConfirmation([lowObs], healthy)[0].needsUserConfirmation === false, 'hardening: gezonde data → geen override')
+  check(enforceLowConfirmation([lowObs], artefact, [{ type: 'fingerstick_confirmed' }])[0].needsUserConfirmation === false, 'hardening: fingerprik bevestigd → override opgeheven')
+  check(lowsNeedConfirmation({ reactive: { pctPostprandialCandidate: 60, medianRecoveryMin: 3, pctPoorQuality: 5 } }) === true, 'hardening: snel herstel (3min) triggert')
+  check(enforceLowConfirmation([lowObs], null)[0].needsUserConfirmation === false, 'hardening: stats=null → veilig ongemoeid')
+  const orig = { ...lowObs }; enforceLowConfirmation([lowObs], artefact); check(lowObs.needsUserConfirmation === orig.needsUserConfirmation, 'hardening: puur (origineel onaangetast)')
 }
 
 // --- Blok 3: skip-conditie (W5) via mock-db, zonder Ollama -----------------------

@@ -326,6 +326,35 @@ function sourceName(aiResult) {
   return `ai-router:${provider}`
 }
 
+// Deterministische veiligheids-override (medische review, residu #1): Ollama Cloud kan het
+// JSON-contract niet afdwingen, dus het model zet needsUserConfirmation niet altijd terwijl
+// dat klinisch wél moet. Als de dataset artefact-/onbevestigd-laag-kenmerken heeft (geen
+// postprandiale koppeling, zeer snel herstel, veel slechte kwaliteit, geen fingerprik-
+// bevestiging), forceren we needsUserConfirmation=true op elke LOW-gerelateerde observatie.
+const LOW_TERMS = /(hypo|laag|lage|low|daling|dip|nadir|kwetsbaar|onder\s*3|<\s*3)/i
+
+export function lowsNeedConfirmation(stats, feedback = []) {
+  const r = stats?.reactive
+  if (!r) return false
+  const noPostprandial = (r.pctPostprandialCandidate ?? 0) <= 5
+  const fastRecovery = r.medianRecoveryMin != null && r.medianRecoveryMin <= 5
+  const poorQuality = (r.pctPoorQuality ?? 0) >= 20
+  const fingerstickConfirmed = Array.isArray(feedback)
+    && feedback.some((f) => f && (f.type === 'fingerstick_confirmed' || f.type === 'confirmed'))
+  // Bevestigde fingerprik heft de override op (dan is er échte grond).
+  return (noPostprandial || fastRecovery || poorQuality) && !fingerstickConfirmed
+}
+
+// Forceert needsUserConfirmation op low-gerelateerde observaties wanneer de data dat eist.
+// Puur/zonder side-effects → unit-testbaar zonder LLM.
+export function enforceLowConfirmation(observations, stats, feedback = []) {
+  if (!lowsNeedConfirmation(stats, feedback)) return observations
+  return observations.map((o) => {
+    const text = `${o?.summary || ''} ${o?.hypothesis || ''}`
+    return LOW_TERMS.test(text) ? { ...o, needsUserConfirmation: true } : o
+  })
+}
+
 function cleanObservation(raw, now, source, runId, model) {
   const confidence = CONFIDENCE.has(raw?.confidence) ? raw.confidence : 'low'
   return {
@@ -401,9 +430,12 @@ export async function runAiReview({ db, aiRouter, dryRun = false, force = false,
   const source = sourceName(ai)
   const now = new Date().toISOString()
   const runId = randomUUID()
-  const observations = Array.isArray(ai.parsed?.observations)
+  const cleanedObservations = Array.isArray(ai.parsed?.observations)
     ? ai.parsed.observations.map((o) => cleanObservation(o, now, source, runId, ai.model)).filter((o) => o.summary || o.hypothesis).slice(0, 5)
     : []
+  // Deterministische veiligheids-override op de LLM-output (residu #1): bevestiging eisen
+  // op low-observaties wanneer de data artefact-/onbevestigd is.
+  const observations = enforceLowConfirmation(cleanedObservations, stats, feedback)
   const questions = Array.isArray(ai.parsed?.questions)
     ? ai.parsed.questions.map((q) => cleanQuestion(q, now, source, runId, ai.model)).filter((q) => q.question).slice(0, 3)
     : []
