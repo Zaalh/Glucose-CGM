@@ -429,6 +429,12 @@ function reportSystemPrompt() {
     'Je mag algemeen bekende, niet-persoonlijke context noemen (bv. dat eiwit/vet vóór koolhydraten de piek vertraagt) maar formuleer dit als observatie, niet als instructie.',
     // Safety guardrail (§17): datadekking bepaalt hoe stellig het rapport mag zijn.
     'Als de datadekking (coveragePct) laag is of er weinig episodes zijn, formuleer dan expliciet voorzichtig en vermeld dat conclusies onzeker zijn.',
+    // Klinische guardrails (gelijk aan de observatie-review): voorkom over-confidence op
+    // mogelijk artefactueel lage waarden en verzonnen postprandiale samenhang.
+    'Datakwaliteit-weging: lage waarden met snel herstel (reactive.medianRecoveryMin laag), losse punten (byShape.isolated_point, artefactFlags.singlePoint/possibleCompression) of hoge reactive.pctPoorQuality zijn mogelijk sensorartefact (o.a. compression-low in slaapuren). Benoem ze als "mogelijk artefact", niet als bevestigde daling.',
+    'Nachtelijke lows (perHour 00:00–08:00) zijn tijdens slaap extra artefactgevoelig; presenteer een nachtelijk daalpatroon niet als gedragsmatig risico zonder die kanttekening.',
+    'Beweer samenhang met maaltijden ALLEEN als reactive.pctPostprandialCandidate dat steunt. Is die ≈ 0, stel dan NIET dat dalingen "postprandiaal" of maaltijdgerelateerd zijn; beschrijf ze als mogelijk fysiologisch/nachtelijk of artefact.',
+    'Erken een gunstig basisprofiel (hoge TIR, lage CV) en noem kleine week-op-week-deltas pas "verslechtering" als de verandering substantieel is én niet door dekking/artefacten kan komen.',
     'Antwoord UITSLUITEND met geldige JSON: {"title":"...","body":"..."}. body = 3–6 korte zinnen of bullets in platte tekst (geen markdown-koppen).',
   ].join('\n')
 }
