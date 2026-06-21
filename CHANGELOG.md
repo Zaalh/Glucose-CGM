@@ -73,6 +73,11 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   Twee-niveau schema lost het M3-dilemma op: WATCH (zacht, ≤12/dag) recall 1.0 + lead 19m; URGENT
   (indringend, ≤3/dag) recall 0.855 + lead 6m; 47/55 events escaleren (WATCH ~8m eerder). Werkt, mits
   WATCH passief is. Bouwen = de bestaande V2 watch/high/urgent-tiers kalibreren, niet from scratch.
+- **Context-gated alarm getest** (`scripts/evaluate-context-gated-alarm.mjs`, `npm run alarm:context`/`alarm:context-check`).
+  Vraag: breekt CGM-afgeleide context (postprandiaal + tijd) de M3-frontier? Antwoord: **nee, nul winst** —
+  de optimale gated-instelling klapt samen naar de globale drempel (postprandiaal = 44% van de tijd; V2
+  codeert de context al). Bevestigt definitief: alle CGM-only hefbomen uitgeput; enige resterende lever =
+  echte externe data (maaltijd/activiteit).
 
 ### Grafiek-interactie
 

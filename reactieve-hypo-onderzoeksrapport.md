@@ -28,8 +28,11 @@ daar al aan/boven; meer CGM-afgeleide features helpen niet operationeel:
 - **Variabiliteit + tijd-van-dag + recent-low** (literatuur): verhogen ROC-AUC maar **verlágen
   PR-AUC en sensitiviteit@spec** — geen winst in de precisie-kritische alarmzone (overfit op ~77
   onafhankelijke episodes).
-De enige plausibele hefboom is **externe context** (maaltijd-timing/-inhoud, activiteit). Een zwaar
-sequentie-model (LSTM, lit. AUC>0.97) vereist een veel grotere/andere populatie en overfit hier.
+- **Context-gated alarm** (postprandiaal + tijd, CGM-afgeleid): **nul winst** — de optimale "gated"
+  oplossing klapt samen naar de globale drempel (§6e). V2 codeert de reactieve/maaltijd-context al.
+De enige plausibele hefboom is **echte externe context** (maaltijd-timing/-inhoud, activiteit) die
+NIET uit de curve af te leiden is. Een zwaar sequentie-model (LSTM, lit. AUC>0.97) vereist een veel
+grotere/andere populatie en overfit hier.
 
 **Aanbeveling (empirisch onderbouwd):** geen extra CGM-feature-laag bouwen. Het bestaande V1/V2
 haalt het praktische plafond al. **V2 als primaire alarmbron is terecht:** bij de werkelijk
@@ -176,6 +179,22 @@ tot events lopen V1 en V2 gelijk — recall 0.97 (38/39 over 14,8 dagen), lead 2
 alarmen/dag** (precisie ~0.14); V2 heeft event-niveau zelfs marginaal méér valse alarmen (14,4 vs 12,8).
 De punt-niveau "V2 beter"-edge verdwijnt dus bij events. Echte les: **recall is prima, de alarmlast is
 het probleem** → `alarm-kwaliteit-plan.md` (M3: drempel op vals-alarm-budget).
+
+## 6e. Context-gated alarm — breekt het de frontier? (nee)
+
+`scripts/evaluate-context-gated-alarm.mjs`. Hypo's clusteren postprandiaal, dus een alarm dat
+gevoeliger is in postprandiale vensters (lage drempel) en strenger op de baseline (hoge drempel) zou
+valse alarmen kunnen besparen bij gelijke recall. Getest op event-niveau (71,8 dagen, 57 events).
+
+| Bij recall ~0.98 | vals-alarm/dag | lead |
+|---|---|---|
+| GLOBAL (één drempel) | 4,3 | 5 min |
+| GATED (postprandiaal-gevoelig) | 4,3 | 5 min |
+
+**Winst = 0.** De optimale gated-instelling klapt samen naar `lo = hi` (= geen gating). Redenen:
+(1) postprandiaal is 44% van de tijd → geen discriminerend zeldzaam venster; (2) V2 codeert de
+reactieve/maaltijd-context al in zijn score. **CGM-afgeleide context is dus al benut** — alleen
+échte externe data (werkelijke maaltijd/activiteit) kan de frontier nog verschuiven.
 
 ## 7. Methodologische waarborgen
 

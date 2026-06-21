@@ -48,6 +48,8 @@
     "alarm:tune-check": "node --check scripts/tune-alarm-threshold.mjs && node scripts/tune-alarm-threshold.mjs --self-test",
     "alarm:graded": "docker compose -f docker-compose.nightscout.yml --profile libre run --rm libreview-sync node scripts/evaluate-graded-alarm.mjs",
     "alarm:graded-check": "node --check scripts/evaluate-graded-alarm.mjs && node scripts/evaluate-graded-alarm.mjs --self-test",
+    "alarm:context": "docker compose -f docker-compose.nightscout.yml --profile libre run --rm libreview-sync node scripts/evaluate-context-gated-alarm.mjs",
+    "alarm:context-check": "node --check scripts/evaluate-context-gated-alarm.mjs && node scripts/evaluate-context-gated-alarm.mjs --self-test",
     "ai:review": "node --env-file-if-exists=.env.ai scripts/ai-review.mjs",
     "detector:fixtures": "node scripts/run-detector-fixtures.mjs",
     "meal:fixtures": "node scripts/run-meal-fixtures.mjs",
