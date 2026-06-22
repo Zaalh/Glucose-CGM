@@ -32,6 +32,9 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   (`AI_REVIEW_SERVER_URL`); onbereikbaar → fallback naar de dunne review.
 - **Rijkere context per run** (budget-ruimte op de free-tier): review-caps verruimd —
   episodes 5→15, observaties 5→8, vragen 3→5. Meer diepte per call, géén extra calls.
+- **Statistiek-tab fix:** de Lows/Near-hypo's/Dips-secties werden alleen gefilterd, niet
+  gesorteerd (willekeurige volgorde). Nu gesorteerd: lows/near op nadir oplopend (ergste
+  bovenaan), dips op daling aflopend (grootste sprong eerst).
 - **Regressievangnet.** `scripts/run-ai-review-prompt-smoke.mjs` + `npm run ai:review-smoke`
   (in `ai:check`): prompt-structuur, edge-cases, skip-conditie, hardening en stats-doorstroming.
 

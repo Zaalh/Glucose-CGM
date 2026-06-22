@@ -3597,9 +3597,19 @@
         escapeHtml(sc || '–') + (poorQuality ? ' · ' + poorQuality + ' met matige/slechte datakwaliteit' : '') + '</div>');
     }
     // Splitsen: echte lows (nadir <3.9) vs dips (daling vanaf piek, niet onder 3.9).
-    var lowsList = episodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol < 3.9; });
-    var nearList = episodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol >= 3.9 && e.nadirMmol < 4.5; });
-    var dipsList = episodes.filter(function (e) { return !(e.nadirMmol != null && e.nadirMmol < 4.5); });
+    // Sorteren zodat de lijsten niet in willekeurige volgorde staan: lows/near op nadir
+    // oplopend (laagste/ergste bovenaan), dips op daling aflopend (grootste sprong eerst).
+    var byNadirAsc = function (a, b) {
+      var av = a.nadirMmol != null ? a.nadirMmol : Infinity;
+      var bv = b.nadirMmol != null ? b.nadirMmol : Infinity;
+      return av - bv;
+    };
+    var byDropDesc = function (a, b) {
+      return (b.dropFromPeakMmol != null ? b.dropFromPeakMmol : -Infinity) - (a.dropFromPeakMmol != null ? a.dropFromPeakMmol : -Infinity);
+    };
+    var lowsList = episodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol < 3.9; }).sort(byNadirAsc);
+    var nearList = episodes.filter(function (e) { return e.nadirMmol != null && e.nadirMmol >= 3.9 && e.nadirMmol < 4.5; }).sort(byNadirAsc);
+    var dipsList = episodes.filter(function (e) { return !(e.nadirMmol != null && e.nadirMmol < 4.5); }).sort(byDropDesc);
     h.push(renderRecentEpisodes(episodes));
     h.push(aiEpisodeSection('Lows (' + lowsList.length + ' getoond) · nadir onder 3.9', lowsList, 'Geen echte lows in dit venster.'));
     if (nearList.length) {
