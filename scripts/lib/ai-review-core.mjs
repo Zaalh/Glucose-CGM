@@ -218,7 +218,7 @@ function systemPrompt() {
     'Je analyseert CGM hypo-voorspellingen voor een single-user monitor.',
     'Schrijf ALLE tekst (summary, hypothesis, question, reason) in het Nederlands.',
     'Je mag NOOIT live alarmbeslissingen nemen, drempels aanpassen of medisch advies geven.',
-    'Geef alleen korte uitleg, hypotheses en maximaal drie nuttige vragen voor latere gebruikersfeedback.',
+    'Geef alleen korte uitleg, hypotheses en maximaal vijf nuttige vragen voor latere gebruikersfeedback.',
     'Baseer je alleen op de meegegeven samenvatting. Wees voorzichtig bij weinig data.',
     DATA_GROUNDING_RULE,
     'Gebruik agpSummary (TBR/TIR/CV/perHourLowPct), vulnerableWindow en recentEpisodes om week- en dagpatronen te benoemen, niet alleen losse snapshots.',
@@ -257,7 +257,7 @@ function userPrompt(snapshots, feedback, stats, episodes) {
     vulnerableWindow: vulnerableWindow(stats),
     highToLowContext: stats?.highToLowContext ?? null,
     // MIDDEN — detaillijsten.
-    recentEpisodes: Array.isArray(episodes) ? episodes.slice(0, 5).map(compactEpisode) : [],
+    recentEpisodes: Array.isArray(episodes) ? episodes.slice(0, 15).map(compactEpisode) : [],
     snapshots: snapshots.map(compactSnapshot),
     recentUserFeedback: feedback.map(compactFeedback),
     patternSemantics: {
@@ -272,8 +272,8 @@ function userPrompt(snapshots, feedback, stats, episodes) {
       noAlarmDecision: true,
       noThresholdChanges: true,
       noMedicalAdvice: true,
-      maxObservations: 5,
-      maxQuestions: 3,
+      maxObservations: 8,
+      maxQuestions: 5,
     },
     // ONDER — herhaalde kernopdracht als allerlaatste sleutel (§21 F): de positie met
     // de hoogste eind-aandacht (lost-in-the-middle), dus ná de constraints.
@@ -442,13 +442,13 @@ export async function runAiReview({ db, aiRouter, dryRun = false, force = false,
   const now = new Date().toISOString()
   const runId = randomUUID()
   const cleanedObservations = Array.isArray(ai.parsed?.observations)
-    ? ai.parsed.observations.map((o) => cleanObservation(o, now, source, runId, ai.model)).filter((o) => o.summary || o.hypothesis).slice(0, 5)
+    ? ai.parsed.observations.map((o) => cleanObservation(o, now, source, runId, ai.model)).filter((o) => o.summary || o.hypothesis).slice(0, 8)
     : []
   // Deterministische veiligheids-override op de LLM-output (residu #1): bevestiging eisen
   // op low-observaties wanneer de data artefact-/onbevestigd is.
   const observations = enforceLowConfirmation(cleanedObservations, stats)
   const questions = Array.isArray(ai.parsed?.questions)
-    ? ai.parsed.questions.map((q) => cleanQuestion(q, now, source, runId, ai.model)).filter((q) => q.question).slice(0, 3)
+    ? ai.parsed.questions.map((q) => cleanQuestion(q, now, source, runId, ai.model)).filter((q) => q.question).slice(0, 5)
     : []
 
   if (!dryRun) {

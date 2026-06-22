@@ -1331,7 +1331,7 @@ async function runAiReviewOnce({ model } = {}) {
     // §21: verrijk de observatie-review met dezelfde deterministische aggregaten die
     // rapport/chat al krijgen (AGP-stats + episodes). Venster vast op 14d, consistent
     // met getAiPatterns (§21.7 invariant). De `reactive`-digest in stats vervangt de
-    // losse episode-lijst grotendeels; episodes worden in de core tot top-5 beperkt.
+    // losse episode-lijst grotendeels; episodes worden in de core tot top-15 beperkt.
     // Best-effort (§21 A): faalt een aggregatie, dan draait de review alsnog op de
     // snapshots/feedback i.p.v. helemaal te stoppen — de verrijking is geen harde eis.
     let stats = null

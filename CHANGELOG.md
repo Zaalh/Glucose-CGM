@@ -30,6 +30,8 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   `artefactPct` (≥5 episodes, anders onderdrukt).
 - **CLI gelijkgetrokken.** `npm run ai:review` haalt de verrijking via de server-endpoints
   (`AI_REVIEW_SERVER_URL`); onbereikbaar → fallback naar de dunne review.
+- **Rijkere context per run** (budget-ruimte op de free-tier): review-caps verruimd —
+  episodes 5→15, observaties 5→8, vragen 3→5. Meer diepte per call, géén extra calls.
 - **Regressievangnet.** `scripts/run-ai-review-prompt-smoke.mjs` + `npm run ai:review-smoke`
   (in `ai:check`): prompt-structuur, edge-cases, skip-conditie, hardening en stats-doorstroming.
 

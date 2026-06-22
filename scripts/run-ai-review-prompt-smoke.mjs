@@ -118,11 +118,11 @@ check(system.includes('agpSummary'), 'system-prompt verwijst niet naar agpSummar
   check(a.dayNight && a.dayNight.night.tbr === 8.0 && a.dayNight.day.tbr === 3.7, 'dayNight (#2) stroomt door')
   check(a.dataSufficiency && a.dataSufficiency.reliable === true, 'dataSufficiency (#3) stroomt door')
 }
-// Episode-cap top-5 + ontbrekende velden → null (geen crash).
+// Episode-cap top-15 + ontbrekende velden → null (geen crash).
 {
-  const many = Array.from({ length: 12 }, (_, i) => ({ peakAt: `2026-06-${10 + i}T11:00:00Z`, readings: [1, 2, 3] }))
+  const many = Array.from({ length: 20 }, (_, i) => ({ peakAt: `2026-06-${(i % 28) + 1}T11:00:00Z`, readings: [1, 2, 3] }))
   const u = JSON.parse(previewReviewPrompt({ stats: null, episodes: many }).user)
-  check(u.recentEpisodes.length === 5, '12 episodes → top-5')
+  check(u.recentEpisodes.length === 15, '20 episodes → top-15')
   check(u.recentEpisodes.every((e) => !('readings' in e)), 'episodes mogen geen ruwe readings bevatten')
   check(u.recentEpisodes[0].peakMmol === null, 'ontbrekend episode-veld → null')
 }
