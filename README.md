@@ -196,6 +196,17 @@ De server-routes: `POST /ai-review/run` (body `{ model }`), `GET /ai-review/late
 (default 30s) voorkomt spammen. Zet hiervoor `.env.ai` (zelfde vars als hierboven)
 op de host; die wordt via `env_file` in de `libreview-sync` service geladen.
 
+De review is **verrijkt** met deterministische AGP-context (TBR-first stats, per-uur
+dipprofiel, episodes, reactive-digest) en gehard met **klinische guardrails**: geen onterecht
+"reactieve hypo"-label bij 0% postprandiaal, artefact-/compressie-weging voor nachtelijke
+lows, en een server-side backstop die `needsUserConfirmation` afdwingt op onbevestigde
+low-observaties. **Cadans:** naast de knop draait de review **event-driven** — bij een
+risico-escalatie naar watch+ of een nieuwe episode (`AI_EVENT_REVIEW`,
+`AI_EVENT_MIN_INTERVAL_MINUTES`), plus één **dag-digest** per kalenderdag (`AI_DAILY_DIGEST`).
+De per-minuut alarmlaag (detector + vectorlaag) staat hier los van. De CLI
+(`npm run ai:review`) draait dezelfde verrijkte review via de server-endpoints
+(`AI_REVIEW_SERVER_URL`). Regressie: `npm run ai:review-smoke` (in `ai:check`).
+
 Daarnaast zijn er **deterministische, gratis** lees-endpoints (puur Mongo, geen LLM):
 `/ai-review/stats`, `/episodes`, `/reports`, `/day`, `/history`, `/patterns`,
 `/evaluation`, `/source-health` en `/episode-detail`, plus notities/reminders

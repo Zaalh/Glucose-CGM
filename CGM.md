@@ -188,7 +188,19 @@ AI_OLLAMA_MODEL=gpt-oss:120b
 AI_OLLAMA_TIMEOUT_MS=60000
 # Optioneel: periodiek automatisch draaien (default 0 = uit)
 # AI_REVIEW_INTERVAL_MINUTES=60
+# Event-driven cadans (default aan): review bij risico-escalatie/nieuwe episode + dag-digest
+# AI_EVENT_REVIEW=1
+# AI_EVENT_MIN_INTERVAL_MINUTES=30
+# AI_DAILY_DIGEST=1
+# CLI (npm run ai:review) haalt de verrijking hier op (default http://localhost:8787)
+# AI_REVIEW_SERVER_URL=http://localhost:8787
 ```
+
+De review draait naast de knop **event-driven** (fire-and-forget, eigen min-interval): bij
+een risico-escalatie naar watch+ of een nieuwe gesloten episode, plus één narratief
+dag-rapport per kalenderdag. De review is verrijkt met AGP-context (`getAiStats`:
+`hypoBurden`/`dayNight`/`dataSufficiency`/per-uur `artefactPct`) en gehard met klinische
+guardrails + een deterministische `enforceLowConfirmation`-backstop in `lib/ai-review-core.mjs`.
 
 `AI_ROUTER_PROVIDERS` is de fallback-volgorde; per provider gelden `AI_<NAAM>_BASE_URL`,
 `AI_<NAAM>_API_KEY`, `AI_<NAAM>_MODEL`. Legacy `AI_CHAT_*` blijft werken als

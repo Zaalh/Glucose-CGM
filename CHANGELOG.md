@@ -5,6 +5,34 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ## [Unreleased]
 
+### AI-review: rijkere overzichten, event-driven cadans en klinische guardrails
+
+- **Verrijkte observatie-review (§21).** `runAiReview` krijgt nu dezelfde deterministische
+  AGP-context als rapport/chat: TBR-first stats, per-uur dipprofiel, episodes en de
+  reactive-digest, in een lost-in-the-middle-bewuste prompt met een `evidence`-veld per
+  observatie. Skip-conditie verzacht (W5): draait ook op rustige dagen zolang er stats/
+  episodes zijn. Detector + vectorlaag (per-minuut alarmlaag) blijven ongemoeid.
+- **Event-driven cadans + dag-digest.** De review vuurt fire-and-forget bij een
+  risico-escalatie naar watch+ of een nieuwe gesloten episode (`AI_EVENT_REVIEW`,
+  `AI_EVENT_MIN_INTERVAL_MINUTES` default 30), plus één dag-rapport per kalenderdag
+  (`AI_DAILY_DIGEST`). Hybride best-practice: snelle deterministische laag + getriggerde
+  LLM-duiding, niet per minuut.
+- **Klinische guardrails (prompt).** Observatie- én rapport-prompt wegen datakwaliteit:
+  geen label "reactieve hypo" bij `pctPostprandialCandidate≈0`, artefact-/compressie-weging
+  voor nachtelijke/snel-herstellende/isolated-point lows, erkenning van een gunstig
+  basisprofiel (TIR/CV) i.p.v. ruis "verslechtering".
+- **Deterministische low-confirmation-backstop.** `enforceLowConfirmation` forceert
+  server-side `needsUserConfirmation=true` op onbevestigde low-observaties bij artefact-prone
+  data; lift is per-observatie (een obs die zelf bevestiging citeert is vrijgesteld).
+- **Verbeterde statistiek (`getAiStats`).** (#1) artefact-gecorrigeerde hypo-belasting
+  (`hypoBurden`: schoon vs artefact + `areaBelow3_9Clean`); (#2) dag/nacht-split (`dayNight`);
+  (#3) `dataSufficiency` (AGP ≥14d & ≥70%) + `gmiClinicalRelevance:'low'`; per-uur
+  `artefactPct` (≥5 episodes, anders onderdrukt).
+- **CLI gelijkgetrokken.** `npm run ai:review` haalt de verrijking via de server-endpoints
+  (`AI_REVIEW_SERVER_URL`); onbereikbaar → fallback naar de dunne review.
+- **Regressievangnet.** `scripts/run-ai-review-prompt-smoke.mjs` + `npm run ai:review-smoke`
+  (in `ai:check`): prompt-structuur, edge-cases, skip-conditie, hardening en stats-doorstroming.
+
 ### Onderzoek: dynamische patroonherkenning (dip → stijging → daling)
 
 - **Fase 0-validatie van de vorm-/curve-match** (`scripts/validate-dip-rise-drop.mjs`, `npm run

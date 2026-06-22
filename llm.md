@@ -1376,6 +1376,60 @@ toont het als "Onderbouwing"-lijst in de observatie-accordion, zie §21.9 hierbo
 
 ---
 
+## 22. Na §21 — cadans, klinische guardrails, hardening & eerlijkere statistiek (GEBOUWD & LIVE)
+
+**Status: geïmplementeerd, getest (`ai:check` + prompt-smoke) en gedeployd op de iMac.**
+Voortbouwend op §21, op basis van online onderzoek (hybride cadans, deterministische
+guardrails, klinische CGM-standaard — zie Bronnen) én een medische review van de live-output.
+
+### 22.1 Event-driven cadans + dag-digest
+Onderzoek: hybride (snelle deterministische detector per minuut, LLM getriggerd; event-driven
+> vaste polling; AGP/trend = batch, niet real-time). In `libreview-nightscout-sync.mjs`:
+- **Risico-escalatie** naar watch+ (V1 of V2) → `runAiReviewOnce` fire-and-forget (`onRiskComputed`).
+- **Nieuwe gesloten episode** → idem (in `maybeBuildEpisodes`).
+- **Dag-digest:** één narratief dagrapport per kalenderdag (`maybeDailyDigest`).
+- Alles fire-and-forget (sync-loop wacht nooit op de ~30s LLM-call), achter de lock + eigen
+  `AI_EVENT_MIN_INTERVAL_MINUTES` (default 30). Uit met `AI_EVENT_REVIEW=0`/`AI_DAILY_DIGEST=0`.
+- De per-minuut alarmlaag (detector + `episode_vectors`) blijft ongemoeid.
+
+### 22.2 Klinische guardrails (prompt) — observatie én rapport
+Medische review van de live-data toonde over-confidence: nachtelijke lows (8% vs 3.4% overdag),
+mediane recovery 2 min, 0% postprandiaal, 0 bevestigd → werden als "reactieve hypo's"/
+"kwetsbaar venster" gepresenteerd. `systemPrompt` én `reportSystemPrompt` wegen nu:
+geen "reactieve hypo" bij `pctPostprandialCandidate≈0`, artefact-/compressie-weging
+(`medianRecoveryMin`, `artefactFlags`, `pctPoorQuality`, per-uur `artefactPct`), nacht-
+voorzichtigheid, en erkenning van een gunstig basisprofiel (TIR/CV) i.p.v. ruis "verslechtering".
+
+### 22.3 Deterministische low-confirmation-backstop
+Ollama Cloud kan het JSON-contract niet afdwingen, dus `needsUserConfirmation` werd niet altijd
+gezet waar het klinisch moet. `enforceLowConfirmation(observations, stats)` (pure, geëxporteerd,
+unit-getest) forceert het server-side op low-gerelateerde observaties bij artefact-prone data
+(`lowsNeedConfirmation`: 0% postprandiaal | herstel ≤5min | ≥20% slechte kwaliteit). **Lift is
+per observatie:** een obs die zélf bevestiging citeert is vrijgesteld, zonder de backstop voor
+de overige obs uit te schakelen (live-bevinding: globale lift was fout). Open verfijning uit het
+onderzoek: gate op het gestructureerde `evidence`-veld i.p.v. proza-keywords (NegEx-false-positive
+"lage CV"); ligt klaar, nog niet gebouwd.
+
+### 22.4 Eerlijkere statistiek (`getAiStats`)
+AGP-consensus + databevindingen:
+- **#1 `hypoBurden`** — artefact-gecorrigeerd: schone vs artefact-episodes + `areaBelow3_9Clean`
+  (artefact-lows blazen de belasting niet meer op; live: 21% v.d. episodes is artefact maar
+  ~3,5% v.d. area).
+- **#2 `dayNight`** — nacht (00–08u, artefactgevoelig) vs dag TBR/TIR uit ruwe per-uur-tellingen.
+- **#3 `dataSufficiency`** — AGP-standaard (≥14d & ≥70% dekking) als deterministische vlag;
+  `gmiClinicalRelevance:'low'` (HbA1c-proxy minder relevant zonder diabetes).
+- Per-uur **`artefactPct`** in `perHour` (≥5 episodes, anders onderdrukt tegen vals-geruststelling).
+`compactStats` geeft ze door; bewust **niet** gebouwd: MAGE/MODD (gold-plating).
+
+### 22.5 CLI gelijkgetrokken + regressievangnet
+`scripts/ai-review.mjs` haalt de verrijking via de server-HTTP-endpoints (`AI_REVIEW_SERVER_URL`),
+fallback naar dunne review als onbereikbaar — geen kopie van `getAiStats` uit de serverlaag.
+`scripts/run-ai-review-prompt-smoke.mjs` (`npm run ai:review-smoke`, in `ai:check`) dekt
+deterministisch: prompt-structuur/volgorde, edge-cases, skip-conditie (W5), low-confirmation-
+hardening en de doorstroming van de nieuwe stats — zonder LLM/Mongo.
+
+---
+
 ## Bronnen
 
 - [OpenAI compatibility — Ollama docs](https://docs.ollama.com/api/openai-compatibility)
