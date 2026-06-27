@@ -56,8 +56,10 @@ export async function buildReactiveHypoEpisodes({ mongoUri = MONGO_URI } = {}) {
 
     const now = new Date().toISOString()
     let upserted = 0
+    const nextKeys = []
     for (const ep of episodes) {
       const key = episodeKey(ep)
+      nextKeys.push(key)
       await coll.updateOne(
         { episodeKey: key },
         {
@@ -68,6 +70,10 @@ export async function buildReactiveHypoEpisodes({ mongoUri = MONGO_URI } = {}) {
       )
       upserted += 1
     }
+    const deleteFilter = nextKeys.length
+      ? { episodeKey: { $nin: nextKeys } }
+      : {}
+    const deleteResult = await coll.deleteMany(deleteFilter)
 
     const hist = outcomeHistogram(episodes)
     const examples = episodes
@@ -87,6 +93,7 @@ export async function buildReactiveHypoEpisodes({ mongoUri = MONGO_URI } = {}) {
       scannedEntries: entries.length,
       episodes: episodes.length,
       upserted,
+      removedStale: deleteResult.deletedCount ?? 0,
       outcomes: hist,
       examples,
       collection: 'reactive_hypo_episodes',

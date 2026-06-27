@@ -24,6 +24,7 @@
     "patterns:analyze": "docker compose -f docker-compose.nightscout.yml exec -T nightscout-mongo sh -lc \"mongo nightscout --quiet\" < scripts/analyze-patterns.mjs",
     "features:build": "docker compose -f docker-compose.nightscout.yml exec -T nightscout-mongo sh -lc \"mongo nightscout --quiet\" < scripts/build-entry-features.mjs",
     "vectors:build": "docker compose -f docker-compose.nightscout.yml exec -T nightscout-mongo sh -lc \"mongo nightscout --quiet\" < scripts/build-episode-vectors.mjs",
+    "patterns:refresh": "npm run patterns:analyze && npm run vectors:build && npm run hypo:tune",
     "snapshots:backfill": "docker compose -f docker-compose.nightscout.yml exec -T nightscout-mongo sh -lc \"mongo nightscout --quiet\" < scripts/backfill-prediction-snapshots.mjs",
     "snapshots:evaluate": "docker compose -f docker-compose.nightscout.yml exec -T nightscout-mongo sh -lc \"mongo nightscout --quiet\" < scripts/evaluate-predictions.mjs",
     "summaries:build": "docker compose -f docker-compose.nightscout.yml exec -T nightscout-mongo sh -lc \"mongo nightscout --quiet\" < scripts/summarize-days.mjs",

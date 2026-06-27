@@ -34,6 +34,8 @@ const QUALITY_EXPECTED_INTERVAL_MS = 60_000
 const QUALITY_MAX_NORMAL_GAP_MS = 150_000
 const QUALITY_MAX_STALE_SECONDS = 10 * 60
 const QUALITY_RECENT_WINDOW_MINUTES = 30
+const QUALITY_MAX_INFERRED_INTERVAL_SECONDS = 6 * 60
+const QUALITY_MAX_GAP_INTERVAL_MULTIPLIER = 1.6
 
 // Stap 8 — meal-onset: een maaltijdrespons is begonnen als de glucose duidelijk
 // stijgt vanaf een lokale bodem die al ≥ 15 min geleden ligt (geen 1-punts blip).
@@ -179,10 +181,14 @@ export function assessTimelineQuality(timeline, latestIndex, options = {}) {
   // mag niet als "slechte data" gelden. We leiden de verwachte cadans uit de gemeten
   // mediaan af en schalen de gap-/sparse-/stale-grenzen mee. Voor een 1-min feed (Libre)
   // liggen de geschaalde waarden onder de vaste floors, dus dat gedrag blijft identiek.
-  const expectedIntervalSec = (medianIntervalSeconds && medianIntervalSeconds > 0)
+  const inferredIntervalSec = (medianIntervalSeconds && medianIntervalSeconds > 0)
     ? medianIntervalSeconds
     : QUALITY_EXPECTED_INTERVAL_MS / 1000
-  const effectiveMaxGapMs = Math.max(maxNormalGapMs, expectedIntervalSec * 1000 * 2.2)
+  const maxInferredIntervalSec = Number.isFinite(options.maxInferredIntervalSeconds)
+    ? options.maxInferredIntervalSeconds
+    : QUALITY_MAX_INFERRED_INTERVAL_SECONDS
+  const expectedIntervalSec = Math.min(inferredIntervalSec, maxInferredIntervalSec)
+  const effectiveMaxGapMs = Math.max(maxNormalGapMs, expectedIntervalSec * 1000 * QUALITY_MAX_GAP_INTERVAL_MULTIPLIER)
   const effectiveMaxStaleSeconds = Math.max(maxStaleSeconds, expectedIntervalSec * 2.5)
   if (largestGapSeconds * 1000 > effectiveMaxGapMs) flags.largeGap = true
 
@@ -204,7 +210,7 @@ export function assessTimelineQuality(timeline, latestIndex, options = {}) {
     if (ageSeconds < -120) flags.futureTimestamp = true
   }
 
-  if (flags.stale) reasons.push('Laatste LibreView-meting is oud')
+  if (flags.stale) reasons.push('Laatste CGM-meting is oud')
   if (flags.futureTimestamp) reasons.push('Laatste timestamp ligt in de toekomst')
   if (flags.largeGap) reasons.push(`Gat in recente metingen (${Math.round(largestGapSeconds)} sec)`)
   if (flags.duplicateTimestamp) reasons.push('Dubbele timestamp in recente metingen')

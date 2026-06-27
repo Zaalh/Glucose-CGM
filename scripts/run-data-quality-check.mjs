@@ -18,6 +18,20 @@ assert.equal(cleanQuality.level, 'good')
 assert.equal(cleanQuality.flags.largeGap, false)
 assert.equal(cleanQuality.flags.duplicateTimestamp, false)
 
+const dexcomTimeline = [30, 25, 20, 15, 10, 5, 0].map((m, i) => entry(m, 6 - i * 0.1))
+const dexcomQuality = assessTimelineQuality(dexcomTimeline, dexcomTimeline.length - 1, { nowMs: now })
+assert.equal(dexcomQuality.level, 'good')
+assert.equal(dexcomQuality.flags.largeGap, false)
+assert.equal(dexcomQuality.medianIntervalSeconds, 300)
+assert.equal(dexcomQuality.expectedIntervalSeconds, 300)
+
+const missedDexcomTimeline = [30, 20, 10, 0].map((m, i) => entry(m, 6 - i * 0.1))
+const missedDexcomQuality = assessTimelineQuality(missedDexcomTimeline, missedDexcomTimeline.length - 1, { nowMs: now })
+assert.equal(missedDexcomQuality.flags.largeGap, true)
+assert.equal(missedDexcomQuality.level, 'watch')
+assert.equal(missedDexcomQuality.medianIntervalSeconds, 600)
+assert.equal(missedDexcomQuality.expectedIntervalSeconds, 360)
+
 const gappedTimeline = [20, 19, 18, 17, 16, 0].map((m, i) => entry(m, 6 - i * 0.1))
 const gappedQuality = assessTimelineQuality(gappedTimeline, gappedTimeline.length - 1, { nowMs: now })
 assert.equal(gappedQuality.level, 'watch')
@@ -62,6 +76,8 @@ assert.ok(v2.uncertainty > 0)
 console.log(JSON.stringify({
   ok: true,
   clean: cleanQuality,
+  dexcom: dexcomQuality,
+  missedDexcom: missedDexcomQuality,
   gapped: gappedQuality,
   duplicate: duplicateQuality,
   stale: staleQuality,

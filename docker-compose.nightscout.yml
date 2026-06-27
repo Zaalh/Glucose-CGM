@@ -100,7 +100,8 @@ services:
         required: false
       - path: .env.dexcom
         required: false
-      - .env.influxdb
+      - path: .env.influxdb
+        required: false
       # AI-laag (Ollama Cloud) voor de overlay AI-review knop. Gitignored, dus
       # per host plaatsen; required:false zodat deploy zonder dit bestand niet breekt.
       - path: .env.ai

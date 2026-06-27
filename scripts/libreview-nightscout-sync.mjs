@@ -21,6 +21,7 @@ const DEFAULT_INTERVAL_SECONDS = 60
 // dekkings-noemer wanneer medianIntervalMinutes() niets oplevert. Staat hier (boven de
 // top-level await) i.v.m. de module-TDZ in --loop-modus.
 const NOMINAL_INTERVAL_MIN = DEFAULT_INTERVAL_SECONDS / 60
+const DEXCOM_NOMINAL_INTERVAL_MIN = 5
 const DEFAULT_GRACE_WINDOW_MINUTES = 30
 const DEFAULT_RETRY_ATTEMPTS = 3
 const DEFAULT_RETRY_BASE_DELAY_MS = 750
@@ -241,10 +242,24 @@ async function syncOnce() {
     : await collectLibreReadings()
   const knownIdentifiers = await getKnownNightscoutIdentifiers()
   const previousEntries = await getRecentNightscoutEntries()
+  const knownRecentDates = new Set(
+    previousEntries
+      .map((entry) => Number(entry.date))
+      .filter(Number.isFinite),
+  )
+  const seenCollectedIdentifiers = new Set()
+  const seenCollectedDates = new Set()
   const collectedEntries = readings
     .filter((pt) => isSourceReading(pt))
     .map(toNightscoutEntry)
-    .filter((entry, index, all) => all.findIndex((candidate) => candidate.identifier === entry.identifier) === index)
+    .filter((entry) => {
+      const date = Number(entry.date)
+      if (entry.identifier && seenCollectedIdentifiers.has(entry.identifier)) return false
+      if (Number.isFinite(date) && seenCollectedDates.has(date)) return false
+      if (entry.identifier) seenCollectedIdentifiers.add(entry.identifier)
+      if (Number.isFinite(date)) seenCollectedDates.add(date)
+      return true
+    })
     .sort((a, b) => a.date - b.date)
   addRateFields(collectedEntries, previousEntries)
 
@@ -253,7 +268,11 @@ async function syncOnce() {
   await writeInfluxGlucoseEntries(collectedEntries)
 
   const entries = collectedEntries
-    .filter((entry) => !knownIdentifiers.has(entry.identifier))
+    .filter((entry) => {
+      if (knownIdentifiers.has(entry.identifier)) return false
+      const date = Number(entry.date)
+      return !Number.isFinite(date) || !knownRecentDates.has(date)
+    })
     .sort((a, b) => a.date - b.date)
   addRateFields(entries, previousEntries)
 
@@ -460,7 +479,8 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
       minutesSincePeak,
       dropFromPeakMmol,
       episodes,
-      patternDrop: pattern ? pattern.correction : null,
+      pattern,
+      features,
     })
 
     const blendedRate = risk.details.blendedRate
@@ -733,19 +753,32 @@ async function loadEpisodeVectors() {
 }
 
 function buildForecast(input) {
-  const baseRate = blendRate(input.rate5m, input.rate10m, input.rate15m)
+  const features = input.features || {}
+  const rawBaseRate = blendRate(input.rate5m, input.rate10m, input.rate15m)
+  const recovering = Boolean(features.recoverySignal || features.isDecelerating || features.isBottoming || features.isRecovering)
+  const baseRate = rawBaseRate < 0 && recovering ? rawBaseRate * 0.55 : rawBaseRate
   // Vector-similarity heeft voorrang; valt terug op de simpele peak-correctie.
-  const corr = Number.isFinite(input.patternDrop)
-    ? Math.max(0, input.patternDrop)
+  const pattern = input.pattern || null
+  const baseCorr = Number.isFinite(pattern?.correction)
+    ? Math.max(0, pattern.correction)
     : patternCorrection(input, input.episodes || [])
+  const corr = recovering ? baseCorr * 0.45 : baseCorr
+  const empiricalNadir = Number.isFinite(pattern?.patternNadirMmol) ? pattern.patternNadirMmol : null
+  const hypoRatio = Number.isFinite(pattern?.similarHypoRatio) ? pattern.similarHypoRatio : null
   const predictedMmol = {}
   const probabilities = {}
   for (const h of FORECAST_HORIZONS) {
-    // Korte horizons lineair; vanaf >30 min satureert de bijdrage van de rate.
-    const effMinutes = h <= 30 ? h : 30 + RATE_DECAY_TAU * (1 - Math.exp(-(h - 30) / RATE_DECAY_TAU))
+    const effMinutes = effectiveForecastMinutes(baseRate, h, features)
     // Correctie schaalt tot ~30 min (codex: h/30 i.p.v. h/20), gecapt op 1 voor de lange horizons.
     const w = Math.min(1, h / 30)
-    const v = clamp(input.currentMmol + baseRate * effMinutes - corr * w, 1.5, 33)
+    let v = input.currentMmol + baseRate * effMinutes - corr * w
+    if (empiricalNadir !== null && baseRate < -0.01) {
+      const margin = hypoRatio !== null && hypoRatio >= 0.7 ? 0.7 : 0.35
+      const nadirFloorWeight = Math.min(1, h / 30)
+      const floor = empiricalNadir - margin
+      v = Math.max(v, input.currentMmol * (1 - nadirFloorWeight) + floor * nadirFloorWeight)
+    }
+    v = clamp(v, 1.5, 33)
     predictedMmol[String(h)] = round(v, 3)
     probabilities[String(h)] = {
       lt45: probBelow(v, 4.5),
@@ -753,6 +786,20 @@ function buildForecast(input) {
     }
   }
   return { predictedMmol, probabilities }
+}
+
+function effectiveForecastMinutes(rate, horizon, features = {}) {
+  if (rate > 0.01) {
+    const tau = features.mealOnset ? 10 : 14
+    const saturated = tau * (1 - Math.exp(-horizon / tau))
+    const maxRiseMmol = features.mealOnset ? 2.2 : 2.8
+    return Math.min(saturated, maxRiseMmol / Math.max(rate, 0.001))
+  }
+  if (features.recoverySignal || features.isDecelerating || features.isBottoming || features.isRecovering) {
+    const tau = 18
+    return tau * (1 - Math.exp(-horizon / tau))
+  }
+  return horizon <= 30 ? horizon : 30 + RATE_DECAY_TAU * (1 - Math.exp(-(horizon - 30) / RATE_DECAY_TAU))
 }
 
 function blendRate(rate5m, rate10m, rate15m) {
@@ -2261,12 +2308,25 @@ function medianIntervalMinutes(rows) {
   return round(gaps[Math.floor(gaps.length / 2)], 1)
 }
 
+function sourceOfEntry(entry) {
+  const id = String(entry?.identifier ?? '')
+  const device = String(entry?.device ?? '')
+  if (/dexcom/i.test(id) || /dexcom/i.test(device)) return 'dexcom'
+  if (/libreview|libre/i.test(id) || /libreview|libre/i.test(device)) return 'libreview'
+  return null
+}
+
+function nominalIntervalForSource(source) {
+  return source === 'dexcom' ? DEXCOM_NOMINAL_INTERVAL_MIN : NOMINAL_INTERVAL_MIN
+}
+
 // Gedeelde dekkings-noemer: verwacht aantal metingen in een venster van `windowMinutes`,
 // data-gedreven uit de werkelijke mediane meetinterval (valt terug op de nominale cadans).
 // Eén bron van waarheid zodat statistiek/history/dag/feed én source-health dezelfde
 // dekking% rapporteren, ook als de cadans ooit afwijkt van 1/min.
 function expectedSamples(rows, windowMinutes) {
-  const step = medianIntervalMinutes(rows) || NOMINAL_INTERVAL_MIN
+  const latest = rows[rows.length - 1] ?? null
+  const step = medianIntervalMinutes(rows) || nominalIntervalForSource(sourceOfEntry(latest) ?? config.source)
   return Math.max(1, Math.round(windowMinutes / step))
 }
 
@@ -2285,19 +2345,32 @@ async function getSourceHealth() {
     const from14 = now - 14 * 24 * 3_600_000
     const from24 = now - 24 * 3_600_000
     const rows = await db.collection('entries')
-      .find({ type: 'sgv', sgv: { $exists: true }, date: { $gte: from14 } }, { projection: { _id: 0, date: 1 } })
+      .find(
+        { type: 'sgv', sgv: { $exists: true }, date: { $gte: from14 } },
+        { projection: { _id: 0, date: 1, device: 1, identifier: 1 } },
+      )
       .sort({ date: 1 })
       .toArray()
-    const last = rows.length ? rows[rows.length - 1].date : null
+    const latestRow = rows[rows.length - 1] ?? null
+    const activeSource = sourceOfEntry(latestRow) ?? config.source
+    const sourceRows = rows.filter((row) => sourceOfEntry(row) === activeSource)
+    const healthRows = sourceRows.length ? sourceRows : rows
+    const last = healthRows.length ? healthRows[healthRows.length - 1].date : null
     const ageMinutes = last != null ? round((now - last) / 60000, 0) : null
-    const rows24 = rows.filter((r) => r.date >= from24)
-    const medianInterval = medianIntervalMinutes(rows) || NOMINAL_INTERVAL_MIN
-    const expected14 = expectedSamples(rows, 14 * 24 * 60)
-    const expected24 = expectedSamples(rows24, 24 * 60)
-    const coverage14d = round(Math.min(100, (rows.length / expected14) * 100), 0)
+    const rows24 = healthRows.filter((r) => r.date >= from24)
+    const medianInterval = medianIntervalMinutes(healthRows) || nominalIntervalForSource(activeSource)
+    const activeSpanMinutes = healthRows.length > 1
+      ? Math.max(medianInterval, (healthRows[healthRows.length - 1].date - healthRows[0].date) / 60000 + medianInterval)
+      : medianInterval
+    const rows24SpanMinutes = rows24.length > 1
+      ? Math.max(medianInterval, (rows24[rows24.length - 1].date - rows24[0].date) / 60000 + medianInterval)
+      : (rows24.length ? medianInterval : 24 * 60)
+    const expected14 = expectedSamples(healthRows, Math.min(14 * 24 * 60, activeSpanMinutes))
+    const expected24 = expectedSamples(rows24, Math.min(24 * 60, rows24SpanMinutes))
+    const coverage14d = round(Math.min(100, (healthRows.length / expected14) * 100), 0)
     const coverageToday = round(Math.min(100, (rows24.length / expected24) * 100), 0)
     const longestGap24h = longestGapMinutes(rows24)
-    const longestGap14d = longestGapMinutes(rows)
+    const longestGap14d = longestGapMinutes(healthRows)
     const reasons = []
     if (ageMinutes == null || ageMinutes > 30) reasons.push('stale')
     else if (ageMinutes > 15) reasons.push('stale_soon')
@@ -2308,6 +2381,7 @@ async function getSourceHealth() {
     else if (ageMinutes > 15 || coverage14d < 70 || longestGap24h > 60) status = 'watch'
     const data = {
       lastEntryAt: last != null ? new Date(last).toISOString() : null,
+      activeSource,
       ageMinutes,
       expectedIntervalMin: medianInterval,
       coverageToday,
