@@ -15,6 +15,18 @@ blijft een vingerprik/medisch advies belangrijk.
 
 ## Implementatiestatus (bijgewerkt 2026-06-02)
 
+> **Update 2026-06-28 — Dexcom-overstap en advieslaag gekalibreerd.** De live sync draait
+> nu veilig op Dexcom Share/Follow (`CGM_SOURCE=dexcom`) met bron-specifieke identifiers,
+> timestamp-dedup tegen recente Nightscout entries en source-health op Dexcom-cadans
+> (5 min). De forecast is fasebewust gemaakt: herstel/deceleratie dempt dalingen,
+> stijgingen satureren en vergelijkbare episode-nadirs zetten een empirische bodem.
+> Daarna is `carbAdvice` aangescherpt: advies-ETA's worden uit de gekalibreerde forecast
+> geinterpoleerd, maar bij harde daling mag de vroege V2/features ETA voorgaan als de
+> gekalibreerde forecast de drempel ook bevestigt. Live effect: herstel rond 5.3 blijft
+> `prepare/watch` zonder valse "onder 4.0 over X min"; snelle daling rond/onder 4.5 geeft
+> `eat_now/high`. Regressiecheck: `npm run carb-advice:check`; volledige lokale suite:
+> `npm run check`.
+
 > **Update 2026-06-05 — M6-gate geslaagd, V2 LIVE geactiveerd.** Met ~8 weken data
 > (13.652 readings, 33 nadir-gebaseerde hypo-onsets) bleek de auto-tuner een
 > degenererende train/test-split te hebben: hij splitste op **kalendertijd**, terwijl

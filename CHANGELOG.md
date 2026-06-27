@@ -5,6 +5,30 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
 
 ## [Unreleased]
 
+### Dexcom-bronwissel, forecast-kalibratie en advieslaag
+
+- **Dexcom als actieve bron gehard.** De sync ondersteunt LibreView en Dexcom Share/Follow
+  via `CGM_SOURCE`; Dexcom gebruikt een gecachte Share-sessie, 5-minuten cadans en
+  source-specifieke identifiers (`glucose-cgm-dexcom:<timestamp>`). Bij sensorwissel
+  blijven Libre- en Dexcom-historie naast elkaar staan, maar nieuwe writes dedupen op
+  identifier én recente timestamp om overlap-dubbels te voorkomen.
+- **Source-health cadans-bewust.** `/ai-review/source-health` bepaalt de actieve bron uit
+  de nieuwste entry en rekent dekking/gaps met de juiste nominale intervalverwachting
+  (Dexcom 5 min, Libre meestal 1 min). Live verificatie: Dexcom actief, 100% dekking
+  vandaag/14d, geen dubbele entry timestamps of prediction identifiers.
+- **Forecast-kalibratie op persoonlijke patronen.** De numerieke forecast houdt rekening
+  met herstel/deceleratie, verzadigde stijging na maaltijd-onset en empirische nadir uit
+  vergelijkbare episodes. Daardoor loopt de forecast bij post-piek herstel minder vaak
+  te pessimistisch door.
+- **Koolhydraatadvies gebruikt gekalibreerde forecast plus fast-drop safety.** `carbAdvice`
+  baseert ETA's op geinterpoleerde forecastpunten en gebruikt bij harde daling de vroege
+  V2/features ETA alleen als de gekalibreerde forecast de drempel bevestigt. Resultaat:
+  geen concrete hypo-ETA bij alleen brede worst-case onzekerheid, maar wel `eat_now/high`
+  bij snelle daling onder of richting 4.5/4.0.
+- **Nieuwe checks.** `npm run carb-advice:check` test de fast-drop en rustige worst-case
+  adviescases. `npm run check` bundelt de minimale pre-deploy suite:
+  carb-advice, AI/syntax, data-quality, detectorfixtures en episode-builder.
+
 ### AI-review: rijkere overzichten, event-driven cadans en klinische guardrails
 
 - **Verrijkte observatie-review (§21).** `runAiReview` krijgt nu dezelfde deterministische

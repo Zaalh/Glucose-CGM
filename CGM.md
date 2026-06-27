@@ -130,6 +130,21 @@ npm run data-quality:check
 Lokale sanity-checks zonder database: de V2-detector op fixtures, de episode-builder op een synthetische timeline, de Laag 9 spike-filter en de Laag 10 data-quality gate (`node --check`-vriendelijk).
 
 ```bash
+npm run carb-advice:check
+npm run check
+```
+
+`carb-advice:check` test de advieslaag los van Mongo/Nightscout. De check dekt:
+
+- snelle daling rond 4.8 mmol/L waarbij V2/features al een vroege ETA zien en de
+  gekalibreerde forecast onder 4.5 komt → verwacht `eat_now`/`high`;
+- worst-case onder 4.5 terwijl de gekalibreerde forecast rond 5.3 blijft → verwacht
+  alleen `prepare`/`watch`, zonder concrete hypo-ETA.
+
+`npm run check` is de minimale pre-deploy suite en draait `carb-advice:check`,
+`ai:check`, `data-quality:check`, `detector:fixtures` en `episodes:check`.
+
+```bash
 npm run hypo:report -- --days 1      # dagrapport
 npm run hypo:report -- --days 7      # weekrapport
 npm run hypo:report -- --by-weekday  # per-weekdag profiel (28 dagen)
@@ -204,6 +219,23 @@ DEXCOM_MAX_COUNT=288
 De sync hergebruikt de Dexcom Share-sessie tussen polls en logt alleen opnieuw in bij een verlopen/afgekeurde sessie (401 of een SessionId-foutcode), zodat een 60s-pollinterval geen ~5× onnodige logins doet op een feed die maar elke ~5 min een punt levert.
 
 De snelheid-vakjes in de overlay zijn cadans-bewust: bij een ~1 min-feed (Libre 3) tonen ze stappen van 1 minuut, bij een ~5 min-feed (Dexcom) automatisch stappen van 5 minuten. De cadans wordt data-gedreven uit de recente metingen bepaald (mediane meetinterval), dus dit past zich vanzelf aan als je van sensor wisselt — er wordt niets geïnterpoleerd, alleen wat de sensor echt levert.
+
+Bij wisselen tussen Libre en Dexcom blijven historische entries naast elkaar in MongoDB
+staan. Nieuwe entries worden per bron gededuped via hun source-specifieke identifier
+en daarnaast op timestamp tegen recente Nightscout entries, zodat dezelfde meting niet
+nogmaals wordt geschreven wanneer beide bronnen tijdelijk overlappen. Source-health
+bepaalt de actieve bron uit de meest recente entry en gebruikt daar de juiste nominale
+cadans voor (Dexcom 5 min, Libre meestal 1 min).
+
+### Koolhydraatadvies en forecast
+
+`carbAdvice` in `/prediction/latest` gebruikt de gekalibreerde `predictedMmol`
+horizons als primaire lijn. De ETA naar 4.5/4.0 wordt lineair geinterpoleerd tussen
+de beschikbare forecastpunten (0/10/15/20/30/60/... min). Bij harde daling
+(`blendedRate` of `maxFallRate30m`) mag de vroegere V2/features ETA de advies-ETA
+vervroegen, maar alleen als de gekalibreerde forecast de drempel ook bevestigt
+(`calibratedMin30 < 4.5` of `<4.0`). Daardoor blijft een herstellende worst-case
+rustig, terwijl een echte snelle daling niet wordt weggedempt door grove horizonpunten.
 
 ### `.env.ai`
 

@@ -91,6 +91,21 @@ npm run dexcom:test
 Test alleen Dexcom Share/Follow login en metingen; schrijft niets naar Nightscout.
 
 ```bash
+npm run check
+```
+
+Draait de minimale pre-deploy suite: carb-advice edge-cases, AI/syntax-smokes,
+data-quality, detectorfixtures en episode-builder check.
+
+```bash
+npm run carb-advice:check
+```
+
+Controleert specifiek de koolhydraatadvieslogica bij twee kritieke patronen:
+een snelle daling waarbij de gekalibreerde forecast de hypo bevestigt, en een
+rustige worst-case situatie waarbij de forecast veilig blijft.
+
+```bash
 npm run influxdb:up
 ```
 
@@ -133,6 +148,12 @@ De `libreview-sync` service (poort 8787) biedt naast `/health` en `/sync`:
 - `GET /prediction/latest` — de nieuwste `prediction_snapshots` record. Bevat o.a. `modelVersion` (welk model de alarmbron is: `rules-v1.1` = V1, `reactive-hypo-v2` = V2 actief), `risk`/`riskScore`/`reasons`, `predictedMmol` per horizon 10/15/20/30/60/120/180, kansen `<4.5`/`<4.0`, `features` (incl. `acceleration`, `effectiveLagMinutes`, herstelsignalen, `spikeFiltered`, `dataQuality`), `rawCurrentMmol` wanneer een ruwe CGM-spike is gladgestreken, `predicted`, `pattern`, de V2 shadow-velden `shadowRisk`/`shadowScore`/`shadowConfidence`/`shadowReasons`/`shadowTuned`, en — als V2 actief is — `legacyRisk`/`legacyScore` (de V1-waarde ter vergelijking).
 - `GET /overlay/entries?count=N` — recente entries voor de overlay-grafiek.
 - `POST /feedback` — schrijft `user_feedback` (types: `confirmed`, `false_alarm`, `feels_hypo`, `ate_now`, `fingerstick_confirmed`). Endpoint blijft bestaan; de hypo-kaart heeft sinds kort geen feedbackknoppen meer.
+
+`carbAdvice` in `/prediction/latest` is afgeleid van de gekalibreerde forecast,
+maar houdt bij harde daling de vroege V2/features ETA vast als de forecast bevestigt
+dat de waarde onder 4.5 of 4.0 gaat. Dit voorkomt twee fouten tegelijk: geen
+onnodige suiker-ETA bij alleen een brede worst-case, maar ook geen te late actie
+wanneer de daling snel is.
 
 De nginx-overlay proxyt deze als `/_prediction/latest`, `/_overlay/entries` en `/_feedback`, zodat de browser ze same-origin kan benaderen. De hypo-kaart toont V1 en V2 naast elkaar (`niveau · score`, bij V2 ook `confidence %` en `✓` bij getunede params; V1 zonder `%` want het regelmodel kent geen confidence), met de redenen per model in de hover-tooltip.
 
