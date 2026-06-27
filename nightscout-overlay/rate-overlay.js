@@ -12,9 +12,11 @@
   // Bij een 5-min feed bestaan de 1-4m-vakjes niet (geen meting binnen tolerantie) en zou
   // alles leeg lijken; dan tonen we stappen van 5 min — eerlijk wat de sensor écht levert,
   // geen interpolatie. Labels blijven in minuten zodat de UI verder identiek werkt.
-  var WINDOWS_MINUTES_5 = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 75, 90, 120];
-  var COMPACT_WINDOWS_MINUTES_5 = [5, 10, 15, 20, 30, 45, 60, 90];
-  var CLASSIC_WINDOWS_MINUTES_5 = [5, 10, 15, 20, 30, 45, 60, 90, 120];
+  // 5-min stappen helemaal door tot 180 min (3 uur). Een 5-min sensor levert geen fijnere
+  // korrel, dus dit is de Dexcom-analoog van de per-minuut-reeks die Libre tot 60 toont.
+  var WINDOWS_MINUTES_5 = Array.from({ length: 36 }, function (_, index) { return (index + 1) * 5; });
+  var COMPACT_WINDOWS_MINUTES_5 = [5, 10, 15, 20, 30, 60, 90, 120];
+  var CLASSIC_WINDOWS_MINUTES_5 = [5, 10, 15, 20, 30, 45, 60, 90, 120, 150, 180];
   // Mediane meet-cadans (min) waarboven we een feed als "traag" (Dexcom-achtig) behandelen.
   var SLOW_FEED_MIN = 3;
   var RATE_MODE_KEY = 'cgm-rate-overlay-mode';
@@ -2306,7 +2308,7 @@
     var slow = isSlowFeed(currentReadings);
     var allLabel = slow ? 'alle stappen van 5 min' : 'alle minuten';
     var cadenceNote = slow ? ' (5-min feed, bv. Dexcom)' : '';
-    button.title = 'Vakjes-weergave: ' + button.textContent + '. compact = 8 vensters · klassiek = ' + (slow ? '9' : '13') + ' · alles = ' + allLabel + ' · uit = verbergen' + cadenceNote + '. Klik om te wisselen.';
+    button.title = 'Vakjes-weergave: ' + button.textContent + '. compact = 8 vensters · klassiek = ' + (slow ? '11' : '13') + ' · alles = ' + allLabel + ' · uit = verbergen' + cadenceNote + '. Klik om te wisselen.';
     var anchored = selectedReadingTime !== null;
     var sourceLabel = detectSourceLabel(currentReadings);
     var sourceSuffix = sourceLabel ? ' · ' + sourceLabel : '';
