@@ -522,7 +522,7 @@ async function writePredictionSnapshots(entries, previousEntries = []) {
     const primary = v2Active
       ? { risk: mapV2Alarm(v2.risk), riskScore: v2.score, reasons: v2.reasons, modelVersion: v2.modelVersion, legacyRisk: risk.risk, legacyScore: risk.score }
       : { risk: risk.risk, riskScore: risk.score, reasons: risk.reasons, modelVersion: 'rules-v1.1', legacyRisk: null, legacyScore: null }
-    const carbAdvice = buildCarbAdvice({ currentMmol, risk: primary, v2, features, pattern })
+    const carbAdvice = buildCarbAdvice({ currentMmol, risk: primary, v2, features, pattern, forecast })
 
     return {
       createdAt: entry.dateString ?? new Date(entry.date).toISOString(),
@@ -613,19 +613,23 @@ function mapV2Alarm(risk) {
   return risk === 'likely' ? 'high' : risk
 }
 
-function buildCarbAdvice({ currentMmol, risk, v2, features, pattern }) {
+function buildCarbAdvice({ currentMmol, risk, v2, features, pattern, forecast }) {
   const f = features || {}
   const predicted = v2?.predicted || {}
   const scenarios = v2?.scenarios || null
-  const minutesTo40 = Number.isFinite(predicted.minutesTo40)
+  const calibrated = summarizeCalibratedForecast(forecast?.predictedMmol)
+  const rawMinutesTo40 = Number.isFinite(predicted.minutesTo40)
     ? predicted.minutesTo40
     : Number.isFinite(f.minutesTo40) ? f.minutesTo40 : null
-  const minutesTo45 = Number.isFinite(predicted.minutesTo45)
+  const rawMinutesTo45 = Number.isFinite(predicted.minutesTo45)
     ? predicted.minutesTo45
     : Number.isFinite(f.minutesTo45) ? f.minutesTo45 : null
+  const minutesTo40 = calibrated.hasData ? calibrated.minutesTo40 : rawMinutesTo40
+  const minutesTo45 = calibrated.hasData ? calibrated.minutesTo45 : rawMinutesTo45
   const current = Number.isFinite(currentMmol) ? currentMmol : Number(f.currentMmol)
   const blended = Number.isFinite(f.blendedRate) ? f.blendedRate : 0
   const falling = blended < -0.01
+  const recovering = Boolean(f.recoverySignal || f.isDecelerating || f.isBottoming || f.isRecovering)
   const dropContext =
     Number(f.dropFromPeakMmol) >= 1.5 &&
     Number(f.minutesSincePeak) <= 90 &&
@@ -637,6 +641,20 @@ function buildCarbAdvice({ currentMmol, risk, v2, features, pattern }) {
   const worstCaseMin30 = scenarios && Number.isFinite(scenarios.worstCaseMin30)
     ? scenarios.worstCaseMin30
     : null
+  const calibratedMin30 = calibrated.min30
+  const calibratedMin60 = calibrated.min60
+  const calibratedSupportsUrgent =
+    calibratedMin30 !== null
+      ? calibratedMin30 < 4.5
+      : rawMinutesTo45 !== null && rawMinutesTo45 >= 0 && rawMinutesTo45 <= 10
+  const calibratedSupportsPrepare =
+    calibratedMin30 !== null
+      ? calibratedMin30 < 4.8
+      : rawMinutesTo40 !== null && rawMinutesTo40 > 15 && rawMinutesTo40 <= 30
+  const worstCaseOnly =
+    worstCaseMin30 !== null &&
+    worstCaseMin30 < 4.5 &&
+    !calibratedSupportsPrepare
 
   let action = 'none'
   let urgency = 'none'
@@ -666,7 +684,7 @@ function buildCarbAdvice({ currentMmol, risk, v2, features, pattern }) {
     title = 'Neem nu suiker'
     message = `Projectie onder 4.0 binnen ${Math.round(minutesTo40)} min.`
     reasons.push('projectie onder 4.0 binnen 15 min')
-  } else if (minutesTo45 !== null && minutesTo45 >= 0 && minutesTo45 <= 10 && dropContext) {
+  } else if (minutesTo45 !== null && minutesTo45 >= 0 && minutesTo45 <= 10 && dropContext && calibratedSupportsUrgent) {
     action = 'eat_now'
     urgency = 'high'
     etaMinutes = Math.round(minutesTo45)
@@ -683,6 +701,21 @@ function buildCarbAdvice({ currentMmol, risk, v2, features, pattern }) {
   } else if (
     risk &&
     (risk.risk === 'high' || risk.risk === 'urgent') &&
+    worstCaseOnly &&
+    (falling || dropContext || patternRisk)
+  ) {
+    action = 'prepare'
+    urgency = recovering && calibratedMin30 !== null && calibratedMin30 >= 4.5 ? 'watch' : (risk.risk === 'urgent' ? 'high' : 'watch')
+    title = urgency === 'high' ? 'Overweeg suiker klaar te leggen' : 'Houd suiker klaar'
+    if (calibratedMin30 !== null) {
+      message = `Worst-case is laag, maar de gekalibreerde forecast blijft 30 min rond ${calibratedMin30.toFixed(1)} mmol/L. Blijf volgen.`
+    } else {
+      message = `Worst-case is laag, maar de gekalibreerde forecast ziet nu geen directe hypo. Blijf volgen.`
+    }
+    reasons.push('worst-case laag zonder bevestiging door gekalibreerde forecast')
+  } else if (
+    risk &&
+    (risk.risk === 'high' || risk.risk === 'urgent') &&
     worstCaseMin30 !== null &&
     worstCaseMin30 < 4.5 &&
     (falling || dropContext || patternRisk)
@@ -690,8 +723,15 @@ function buildCarbAdvice({ currentMmol, risk, v2, features, pattern }) {
     action = 'prepare'
     urgency = risk.risk === 'urgent' ? 'high' : 'watch'
     title = urgency === 'high' ? 'Overweeg nu suiker' : 'Houd suiker klaar'
-    message = `Worst-case voorspelling komt binnen 30 min onder ${worstCaseMin30.toFixed(1)} mmol/L.`
-    reasons.push('worst-case onder 4.5 binnen 30 min')
+    if (calibrated.hasData && calibratedMin30 !== null && calibratedMin30 >= 4.5) {
+      urgency = recovering ? 'watch' : urgency
+      title = urgency === 'high' ? 'Overweeg suiker klaar te leggen' : 'Houd suiker klaar'
+      message = `Worst-case is laag, maar de gekalibreerde forecast blijft 30 min rond ${calibratedMin30.toFixed(1)} mmol/L. Blijf volgen.`
+      reasons.push('worst-case laag met gekalibreerde forecast boven 4.5')
+    } else {
+      message = `Worst-case voorspelling komt binnen 30 min onder ${worstCaseMin30.toFixed(1)} mmol/L.`
+      reasons.push('worst-case onder 4.5 binnen 30 min')
+    }
   }
 
   return {
@@ -703,8 +743,31 @@ function buildCarbAdvice({ currentMmol, risk, v2, features, pattern }) {
     reasons,
     minutesTo40: minutesTo40 === null ? null : round(minutesTo40, 1),
     minutesTo45: minutesTo45 === null ? null : round(minutesTo45, 1),
+    calibratedMin30: calibratedMin30 === null ? null : round(calibratedMin30, 3),
+    calibratedMin60: calibratedMin60 === null ? null : round(calibratedMin60, 3),
     worstCaseMin30: worstCaseMin30 === null ? null : round(worstCaseMin30, 3),
     generatedAt: new Date().toISOString(),
+  }
+}
+
+function summarizeCalibratedForecast(predictedMmol) {
+  const points = FORECAST_HORIZONS
+    .map((minutes) => ({ minutes, value: Number(predictedMmol?.[String(minutes)]) }))
+    .filter((point) => Number.isFinite(point.value))
+  const minUntil = (limit) => {
+    const values = points.filter((point) => point.minutes <= limit).map((point) => point.value)
+    return values.length ? Math.min(...values) : null
+  }
+  const firstAtOrBelow = (threshold) => {
+    const point = points.find((candidate) => candidate.value <= threshold)
+    return point ? point.minutes : null
+  }
+  return {
+    hasData: points.length > 0,
+    min30: minUntil(30),
+    min60: minUntil(60),
+    minutesTo40: firstAtOrBelow(4.0),
+    minutesTo45: firstAtOrBelow(4.5),
   }
 }
 
