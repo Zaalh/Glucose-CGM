@@ -10,6 +10,12 @@ import { buildReactiveHypoEpisodes } from './build-reactive-hypo-episodes.mjs'
 import { buildGlucoseEvents } from './lib/glucose-events.mjs'
 
 const LIBRE_API = 'https://api-eu.libreview.io'
+const DEXCOM_APPLICATION_ID = 'd89443d2-327c-4a6f-89e5-496bbb0317db'
+const DEXCOM_BASE_URLS = {
+  us: 'https://share2.dexcom.com/ShareWebServices/Services',
+  ous: 'https://shareous1.dexcom.com/ShareWebServices/Services',
+  eu: 'https://shareous1.dexcom.com/ShareWebServices/Services',
+}
 const DEFAULT_INTERVAL_SECONDS = 60
 // Nominale cadans = sync-poll-interval (default 60s → 1 meting/min). Fallback voor de
 // dekkings-noemer wanneer medianIntervalMinutes() niets oplevert. Staat hier (boven de
@@ -69,6 +75,7 @@ const LLU_BASE_HEADERS = {
 const args = new Set(process.argv.slice(2))
 const loop = args.has('--loop')
 const server = args.has('--server')
+const testSource = args.has('--test-source')
 let config = readConfig(false)
 
 // AI-review state (lock + min-interval + modellen-cache). MOET hierboven de
@@ -105,10 +112,38 @@ let episodesBuildRunning = false
 
 if (server) startServer()
 
-if (loop) {
+if (testSource) {
+  await testSourceOnce()
+} else if (loop) {
   await runForever()
 } else if (!server) {
   await syncOnce()
+}
+
+async function testSourceOnce() {
+  config = readConfig(true, { requireApiSecret: false })
+  const { readings, debugInfo } = config.source === 'dexcom'
+    ? await collectDexcomReadings()
+    : await collectLibreReadings()
+  const entries = readings
+    .filter((pt) => isSourceReading(pt))
+    .map(toNightscoutEntry)
+    .sort((a, b) => a.date - b.date)
+  const latest = entries[entries.length - 1] ?? null
+  console.log(JSON.stringify({
+    ok: true,
+    source: config.source,
+    readings: readings.length,
+    entries: entries.length,
+    latest: latest ? {
+      dateString: latest.dateString,
+      sgv: latest.sgv,
+      mmol: round(Number(latest.sgv) / MGDL_PER_MMOL, 1),
+      direction: latest.direction,
+      device: latest.device,
+    } : null,
+    debug: debugInfo,
+  }, null, 2))
 }
 
 async function runForever() {
@@ -196,12 +231,13 @@ function maybeDailyDigest() {
 
 async function syncOnce() {
   config = readConfig(true)
-  const { lluToken, baseUrl, accountId } = await libreLogin(config.email, config.password)
-  const { readings, debugInfo } = await collectReadings(lluToken, accountId, baseUrl)
+  const { readings, debugInfo } = config.source === 'dexcom'
+    ? await collectDexcomReadings()
+    : await collectLibreReadings()
   const knownIdentifiers = await getKnownNightscoutIdentifiers()
   const previousEntries = await getRecentNightscoutEntries()
   const collectedEntries = readings
-    .filter((pt) => (pt.Timestamp ?? pt.FactoryTimestamp) && (pt.Value ?? pt.ValueInMgPerDl))
+    .filter((pt) => isSourceReading(pt))
     .map(toNightscoutEntry)
     .filter((entry, index, all) => all.findIndex((candidate) => candidate.identifier === entry.identifier) === index)
     .sort((a, b) => a.date - b.date)
@@ -231,6 +267,30 @@ async function syncOnce() {
     uploaded: entries.length,
     message: `${entries.length} metingen naar Nightscout geschreven.`,
     debug: debugInfo,
+  }
+}
+
+async function collectLibreReadings() {
+  const { lluToken, baseUrl, accountId } = await libreLogin(config.email, config.password)
+  return await collectReadings(lluToken, accountId, baseUrl)
+}
+
+async function collectDexcomReadings() {
+  const baseUrl = dexcomBaseUrl()
+  const sessionId = await dexcomLogin(baseUrl)
+  const minutes = Math.max(30, Number(config.dexcomMinutes ?? 1440))
+  const maxCount = Math.max(1, Number(config.dexcomMaxCount ?? 288))
+  const url = `${baseUrl}/Publisher/ReadPublisherLatestGlucoseValues?sessionId=${encodeURIComponent(sessionId)}&minutes=${minutes}&maxCount=${maxCount}`
+  const res = await fetchWithRetry(url, { headers: { Accept: 'application/json' } }, 'dexcom_read')
+  const text = await res.text()
+  const readings = parseJson(text, `Dexcom readings parse fout: ${text.slice(0, 200)}`)
+  if (!res.ok) throw new Error(`Dexcom readings mislukt (${res.status}): ${JSON.stringify(readings).slice(0, 300)}`)
+  if (!Array.isArray(readings) || readings.length === 0) {
+    throw new Error('Geen Dexcom sensordata. Controleer Dexcom Share/Follow en de Dexcom credentials.')
+  }
+  return {
+    readings,
+    debugInfo: `dexcom_region=${config.dexcomRegion}, dexcom_points=${readings.length}`,
   }
 }
 
@@ -826,7 +886,13 @@ function startServer() {
       const current = readConfig(false)
       res.end(JSON.stringify({
         ok: true,
-        configured: Boolean(current.email && current.password && current.apiSecret),
+        source: current.source,
+        configured: Boolean(
+          current.apiSecret &&
+          (current.source === 'dexcom'
+            ? current.dexcomUsername && current.dexcomPassword
+            : current.email && current.password)
+        ),
         intervalSeconds: current.intervalSeconds,
         graceWindowMinutes: current.graceWindowMinutes,
         retryAttempts: current.retryAttempts,
@@ -3223,6 +3289,8 @@ function startAiReviewLoop() {
 }
 
 function toNightscoutEntry(pt) {
+  if (config.source === 'dexcom') return dexcomToNightscoutEntry(pt)
+
   const dateString = parseLibreTimestamp(pt.Timestamp ?? pt.FactoryTimestamp)
   const date = new Date(dateString).getTime()
 
@@ -3247,6 +3315,74 @@ function toNightscoutEntry(pt) {
     identifier: `glucose-cgm-libreview:${dateString}`,
   }
   return entry
+}
+
+function isSourceReading(pt) {
+  if (config.source === 'dexcom') return (pt.ST ?? pt.WT ?? pt.DT) && pt.Value != null
+  return (pt.Timestamp ?? pt.FactoryTimestamp) && (pt.Value ?? pt.ValueInMgPerDl)
+}
+
+function dexcomToNightscoutEntry(pt) {
+  const dateString = parseDexcomTimestamp(pt.ST ?? pt.WT ?? pt.DT)
+  const date = new Date(dateString).getTime()
+  const sgv = Math.round(Number(pt.Value))
+  if (!Number.isFinite(date) || !Number.isFinite(sgv)) {
+    throw new Error(`Ongeldige Dexcom meting: ${JSON.stringify(pt).slice(0, 300)}`)
+  }
+
+  return {
+    type: 'sgv',
+    date,
+    dateString,
+    sgv,
+    direction: mapDexcomDirection(pt.Trend),
+    device: 'glucose-cgm-dexcom',
+    identifier: `glucose-cgm-dexcom:${dateString}`,
+  }
+}
+
+async function dexcomLogin(baseUrl) {
+  const authRes = await dexcomPost(baseUrl, '/General/AuthenticatePublisherAccount', {
+    accountName: config.dexcomUsername,
+    password: config.dexcomPassword,
+    applicationId: DEXCOM_APPLICATION_ID,
+  }, 'dexcom_auth')
+  const accountId = parseDexcomStringResponse(authRes)
+  if (!accountId) throw new Error('Dexcom login gaf geen accountId terug.')
+
+  const loginRes = await dexcomPost(baseUrl, '/General/LoginPublisherAccountById', {
+    accountId,
+    password: config.dexcomPassword,
+    applicationId: DEXCOM_APPLICATION_ID,
+  }, 'dexcom_login')
+  const sessionId = parseDexcomStringResponse(loginRes)
+  if (!sessionId) throw new Error('Dexcom login gaf geen sessionId terug.')
+  return sessionId
+}
+
+async function dexcomPost(baseUrl, path, body, label) {
+  const res = await fetchWithRetry(`${baseUrl}${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(body),
+  }, label)
+  const text = await res.text()
+  if (!res.ok) throw new Error(`${label} mislukt (${res.status}): ${text.slice(0, 500)}`)
+  return text
+}
+
+function parseDexcomStringResponse(text) {
+  const parsed = parseJson(text, `Dexcom response parse fout: ${text.slice(0, 200)}`)
+  return typeof parsed === 'string' ? parsed : ''
+}
+
+function dexcomBaseUrl() {
+  if (config.dexcomBaseUrl) return trimTrailingSlash(config.dexcomBaseUrl)
+  const key = String(config.dexcomRegion || 'ous').toLowerCase()
+  return DEXCOM_BASE_URLS[key] ?? DEXCOM_BASE_URLS.ous
 }
 
 async function libreLogin(email, password) {
@@ -3495,6 +3631,23 @@ function parseLibreTimestamp(ts) {
   return new Date(wallClockToUtc(localMs, config.tzName)).toISOString()
 }
 
+function parseDexcomTimestamp(ts) {
+  if (!ts) throw new Error('Lege Dexcom timestamp')
+  const text = String(ts)
+  const msMatch = text.match(/Date\((\d+)(?:[+-]\d+)?\)/)
+  if (msMatch) return new Date(Number(msMatch[1])).toISOString()
+
+  const asNum = Number(text)
+  if (!Number.isNaN(asNum) && asNum > 1_000_000_000) {
+    return new Date(asNum * (asNum < 1e12 ? 1000 : 1)).toISOString()
+  }
+
+  const normalized = text.replace(' ', 'T')
+  const d = new Date(normalized)
+  if (!Number.isNaN(d.getTime())) return d.toISOString()
+  throw new Error(`Onbekend Dexcom timestamp formaat: ${ts}`)
+}
+
 // Zet een lokale wandkloktijd (als UTC-getallen) DST-bewust om naar echte UTC-ms voor `timeZone`.
 function wallClockToUtc(wallAsUtcMs, timeZone) {
   const dtf = new Intl.DateTimeFormat('en-US', {
@@ -3525,6 +3678,28 @@ function mapNightscoutDirection(trend) {
     7: 'DoubleUp',
   }
   return map[trend] ?? 'Flat'
+}
+
+function mapDexcomDirection(trend) {
+  const map = {
+    1: 'DoubleUp',
+    2: 'SingleUp',
+    3: 'FortyFiveUp',
+    4: 'Flat',
+    5: 'FortyFiveDown',
+    6: 'SingleDown',
+    7: 'DoubleDown',
+    DoubleUp: 'DoubleUp',
+    SingleUp: 'SingleUp',
+    FortyFiveUp: 'FortyFiveUp',
+    Flat: 'Flat',
+    FortyFiveDown: 'FortyFiveDown',
+    SingleDown: 'SingleDown',
+    DoubleDown: 'DoubleDown',
+    NotComputable: 'NOT COMPUTABLE',
+    RateOutOfRange: 'NOT COMPUTABLE',
+  }
+  return map[trend] ?? map[String(trend)] ?? 'NOT COMPUTABLE'
 }
 
 async function responseJson(res) {
@@ -3611,17 +3786,30 @@ function requiredEnv(name) {
   return value
 }
 
-function readConfig(requireSecrets) {
+function readConfig(requireSecrets, options = {}) {
+  const source = String(process.env.CGM_SOURCE ?? process.env.SENSOR_SOURCE ?? 'libreview').toLowerCase()
+  if (!['libreview', 'libre', 'dexcom'].includes(source)) {
+    throw new Error('CGM_SOURCE moet libreview of dexcom zijn.')
+  }
+  const normalizedSource = source === 'libre' ? 'libreview' : source
+
   const next = {
-    email: requireSecrets ? requiredEnv('LIBREVIEW_EMAIL') : optionalEnv('LIBREVIEW_EMAIL'),
-    password: requireSecrets ? requiredEnv('LIBREVIEW_PASSWORD') : optionalEnv('LIBREVIEW_PASSWORD'),
+    source: normalizedSource,
+    email: requireSecrets && normalizedSource === 'libreview' ? requiredEnv('LIBREVIEW_EMAIL') : optionalEnv('LIBREVIEW_EMAIL'),
+    password: requireSecrets && normalizedSource === 'libreview' ? requiredEnv('LIBREVIEW_PASSWORD') : optionalEnv('LIBREVIEW_PASSWORD'),
+    dexcomUsername: requireSecrets && normalizedSource === 'dexcom' ? requiredEnv('DEXCOM_USERNAME') : optionalEnv('DEXCOM_USERNAME'),
+    dexcomPassword: requireSecrets && normalizedSource === 'dexcom' ? requiredEnv('DEXCOM_PASSWORD') : optionalEnv('DEXCOM_PASSWORD'),
+    dexcomRegion: process.env.DEXCOM_REGION ?? 'ous',
+    dexcomBaseUrl: optionalEnv('DEXCOM_BASE_URL'),
+    dexcomMinutes: Number(process.env.DEXCOM_MINUTES ?? 1440),
+    dexcomMaxCount: Number(process.env.DEXCOM_MAX_COUNT ?? 288),
     tzFixedOffsetMinutes: (process.env.LIBREVIEW_TZ_OFFSET != null && process.env.LIBREVIEW_TZ_OFFSET !== '')
       ? Number(process.env.LIBREVIEW_TZ_OFFSET)
       : null,
     tzName: process.env.LIBREVIEW_TZ ?? 'Europe/Amsterdam',
     nightscoutUrl: trimTrailingSlash(process.env.NIGHTSCOUT_URL ?? 'http://localhost:1337'),
     mongoUri: process.env.MONGODB_URI ?? 'mongodb://nightscout-mongo:27017/nightscout',
-    apiSecret: requireSecrets ? requiredEnv('API_SECRET') : optionalEnv('API_SECRET'),
+    apiSecret: requireSecrets && options.requireApiSecret !== false ? requiredEnv('API_SECRET') : optionalEnv('API_SECRET'),
     intervalSeconds: Number(process.env.LIBREVIEW_INTERVAL_SECONDS ?? DEFAULT_INTERVAL_SECONDS),
     graceWindowMinutes: Number(process.env.LIBREVIEW_GRACE_WINDOW_MINUTES ?? DEFAULT_GRACE_WINDOW_MINUTES),
     retryAttempts: Number(process.env.LIBREVIEW_RETRY_ATTEMPTS ?? DEFAULT_RETRY_ATTEMPTS),
@@ -3641,6 +3829,18 @@ function readConfig(requireSecrets) {
 
   if (!Number.isFinite(next.intervalSeconds) || next.intervalSeconds < 30) {
     throw new Error('LIBREVIEW_INTERVAL_SECONDS moet minimaal 30 zijn.')
+  }
+
+  if (normalizedSource === 'dexcom') {
+    if (!['us', 'ous', 'eu'].includes(String(next.dexcomRegion).toLowerCase()) && !next.dexcomBaseUrl) {
+      throw new Error('DEXCOM_REGION moet us of ous/eu zijn, of zet DEXCOM_BASE_URL expliciet.')
+    }
+    if (!Number.isFinite(next.dexcomMinutes) || next.dexcomMinutes < 30) {
+      throw new Error('DEXCOM_MINUTES moet minimaal 30 zijn.')
+    }
+    if (!Number.isInteger(next.dexcomMaxCount) || next.dexcomMaxCount < 1 || next.dexcomMaxCount > 288) {
+      throw new Error('DEXCOM_MAX_COUNT moet een geheel getal tussen 1 en 288 zijn.')
+    }
   }
 
   if (!Number.isFinite(next.graceWindowMinutes) || next.graceWindowMinutes < HISTORY_PERIOD_MINUTES) {

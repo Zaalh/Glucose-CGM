@@ -1,12 +1,12 @@
 # Glucose CGM
 
-Lokale CGM-monitor voor LibreView/LibreLink data met Nightscout en MongoDB. De Nightscout-UI met een eigen nginx-overlay toont live glucose, grafiek, time-in-range, alarmen en voorspellingen op basis van de metingen die Nightscout opslaat.
+Lokale CGM-monitor voor LibreView/LibreLink of Dexcom Share/Follow data met Nightscout en MongoDB. De Nightscout-UI met een eigen nginx-overlay toont live glucose, grafiek, time-in-range, alarmen en voorspellingen op basis van de metingen die Nightscout opslaat.
 
 ## In het Kort
 
 - UI: Nightscout-webinterface met een geïnjecteerde nginx-overlay (`nightscout-overlay/`).
 - CGM-opslag: Nightscout + MongoDB.
-- Lokale sync: LibreView naar Nightscout via Docker.
+- Lokale sync: LibreView of Dexcom Share naar Nightscout via Docker.
 - Predictie: offline Node-scripts (`scripts/`) op MongoDB.
 
 ## Snel Starten
@@ -22,20 +22,25 @@ Lokale CGM-monitor voor LibreView/LibreLink data met Nightscout en MongoDB. De N
    ```bash
    cp .env.nightscout.example .env.nightscout
    cp .env.libreview.example .env.libreview
+   cp .env.dexcom.example .env.dexcom
    cp .env.influxdb.example .env.influxdb
    ```
 
-3. Vul `.env.libreview` met je LibreView/LibreLink gegevens:
+3. Vul de credentials voor de sensorbron(nen) die je gebruikt:
 
    ```env
    LIBREVIEW_EMAIL=jij@example.com
    LIBREVIEW_PASSWORD=...
+   DEXCOM_USERNAME=+316...
+   DEXCOM_PASSWORD=...
    ```
 
-4. Start Nightscout, MongoDB en de LibreView sync:
+4. Start Nightscout, MongoDB en de gewenste sync-bron:
 
    ```bash
    npm run nightscout:libre
+   # of
+   npm run nightscout:dexcom
    ```
 
 Open daarna de UI met overlay op `http://localhost:1337`.
@@ -62,6 +67,12 @@ npm run nightscout:libre
 Start Nightscout, MongoDB en de LibreView sync-service.
 
 ```bash
+npm run nightscout:dexcom
+```
+
+Start Nightscout, MongoDB en dezelfde sync-service in Dexcom Share/Follow modus.
+
+```bash
 npm run nightscout:logs
 ```
 
@@ -71,7 +82,13 @@ Bekijk Nightscout logs.
 npm run libre:logs
 ```
 
-Bekijk LibreView sync logs.
+Bekijk sync logs. Dit is dezelfde service voor Libre en Dexcom.
+
+```bash
+npm run dexcom:test
+```
+
+Test alleen Dexcom Share/Follow login en metingen; schrijft niets naar Nightscout.
 
 ```bash
 npm run influxdb:up
@@ -487,6 +504,20 @@ LIBREVIEW_RETRY_JITTER_MS=400
 
 `LIBREVIEW_TZ` (IANA-zone, default `Europe/Amsterdam`) zet timestamps **DST-bewust** om, dus zomer- én wintertijd kloppen vanzelf. Alleen als je een vaste offset wilt forceren zet je `LIBREVIEW_TZ_OFFSET` (minuten); leeg laten = automatisch.
 
+### `.env.dexcom`
+
+Lokale Dexcom Share/Follow credentials. Dit bestand wordt niet gecommit. Je mag `.env.libreview` en `.env.dexcom` allebei laten staan; het startcommando kiest de bron.
+
+```env
+DEXCOM_USERNAME=+316...
+DEXCOM_PASSWORD=your-dexcom-password
+DEXCOM_REGION=ous
+DEXCOM_MINUTES=1440
+DEXCOM_MAX_COUNT=288
+```
+
+`DEXCOM_REGION=ous` is de standaard voor Europa/Outside-US. Dexcom levert normaal een meting per 5 minuten; `DEXCOM_MAX_COUNT=288` is ongeveer 24 uur historie.
+
 ### `.env.influxdb`
 
 Optionele InfluxDB 1.8 configuratie voor xDrip upload of Grafana. Dit bestand wordt niet gecommit.
@@ -506,8 +537,8 @@ InfluxDB is hier een extra tijdreeks-archief. De Nightscout UI, overlay en predi
 ## Data Flow
 
 ```text
-LibreView/LibreLink
-  -> lokale libreview-sync Docker service
+LibreView/LibreLink of Dexcom Share/Follow
+  -> lokale libreview-sync Docker service (bron gekozen met CGM_SOURCE)
   -> Nightscout API
   -> MongoDB
   -> Nightscout-UI + nginx-overlay: grafiek, alarmen en voorspelling

@@ -5,7 +5,8 @@ services:
     profiles:
       - influxdb
     env_file:
-      - .env.influxdb
+      - path: .env.influxdb
+        required: false
     volumes:
       - ./influxdb-data:/var/lib/influxdb
     ports:
@@ -95,13 +96,20 @@ services:
         condition: service_started
     env_file:
       - .env.nightscout
-      - .env.libreview
+      - path: .env.libreview
+        required: false
+      - path: .env.dexcom
+        required: false
       - .env.influxdb
       # AI-laag (Ollama Cloud) voor de overlay AI-review knop. Gitignored, dus
       # per host plaatsen; required:false zodat deploy zonder dit bestand niet breekt.
       - path: .env.ai
         required: false
     environment:
+      # Kies bron via het startcommando:
+      #   CGM_SOURCE=libreview (Libre 3 via LibreView)
+      #   CGM_SOURCE=dexcom   (Dexcom ONE+ via Dexcom Share/Follow)
+      CGM_SOURCE: ${CGM_SOURCE:-libreview}
       NIGHTSCOUT_URL: http://nightscout:1337
       MONGODB_URI: mongodb://nightscout-mongo:27017/nightscout
       INFLUX_URL: http://influxdb:8086
