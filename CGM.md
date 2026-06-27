@@ -6,7 +6,7 @@ Glucose CGM is een lokale, self-hosted glucosemonitor. De UI is de Nightscout-we
 
 Belangrijkste doel:
 
-- LibreView/LibreLink data elke minuut ophalen.
+- LibreView/LibreLink of Dexcom Share/Follow data ophalen.
 - Elke beschikbare meting opslaan in Nightscout/MongoDB.
 - Analyse, grafieken, alarmen en voorspelling baseren op Nightscout/MongoDB.
 
@@ -16,7 +16,7 @@ Belangrijkste doel:
 - CGM opslag: MongoDB via Nightscout.
 - Optioneel tijdreeks-archief: InfluxDB 1.8 voor xDrip/Grafana.
 - CGM API/UI backend: `nightscout/cgm-remote-monitor`.
-- Lokale Libre sync: `scripts/libreview-nightscout-sync.mjs`.
+- Lokale CGM sync: `scripts/libreview-nightscout-sync.mjs` (LibreView of Dexcom, gekozen met `CGM_SOURCE`).
 - Predictie: offline Node-scripts in `scripts/`.
 - Docker services: `nightscout-mongo`, `nightscout`, `libreview-sync`, `nightscout-ui` (nginx), optioneel `influxdb`.
 
@@ -34,7 +34,13 @@ Start Nightscout en MongoDB.
 npm run nightscout:libre
 ```
 
-Start Nightscout, MongoDB en de LibreView sync-service.
+Start Nightscout, MongoDB en de sync-service met LibreView/LibreLink als bron.
+
+```bash
+npm run nightscout:dexcom
+```
+
+Start Nightscout, MongoDB en dezelfde sync-service met Dexcom Share/Follow als bron.
 
 ```bash
 npm run nightscout:logs
@@ -46,7 +52,14 @@ Toont Nightscout logs.
 npm run libre:logs
 ```
 
-Toont LibreView sync logs.
+Toont sync logs. De service heet historisch `libreview-sync`, maar kan zowel Libre als Dexcom draaien.
+
+```bash
+npm run dexcom:logs
+npm run dexcom:test
+```
+
+Toont dezelfde sync logs of test alleen Dexcom Share/Follow login en metingen zonder naar Nightscout te schrijven.
 
 ```bash
 npm run influxdb:up
@@ -61,7 +74,7 @@ Start, toont logs of stopt de optionele InfluxDB-service, of start Grafana voor 
 curl http://localhost:8787/health
 ```
 
-Controleert of de lokale LibreView sync-service draait en geconfigureerd is.
+Controleert of de lokale sync-service draait, welke bron actief is (`source`) en of de bijbehorende credentials geconfigureerd zijn.
 
 ```bash
 curl -X POST http://localhost:8787/sync
@@ -174,6 +187,20 @@ LIBREVIEW_RETRY_BASE_DELAY_MS=750
 `LIBREVIEW_GRACE_WINDOW_MINUTES` bepaalt hoeveel recente LibreView-historie elke sync opnieuw ophaalt, zodat late meetpunten alsnog opgeslagen kunnen worden.
 `LIBREVIEW_RETRY_ATTEMPTS` en `LIBREVIEW_RETRY_BASE_DELAY_MS` bepalen hoeveel korte herpogingen de sync doet bij tijdelijke netwerkfouten, timeouts, rate limits of serverfouten.
 
+### `.env.dexcom`
+
+Lokale Dexcom Share/Follow credentials. Dit bestand wordt niet gecommit. Je mag `.env.libreview` en `.env.dexcom` allebei laten staan; het startcommando kiest de bron via `CGM_SOURCE`.
+
+```env
+DEXCOM_USERNAME=+316...
+DEXCOM_PASSWORD=your-dexcom-password
+DEXCOM_REGION=ous
+DEXCOM_MINUTES=1440
+DEXCOM_MAX_COUNT=288
+```
+
+`DEXCOM_REGION=ous` is de standaard voor Europa/Outside-US. Dexcom Share levert normaal ongeveer elke 5 minuten een waarde; `DEXCOM_MAX_COUNT=288` is ongeveer 24 uur historie. Entries krijgen `device: glucose-cgm-dexcom` en identifiers met `glucose-cgm-dexcom:<timestamp>`.
+
 ### `.env.ai`
 
 Optionele AI-laag (Ollama Cloud). Niet gecommit (gitignored); per host plaatsen. Wordt
@@ -223,18 +250,20 @@ INFLUXDB_PORT=8086
 
 ## Data Flow
 
-1. LibreView/LibreLink account levert sensorhistorie.
+1. LibreView/LibreLink of Dexcom Share/Follow levert sensorhistorie.
 2. `libreview-sync` haalt elke 60 seconden data op, met korte retries bij tijdelijke API-fouten.
 3. Metingen worden genormaliseerd naar Nightscout `sgv` entries.
-4. Elke entry krijgt een stabiele `identifier`: `glucose-cgm-libreview:<timestamp>`.
+4. Elke entry krijgt een stabiele bron-specifieke `identifier`: `glucose-cgm-libreview:<timestamp>` of `glucose-cgm-dexcom:<timestamp>`.
 5. Bestaande identifiers worden overgeslagen om dubbele records te voorkomen.
-6. De sync haalt steeds een recente grace window opnieuw op, zodat late meetpunten alsnog naar Nightscout kunnen.
+6. De sync haalt steeds recente historie opnieuw op, zodat late meetpunten alsnog naar Nightscout kunnen.
 7. Nightscout schrijft entries naar MongoDB.
 8. De `libreview-sync` service schrijft bij nieuwe entries direct `prediction_snapshots` naar MongoDB.
 9. De nginx-overlay leest historie uit `/api/v1/entries/sgv.json` plus de sync-endpoints.
 10. Analyse, time-in-range, alarmen en voorspelling gebruiken deze Nightscout/MongoDB data.
 
-De sync-service biedt op poort 8787 `POST /sync` om dezelfde LibreView-sync handmatig te starten.
+De sync-service biedt op poort 8787 `POST /sync` om dezelfde actieve bron handmatig te synchroniseren.
+
+Op 2026-06-27 is de LAN-server (`192.168.178.240`, repo `~/Documents/Glucose CGM`) gedeployed in Dexcom-modus. Verificatie: `/health` gaf `source: "dexcom"` en `configured: true`; een handmatige sync schreef Dexcom entries naar Nightscout met `device: "glucose-cgm-dexcom"` en maakte een gekoppelde prediction snapshot aan.
 
 ## MongoDB-indexen
 
@@ -310,11 +339,11 @@ De live setup is geverifieerd met InfluxDB `1.8.10`, Grafana `11.5.2`, datasourc
 
 ## Important Files
 
-- `docker-compose.nightscout.yml`: Docker services voor MongoDB, Nightscout, LibreView sync en optionele InfluxDB.
+- `docker-compose.nightscout.yml`: Docker services voor MongoDB, Nightscout, CGM sync (LibreView of Dexcom) en optionele InfluxDB.
 - `grafana/provisioning/datasources/influxdb.yml`: Grafana datasource voor InfluxDB 1.x / InfluxQL.
 - `grafana/provisioning/dashboards/dashboards.yml`: Grafana dashboard provider.
 - `grafana/dashboards/xdrip-glucose.json`: Basisdashboard voor xDrip glucosewaarden.
-- `scripts/libreview-nightscout-sync.mjs`: Lokale sync van LibreView naar Nightscout; schrijft `prediction_snapshots` (V1 + V2 shadow) en glucose/rate naar InfluxDB. Serveert ook de AI-review endpoints (`/ai-review/*`).
+- `scripts/libreview-nightscout-sync.mjs`: Lokale sync van LibreView of Dexcom Share naar Nightscout; schrijft `prediction_snapshots` (V1 + V2 shadow) en glucose/rate naar InfluxDB. Serveert ook de AI-review endpoints (`/ai-review/*`).
 - `scripts/lib/ai-review-core.mjs`: Gedeelde AI-review kern (`runAiReview`) voor CLI en server; JSON-mode + retry, neemt `user_feedback` mee.
 - `scripts/lib/ai-router.mjs`: Multi-provider AI-router (OpenAI-compatible) met fallback-volgorde.
 - `scripts/ai-review.mjs`: Dunne CLI-wrapper rond `runAiReview` (`npm run ai:review`).
@@ -347,7 +376,7 @@ De voorspelling gebruikt weighted linear regression op recente metingen. Recente
 
 Geen quadratic regression gebruiken voor glucosevoorspelling. Bij minuutdata geeft dat te snel overfit en wilde extrapolaties.
 
-Naast de V1-regel draait een **V2 reactieve-hypo detector** (`scripts/lib/reactive-hypo-detector.mjs`, zie `hypo.md`) die curvevorm, dalingssnelheid, CGM-lag, scenario's en persoonlijke episodes combineert. V2 staat in **shadow-mode**: per snapshot opgeslagen als `shadowRisk`, maar V1 (`rules-v1.1`) blijft de enige alarmbron tot V2 op genoeg 1-min data getuned en geactiveerd is (M6). Live en backtest delen dezelfde featurebuilder/detector, zodat de backtest meet wat live draait. Nightscout/MongoDB blijft de bron van waarheid; `episode_vectors` zijn alleen een afgeleide zoeklaag/cache die uit MongoDB opnieuw gebouwd kan worden.
+Naast de V1-regel draait een **V2 reactieve-hypo detector** (`scripts/lib/reactive-hypo-detector.mjs`, zie `hypo.md`) die curvevorm, dalingssnelheid, CGM-lag, scenario's en persoonlijke episodes combineert. V2 staat in **shadow-mode**: per snapshot opgeslagen als `shadowRisk`, maar V1 (`rules-v1.1`) blijft de enige alarmbron tot V2 op genoeg data getuned en geactiveerd is (M6). Live en backtest delen dezelfde featurebuilder/detector, zodat de backtest meet wat live draait. Nightscout/MongoDB blijft de bron van waarheid; `episode_vectors` zijn alleen een afgeleide zoeklaag/cache die uit MongoDB opnieuw gebouwd kan worden. Let op bij Dexcom: de cadans is normaal ~5 minuten in plaats van Libre 3 ~1 minuut, dus na meerdere dagen Dexcom-data opnieuw evalueren/tunen.
 
 De featurebuilder (`scripts/lib/hypo-features.mjs`) berekent o.a. `acceleration` (versnelt de daling?), herstelsignalen (`isDecelerating`/`isBottoming`/`recoverySignal`) die vals alarm dempen wanneer een daling al voorbij is, een **variabele CGM-lag** (`effectiveLagMinutes` 7/5/3/0 min, afhankelijk van de dalingssnelheid) en een **meal-onset detector** (`mealOnset`/`riseFromTroughMmol`/`minutesSinceTrough`): herkent dat een maaltijdpiek begint zodat V2 al in de stijgende fase een lage `watch` geeft (~10-15 min eerder dan de daling). Die `watch` werkt als risk-floor, niet als score-bijdrage, dus meal-onset kan nooit zelf tot een alarm leiden. Laag 9 draait dezelfde median-of-3 spike-filter in live-sync, featurebuilder, backtest en tuner; alleen de werk-timeline wordt opgeschoond, ruwe CGM-entries blijven intact en snapshots markeren dit met `spikeFiltered`/`rawCurrentMmol` wanneer het gebeurt. De live-sync geeft V2 hetzelfde `pattern`-object (persoonlijke episode-vergelijking) door als V1, en sinds 2026-06-04 doen de backtest én auto-tuner dat ook via de gedeelde `scripts/lib/episode-similarity.mjs` — train/serve zijn dus gelijkgetrokken (component 6 / `patternScore` wordt overal hetzelfde gevoed). De hypo-kaart in de overlay toont V1 en V2 naast elkaar (`niveau · score`, bij V2 ook `confidence %` en `✓` bij getunede params; V1 heeft geen `%` want het regelmodel berekent geen confidence). Redenen per model staan in de hover-tooltip; de sync-risk mag het kaart-alarm escaleren maar nooit verlagen. `hypo.md` bevat het volledige verbeterd-voorspellingsplan (9 lagen).
 

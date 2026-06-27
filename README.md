@@ -64,7 +64,7 @@ Start alleen Nightscout en MongoDB.
 npm run nightscout:libre
 ```
 
-Start Nightscout, MongoDB en de LibreView sync-service.
+Start Nightscout, MongoDB en de sync-service met LibreView/LibreLink als bron.
 
 ```bash
 npm run nightscout:dexcom
@@ -124,7 +124,7 @@ Controleer of de lokale sync-service draait en geconfigureerd is.
 curl -X POST http://localhost:8787/sync
 ```
 
-Start handmatig dezelfde sync die de `Sync Libre` knop gebruikt.
+Start handmatig dezelfde actieve CGM-bron die de sync-service gebruikt.
 
 ### Sync-service endpoints
 
@@ -554,7 +554,7 @@ xDrip+
 
 Gebruik InfluxDB dus niet als enige uploaddoel als je deze app live wilt blijven voeden.
 
-De sync draait elke 60 seconden. Elke meting krijgt een vaste Nightscout `identifier`, waardoor vertraagde minuutmetingen alsnog worden opgeslagen zonder dubbele records.
+De sync draait elke 60 seconden. Elke meting krijgt een vaste bron-specifieke Nightscout `identifier`, waardoor vertraagde metingen alsnog worden opgeslagen zonder dubbele records.
 
 De sync-service biedt op poort 8787 `POST /sync` om handmatig dezelfde sync te starten.
 
