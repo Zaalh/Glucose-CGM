@@ -77,6 +77,7 @@ const args = new Set(process.argv.slice(2))
 const loop = args.has('--loop')
 const server = args.has('--server')
 const testSource = args.has('--test-source')
+const carbAdviceSelfTest = args.has('--carb-advice-self-test')
 let config = readConfig(false)
 
 // AI-review state (lock + min-interval + modellen-cache). MOET hierboven de
@@ -118,7 +119,9 @@ let dexcomSession = { id: null, key: null }
 
 if (server) startServer()
 
-if (testSource) {
+if (carbAdviceSelfTest) {
+  runCarbAdviceSelfTest()
+} else if (testSource) {
   await testSourceOnce()
 } else if (loop) {
   await runForever()
@@ -617,18 +620,17 @@ function buildCarbAdvice({ currentMmol, risk, v2, features, pattern, forecast })
   const f = features || {}
   const predicted = v2?.predicted || {}
   const scenarios = v2?.scenarios || null
-  const calibrated = summarizeCalibratedForecast(forecast?.predictedMmol)
+  const current = Number.isFinite(currentMmol) ? currentMmol : Number(f.currentMmol)
+  const calibrated = summarizeCalibratedForecast(forecast?.predictedMmol, current)
   const rawMinutesTo40 = Number.isFinite(predicted.minutesTo40)
     ? predicted.minutesTo40
     : Number.isFinite(f.minutesTo40) ? f.minutesTo40 : null
   const rawMinutesTo45 = Number.isFinite(predicted.minutesTo45)
     ? predicted.minutesTo45
     : Number.isFinite(f.minutesTo45) ? f.minutesTo45 : null
-  const minutesTo40 = calibrated.hasData ? calibrated.minutesTo40 : rawMinutesTo40
-  const minutesTo45 = calibrated.hasData ? calibrated.minutesTo45 : rawMinutesTo45
-  const current = Number.isFinite(currentMmol) ? currentMmol : Number(f.currentMmol)
   const blended = Number.isFinite(f.blendedRate) ? f.blendedRate : 0
   const falling = blended < -0.01
+  const hardFalling = blended < -0.05 || Number(f.maxFallRate30m) < -0.08
   const recovering = Boolean(f.recoverySignal || f.isDecelerating || f.isBottoming || f.isRecovering)
   const dropContext =
     Number(f.dropFromPeakMmol) >= 1.5 &&
@@ -643,6 +645,20 @@ function buildCarbAdvice({ currentMmol, risk, v2, features, pattern, forecast })
     : null
   const calibratedMin30 = calibrated.min30
   const calibratedMin60 = calibrated.min60
+  const minutesTo40 = chooseAdviceEta({
+    calibratedEta: calibrated.minutesTo40,
+    rawEta: rawMinutesTo40,
+    calibratedConfirmsThreshold: calibratedMin30 !== null && calibratedMin30 < 4.0,
+    hardFalling,
+    hasCalibratedData: calibrated.hasData,
+  })
+  const minutesTo45 = chooseAdviceEta({
+    calibratedEta: calibrated.minutesTo45,
+    rawEta: rawMinutesTo45,
+    calibratedConfirmsThreshold: calibratedMin30 !== null && calibratedMin30 < 4.5,
+    hardFalling,
+    hasCalibratedData: calibrated.hasData,
+  })
   const calibratedSupportsUrgent =
     calibratedMin30 !== null
       ? calibratedMin30 < 4.5
@@ -750,17 +766,38 @@ function buildCarbAdvice({ currentMmol, risk, v2, features, pattern, forecast })
   }
 }
 
-function summarizeCalibratedForecast(predictedMmol) {
+function chooseAdviceEta({ calibratedEta, rawEta, calibratedConfirmsThreshold, hardFalling, hasCalibratedData }) {
+  if (!hasCalibratedData) return rawEta ?? null
+  if (calibratedEta === null && !(hardFalling && calibratedConfirmsThreshold)) return null
+  if (hardFalling && calibratedConfirmsThreshold && rawEta !== null) {
+    return calibratedEta === null ? rawEta : Math.min(calibratedEta, rawEta)
+  }
+  return calibratedEta
+}
+
+function summarizeCalibratedForecast(predictedMmol, currentMmol = null) {
   const points = FORECAST_HORIZONS
     .map((minutes) => ({ minutes, value: Number(predictedMmol?.[String(minutes)]) }))
     .filter((point) => Number.isFinite(point.value))
+  const current = Number(currentMmol)
+  if (Number.isFinite(current)) points.unshift({ minutes: 0, value: current })
   const minUntil = (limit) => {
     const values = points.filter((point) => point.minutes <= limit).map((point) => point.value)
     return values.length ? Math.min(...values) : null
   }
   const firstAtOrBelow = (threshold) => {
-    const point = points.find((candidate) => candidate.value <= threshold)
-    return point ? point.minutes : null
+    for (let i = 0; i < points.length; i += 1) {
+      const point = points[i]
+      if (point.value <= threshold) {
+        if (i === 0) return point.minutes
+        const prev = points[i - 1]
+        const dv = point.value - prev.value
+        if (!Number.isFinite(dv) || Math.abs(dv) < 0.0001) return point.minutes
+        const ratio = (threshold - prev.value) / dv
+        return prev.minutes + (point.minutes - prev.minutes) * Math.max(0, Math.min(1, ratio))
+      }
+    }
+    return null
   }
   return {
     hasData: points.length > 0,
@@ -769,6 +806,83 @@ function summarizeCalibratedForecast(predictedMmol) {
     minutesTo40: firstAtOrBelow(4.0),
     minutesTo45: firstAtOrBelow(4.5),
   }
+}
+
+function runCarbAdviceSelfTest() {
+  const fastDrop = buildCarbAdvice({
+    currentMmol: 4.828,
+    risk: { risk: 'urgent' },
+    v2: {
+      predicted: { minutesTo45: 3, minutesTo40: 7.6 },
+      scenarios: { worstCaseMin30: 1.5 },
+    },
+    features: {
+      currentMmol: 4.828,
+      blendedRate: -0.1096,
+      maxFallRate30m: -0.122,
+      dropFromPeakMmol: 4.384,
+      minutesSincePeak: 50,
+      minutesTo45: 3,
+      minutesTo40: 7.6,
+    },
+    pattern: { similarEpisodeCount: 18, similarHypoRatio: 0.938 },
+    forecast: {
+      predictedMmol: {
+        10: 4.587,
+        15: 4.466,
+        20: 4.345,
+        30: 4.103,
+        60: 4.103,
+      },
+    },
+  })
+  if (fastDrop.action !== 'eat_now') {
+    throw new Error(`carb-advice self-test: verwacht eat_now, kreeg ${fastDrop.action}`)
+  }
+  if (fastDrop.urgency !== 'high') {
+    throw new Error(`carb-advice self-test: verwacht high urgency, kreeg ${fastDrop.urgency}`)
+  }
+  if (!(Number.isFinite(fastDrop.minutesTo45) && fastDrop.minutesTo45 <= 3.1)) {
+    throw new Error(`carb-advice self-test: verwacht vroege minutesTo45, kreeg ${fastDrop.minutesTo45}`)
+  }
+  if (!(Number.isFinite(fastDrop.calibratedMin30) && fastDrop.calibratedMin30 < 4.5)) {
+    throw new Error(`carb-advice self-test: verwacht calibratedMin30 < 4.5, kreeg ${fastDrop.calibratedMin30}`)
+  }
+
+  const recovering = buildCarbAdvice({
+    currentMmol: 5.605,
+    risk: { risk: 'high' },
+    v2: {
+      predicted: { minutesTo45: null, minutesTo40: null },
+      scenarios: { worstCaseMin30: 1.543 },
+    },
+    features: {
+      currentMmol: 5.605,
+      blendedRate: 0.0249,
+      dropFromPeakMmol: 3.607,
+      minutesSincePeak: 30,
+      minutesTo45: null,
+      minutesTo40: null,
+    },
+    pattern: { similarEpisodeCount: 18, similarHypoRatio: 0.803 },
+    forecast: {
+      predictedMmol: {
+        10: 5.562,
+        15: 5.503,
+        20: 5.429,
+        30: 5.25,
+        60: 5.286,
+      },
+    },
+  })
+  if (recovering.action !== 'prepare' || recovering.urgency !== 'watch') {
+    throw new Error(`carb-advice self-test: verwacht rustige prepare/watch, kreeg ${recovering.action}/${recovering.urgency}`)
+  }
+  if (recovering.minutesTo40 !== null || recovering.minutesTo45 !== null) {
+    throw new Error(`carb-advice self-test: verwacht geen ETA bij veilige gekalibreerde forecast, kreeg ${recovering.minutesTo40}/${recovering.minutesTo45}`)
+  }
+
+  console.log('✓ carb-advice-check: snelle daling en rustige worst-case kalibratie OK')
 }
 
 // Leest de geleerde V2-parameters van schijf (geschreven door de wekelijkse
