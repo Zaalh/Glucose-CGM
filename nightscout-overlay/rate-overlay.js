@@ -8,6 +8,15 @@
   var OVERLAY_ENTRY_COUNT = 1600;
   var COMPACT_WINDOWS_MINUTES = [1, 2, 3, 4, 5, 10, 15, 30];
   var CLASSIC_WINDOWS_MINUTES = [1, 2, 3, 4, 5, 10, 15, 20, 30, 45, 60, 90, 120];
+  // Cadans-bewuste varianten. Een Libre 3 levert ~1 punt/min, Dexcom Share ~1 punt/5 min.
+  // Bij een 5-min feed bestaan de 1-4m-vakjes niet (geen meting binnen tolerantie) en zou
+  // alles leeg lijken; dan tonen we stappen van 5 min — eerlijk wat de sensor écht levert,
+  // geen interpolatie. Labels blijven in minuten zodat de UI verder identiek werkt.
+  var WINDOWS_MINUTES_5 = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 75, 90, 120];
+  var COMPACT_WINDOWS_MINUTES_5 = [5, 10, 15, 20, 30, 45, 60, 90];
+  var CLASSIC_WINDOWS_MINUTES_5 = [5, 10, 15, 20, 30, 45, 60, 90, 120];
+  // Mediane meet-cadans (min) waarboven we een feed als "traag" (Dexcom-achtig) behandelen.
+  var SLOW_FEED_MIN = 3;
   var RATE_MODE_KEY = 'cgm-rate-overlay-mode';
   var RATE_CALC_KEY = 'cgm-rate-overlay-calc';
   // Regressie-modus: tijd-gewogen kleinste-kwadraten helling i.p.v. 2-punts verschil.
@@ -135,8 +144,9 @@
     return Number(entry.date || entry.mills || Date.parse(entry.dateString));
   }
 
-  function findBaseline(readings, latestTime, minutesBack) {
+  function findBaseline(readings, latestTime, minutesBack, tolMs) {
     var target = latestTime - minutesBack * 60000;
+    var tolerance = Number.isFinite(tolMs) ? tolMs : MAX_BASELINE_DIFF_MS;
     var best = null;
     var bestDiff = Infinity;
 
@@ -151,7 +161,7 @@
       }
     });
 
-    return bestDiff <= MAX_BASELINE_DIFF_MS ? best : null;
+    return bestDiff <= tolerance ? best : null;
   }
 
   function sortedReadings(entries) {
@@ -176,6 +186,62 @@
 
     return Array.from(byTime.values())
       .sort(function (a, b) { return readingTime(b) - readingTime(a); });
+  }
+
+  // Mediane meet-cadans (min) uit de recente metingen, los van de bron. Spiegelt de
+  // backend `medianIntervalMinutes`: gaps > 0 en < 30 min, mediaan. Data-gedreven, dus
+  // het past zich vanzelf aan als je van sensor wisselt (Libre 1-min <-> Dexcom 5-min).
+  function detectCadenceMinutes(readings) {
+    if (!readings || readings.length < 3) return null;
+    var times = readings
+      .map(function (entry) { return readingTime(entry); })
+      .filter(function (t) { return Number.isFinite(t); })
+      .sort(function (a, b) { return b - a; })
+      .slice(0, 24); // alleen de recente cadans telt
+    var gaps = [];
+    for (var i = 1; i < times.length; i++) {
+      var g = (times[i - 1] - times[i]) / 60000;
+      if (g > 0 && g < 30) gaps.push(g);
+    }
+    if (!gaps.length) return null;
+    gaps.sort(function (a, b) { return a - b; });
+    return gaps[Math.floor(gaps.length / 2)];
+  }
+
+  function isSlowFeed(readings) {
+    var cad = detectCadenceMinutes(readings);
+    return cad != null && cad >= SLOW_FEED_MIN;
+  }
+
+  // De actieve venster-lijsten voor de huidige feed-cadans (1-min vs 5-min).
+  function activeWindows(readings) {
+    return isSlowFeed(readings)
+      ? { all: WINDOWS_MINUTES_5, compact: COMPACT_WINDOWS_MINUTES_5, classic: CLASSIC_WINDOWS_MINUTES_5 }
+      : { all: WINDOWS_MINUTES, compact: COMPACT_WINDOWS_MINUTES, classic: CLASSIC_WINDOWS_MINUTES };
+  }
+
+  // Baseline-tolerantie schaalt mee met de cadans: bij een 5-min feed valt het dichtstbijzijnde
+  // punt anders buiten de 75s-default door Dexcom-timestampdrift. ~0.6x cadans (~180s bij 5 min).
+  function baselineToleranceMs(readings) {
+    var cad = detectCadenceMinutes(readings);
+    if (cad == null || cad < SLOW_FEED_MIN) return MAX_BASELINE_DIFF_MS;
+    return Math.max(MAX_BASELINE_DIFF_MS, Math.round(cad * 60000 * 0.6));
+  }
+
+  // Welke sensor levert de huidige data? Exact uit de entry-identifier (de sync schrijft
+  // `glucose-cgm-dexcom:` of `glucose-cgm-libreview:`); valt terug op de cadans als de
+  // prefix onbekend is. Data-gedreven, dus het volgt automatisch een sensorwissel.
+  function detectSourceLabel(readings) {
+    if (readings && readings.length) {
+      for (var i = 0; i < Math.min(readings.length, 12); i++) {
+        var id = readings[i] && readings[i].identifier ? String(readings[i].identifier) : '';
+        if (/dexcom/i.test(id)) return 'Dexcom';
+        if (/libreview|libre/i.test(id)) return 'Libre';
+      }
+    }
+    var cad = detectCadenceMinutes(readings);
+    if (cad == null) return null;
+    return cad >= SLOW_FEED_MIN ? '~5 min' : '~1 min';
   }
 
   function formatClock(timeMs) {
@@ -244,8 +310,9 @@
     if (!latest) return [];
 
     var latestTime = readingTime(latest);
-    return WINDOWS_MINUTES.map(function (minutesBack) {
-      var baseline = findBaseline(readings, latestTime, minutesBack);
+    var tolMs = baselineToleranceMs(readings);
+    return activeWindows(readings).all.map(function (minutesBack) {
+      var baseline = findBaseline(readings, latestTime, minutesBack, tolMs);
       if (!baseline) {
         return {
           label: minutesBack + 'm',
@@ -282,7 +349,8 @@
     var latest = anchorEntry || readings[0];
     if (!latest) return [];
     var latestTime = readingTime(latest);
-    return WINDOWS_MINUTES.map(function (minutesBack) {
+    var tolMs = baselineToleranceMs(readings);
+    return activeWindows(readings).all.map(function (minutesBack) {
       var target = latestTime - (minutesBack - 1) * 60000;
       var bestIdx = -1;
       var bestDiff = Infinity;
@@ -292,7 +360,7 @@
         var diff = Math.abs(time - target);
         if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
       }
-      if (bestIdx < 0 || bestDiff > MAX_BASELINE_DIFF_MS) {
+      if (bestIdx < 0 || bestDiff > tolMs) {
         return { label: minutesBack + 'm', missing: true };
       }
       var pointEntry = readings[bestIdx];
@@ -324,8 +392,9 @@
     if (!latest) return [];
     var latestTime = readingTime(latest);
     var latestMmol = mmol(Number(latest.sgv));
-    return WINDOWS_MINUTES.map(function (minutesBack) {
-      var windowMs = minutesBack * 60000 + MAX_BASELINE_DIFF_MS;
+    var tolMs = baselineToleranceMs(readings);
+    return activeWindows(readings).all.map(function (minutesBack) {
+      var windowMs = minutesBack * 60000 + tolMs;
       var tau = Math.min(windowMs, REG_TAU_MAX_MS) * REG_TAU_FRACTION;
       var fit = regressionSlope(readings, latestTime, windowMs, tau);
       if (fit) {
@@ -347,7 +416,7 @@
         };
       }
       // Te weinig punten voor regressie (bv. 1-2m bij 1-min feed): 2-punts terugval.
-      var baseline = findBaseline(readings, latestTime, minutesBack);
+      var baseline = findBaseline(readings, latestTime, minutesBack, tolMs);
       if (!baseline) return { label: minutesBack + 'm', missing: true };
       var minutesActual = (latestTime - readingTime(baseline)) / 60000;
       if (minutesActual <= 0) return { label: minutesBack + 'm', missing: true };
@@ -411,8 +480,13 @@
   }
 
   function getPrimaryRate(rows) {
+    // Drempel cadans-bewust: bij een 1-min feed blijft dit exact 5 min; bij een 5-min feed
+    // (Dexcom) zou het kleinste venster (~5 min, met drift soms 5.x) anders wegvallen en
+    // helemaal geen primaire snelheid opleveren. max(5, cadans*1.4) houdt Libre identiek.
+    var cad = detectCadenceMinutes(currentReadings);
+    var maxMin = (cad != null && cad >= SLOW_FEED_MIN) ? Math.max(5, cad * 1.4) : 5;
     return rows.filter(function (row) {
-      return row && !row.missing && Number.isFinite(row.rateMmol) && row.actualMinutes <= 5;
+      return row && !row.missing && Number.isFinite(row.rateMmol) && row.actualMinutes <= maxMin;
     }).sort(function (a, b) {
       return a.actualMinutes - b.actualMinutes;
     })[0] || null;
@@ -2203,16 +2277,17 @@
 
   function visibleRows(rows) {
     if (getMode() === 'all') return rows;
+    var windows = activeWindows(currentReadings);
     if (getMode() === 'classic') {
       return rows.filter(function (row) {
         var minutes = Number.parseInt(row.label, 10);
-        return CLASSIC_WINDOWS_MINUTES.indexOf(minutes) !== -1;
+        return windows.classic.indexOf(minutes) !== -1;
       });
     }
 
     return rows.filter(function (row) {
       var minutes = Number.parseInt(row.label, 10);
-      return COMPACT_WINDOWS_MINUTES.indexOf(minutes) !== -1;
+      return windows.compact.indexOf(minutes) !== -1;
     });
   }
 
@@ -2228,13 +2303,19 @@
     var viewButton = ensureViewToggle();
     var mode = getMode();
     button.textContent = mode === 'compact' ? 'compact' : mode === 'classic' ? 'klassiek' : mode === 'all' ? 'alles' : 'uit';
-    button.title = 'Vakjes-weergave: ' + button.textContent + '. compact = 8 vensters · klassiek = 13 · alles = alle minuten · uit = verbergen. Klik om te wisselen.';
+    var slow = isSlowFeed(currentReadings);
+    var allLabel = slow ? 'alle stappen van 5 min' : 'alle minuten';
+    var cadenceNote = slow ? ' (5-min feed, bv. Dexcom)' : '';
+    button.title = 'Vakjes-weergave: ' + button.textContent + '. compact = 8 vensters · klassiek = ' + (slow ? '9' : '13') + ' · alles = ' + allLabel + ' · uit = verbergen' + cadenceNote + '. Klik om te wisselen.';
     var anchored = selectedReadingTime !== null;
-    viewButton.textContent = anchored ? '↩ live · ' + formatClock(selectedReadingTime) : 'live';
+    var sourceLabel = detectSourceLabel(currentReadings);
+    var sourceSuffix = sourceLabel ? ' · ' + sourceLabel : '';
+    viewButton.textContent = (anchored ? '↩ live · ' + formatClock(selectedReadingTime) : 'live') + sourceSuffix;
     viewButton.style.opacity = anchored ? '1' : '0.55';
-    viewButton.title = anchored
+    var sourceNote = sourceLabel ? ' Actieve sensorbron: ' + sourceLabel + '.' : '';
+    viewButton.title = (anchored
       ? 'Je bekijkt een eerder punt in de grafiek (' + formatClock(selectedReadingTime) + '). Klik → terug naar de nieuwste meting.'
-      : 'De vakjes volgen de nieuwste meting. Klik op een bolletje in de grafiek om een eerder punt te bekijken; het alarm blijft altijd live.';
+      : 'De vakjes volgen de nieuwste meting. Klik op een bolletje in de grafiek om een eerder punt te bekijken; het alarm blijft altijd live.') + sourceNote;
     var calcButton = ensureCalcToggle();
     var calc = getCalcMode();
     calcButton.textContent = calcLabel(calc);

@@ -110,6 +110,11 @@ const EPISODES_BUILD_INTERVAL_MS = Math.max(0, Number(process.env.EPISODES_BUILD
 let episodesBuildLastAt = 0
 let episodesBuildRunning = false
 
+// Dexcom Share sessie-cache. Dexcom levert ~1 punt/5 min maar de sync pollt elke 60s;
+// een sessie hergebruiken scheelt ~5x onnodige (rate-limit-gevoelige) logins. We loggen
+// alleen opnieuw in als er geen sessie is of als Dexcom de sessie afkeurt (expiry).
+let dexcomSession = { id: null, key: null }
+
 if (server) startServer()
 
 if (testSource) {
@@ -277,14 +282,29 @@ async function collectLibreReadings() {
 
 async function collectDexcomReadings() {
   const baseUrl = dexcomBaseUrl()
-  const sessionId = await dexcomLogin(baseUrl)
   const minutes = Math.max(30, Number(config.dexcomMinutes ?? 1440))
   const maxCount = Math.max(1, Number(config.dexcomMaxCount ?? 288))
-  const url = `${baseUrl}/Publisher/ReadPublisherLatestGlucoseValues?sessionId=${encodeURIComponent(sessionId)}&minutes=${minutes}&maxCount=${maxCount}`
-  const res = await fetchWithRetry(url, { headers: { Accept: 'application/json' } }, 'dexcom_read')
-  const text = await res.text()
+
+  // Eén poging met (mogelijk gecachte) sessie; bij sessie-expiry forceren we één
+  // nieuwe login en proberen we opnieuw. Andere fouten bubbelen direct omhoog.
+  const attempt = async (force) => {
+    const sessionId = await getDexcomSession(baseUrl, force)
+    const url = `${baseUrl}/Publisher/ReadPublisherLatestGlucoseValues?sessionId=${encodeURIComponent(sessionId)}&minutes=${minutes}&maxCount=${maxCount}`
+    const res = await fetchWithRetry(url, { headers: { Accept: 'application/json' } }, 'dexcom_read')
+    const text = await res.text()
+    return { res, text }
+  }
+
+  let { res, text } = await attempt(false)
+  if (!res.ok && isDexcomSessionError(res.status, text)) {
+    ;({ res, text } = await attempt(true)) // sessie verlopen → opnieuw inloggen en herhalen
+  }
+
   const readings = parseJson(text, `Dexcom readings parse fout: ${text.slice(0, 200)}`)
-  if (!res.ok) throw new Error(`Dexcom readings mislukt (${res.status}): ${JSON.stringify(readings).slice(0, 300)}`)
+  if (!res.ok) {
+    dexcomSession = { id: null, key: null } // ongeldige sessie niet vasthouden
+    throw new Error(`Dexcom readings mislukt (${res.status}): ${JSON.stringify(readings).slice(0, 300)}`)
+  }
   if (!Array.isArray(readings) || readings.length === 0) {
     throw new Error('Geen Dexcom sensordata. Controleer Dexcom Share/Follow en de Dexcom credentials.')
   }
@@ -292,6 +312,24 @@ async function collectDexcomReadings() {
     readings,
     debugInfo: `dexcom_region=${config.dexcomRegion}, dexcom_points=${readings.length}`,
   }
+}
+
+// Hergebruik een Dexcom Share sessie tot Dexcom 'm afkeurt. De cache-key bindt aan
+// regio/baseUrl + account, zodat een credential-/regiowissel automatisch herinlogt.
+async function getDexcomSession(baseUrl, force) {
+  const key = `${baseUrl}|${config.dexcomUsername}`
+  if (!force && dexcomSession.id && dexcomSession.key === key) return dexcomSession.id
+  const id = await dexcomLogin(baseUrl)
+  dexcomSession = { id, key }
+  return id
+}
+
+// Dexcom Share signaleert een verlopen/onbekende sessie met 401 of een SessionId-/
+// Session-foutcode in de body (HTTP 500). Dan is één herinlog zinvol.
+function isDexcomSessionError(status, text) {
+  if (status === 401) return true
+  // Dexcom-foutcodes bij expiry: "SessionIdNotFound" / "SessionNotValid".
+  return /SessionId|SessionNotValid/i.test(String(text || ''))
 }
 
 async function writeInfluxGlucoseEntries(entries) {

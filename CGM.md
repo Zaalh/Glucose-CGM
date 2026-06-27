@@ -201,6 +201,10 @@ DEXCOM_MAX_COUNT=288
 
 `DEXCOM_REGION=ous` is de standaard voor Europa/Outside-US. Dexcom Share levert normaal ongeveer elke 5 minuten een waarde; `DEXCOM_MAX_COUNT=288` is ongeveer 24 uur historie. Entries krijgen `device: glucose-cgm-dexcom` en identifiers met `glucose-cgm-dexcom:<timestamp>`.
 
+De sync hergebruikt de Dexcom Share-sessie tussen polls en logt alleen opnieuw in bij een verlopen/afgekeurde sessie (401 of een SessionId-foutcode), zodat een 60s-pollinterval geen ~5× onnodige logins doet op een feed die maar elke ~5 min een punt levert.
+
+De snelheid-vakjes in de overlay zijn cadans-bewust: bij een ~1 min-feed (Libre 3) tonen ze stappen van 1 minuut, bij een ~5 min-feed (Dexcom) automatisch stappen van 5 minuten. De cadans wordt data-gedreven uit de recente metingen bepaald (mediane meetinterval), dus dit past zich vanzelf aan als je van sensor wisselt — er wordt niets geïnterpoleerd, alleen wat de sensor echt levert.
+
 ### `.env.ai`
 
 Optionele AI-laag (Ollama Cloud). Niet gecommit (gitignored); per host plaatsen. Wordt
