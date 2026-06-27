@@ -166,7 +166,6 @@ export function assessTimelineQuality(timeline, latestIndex, options = {}) {
       else {
         intervals.push(gap / 1000)
         largestGapSeconds = Math.max(largestGapSeconds, gap / 1000)
-        if (gap > maxNormalGapMs) flags.largeGap = true
       }
     }
   }
@@ -176,17 +175,32 @@ export function assessTimelineQuality(timeline, latestIndex, options = {}) {
     medianIntervalSeconds = sorted[Math.floor(sorted.length / 2)]
   }
 
+  // Cadans-bewuste drempels: een feed die normaal elke ~5 min een punt levert (Dexcom)
+  // mag niet als "slechte data" gelden. We leiden de verwachte cadans uit de gemeten
+  // mediaan af en schalen de gap-/sparse-/stale-grenzen mee. Voor een 1-min feed (Libre)
+  // liggen de geschaalde waarden onder de vaste floors, dus dat gedrag blijft identiek.
+  const expectedIntervalSec = (medianIntervalSeconds && medianIntervalSeconds > 0)
+    ? medianIntervalSeconds
+    : QUALITY_EXPECTED_INTERVAL_MS / 1000
+  const effectiveMaxGapMs = Math.max(maxNormalGapMs, expectedIntervalSec * 1000 * 2.2)
+  const effectiveMaxStaleSeconds = Math.max(maxStaleSeconds, expectedIntervalSec * 2.5)
+  if (largestGapSeconds * 1000 > effectiveMaxGapMs) flags.largeGap = true
+
   const recentSpanMinutes = recent.length > 1
     ? (Number(recent[recent.length - 1].date) - Number(recent[0].date)) / 60_000
     : 0
-  if (recentSpanMinutes >= 10 && recent.length < Math.max(5, Math.floor(recentSpanMinutes / 2))) {
+  // Verwacht aantal punten = tijdspan / cadans; "te dun" pas onder ~60% daarvan.
+  const expectedRecentCount = expectedIntervalSec > 0
+    ? (recentSpanMinutes * 60) / expectedIntervalSec
+    : 0
+  if (recentSpanMinutes >= 10 && recent.length < Math.max(5, Math.floor(expectedRecentCount * 0.6))) {
     flags.sparseRecentData = true
   }
 
   let ageSeconds = null
   if (nowMs !== null) {
     ageSeconds = Math.round((nowMs - latest.date) / 1000)
-    if (ageSeconds > maxStaleSeconds) flags.stale = true
+    if (ageSeconds > effectiveMaxStaleSeconds) flags.stale = true
     if (ageSeconds < -120) flags.futureTimestamp = true
   }
 
@@ -216,7 +230,7 @@ export function assessTimelineQuality(timeline, latestIndex, options = {}) {
     recentSpanMinutes: round(recentSpanMinutes, 1),
     largestGapSeconds: round(largestGapSeconds, 1),
     medianIntervalSeconds: medianIntervalSeconds === null ? null : round(medianIntervalSeconds, 1),
-    expectedIntervalSeconds: round(QUALITY_EXPECTED_INTERVAL_MS / 1000, 0),
+    expectedIntervalSeconds: round(expectedIntervalSec, 0),
     ageSeconds,
   }
 }
