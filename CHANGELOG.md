@@ -16,6 +16,16 @@ Alle noemenswaardige wijzigingen aan Glucose CGM. Formaat losjes gebaseerd op
   de nieuwste entry en rekent dekking/gaps met de juiste nominale intervalverwachting
   (Dexcom 5 min, Libre meestal 1 min). Live verificatie: Dexcom actief, 100% dekking
   vandaag/14d, geen dubbele entry timestamps of prediction identifiers.
+- **Data-quality gate cadans-bewust** (`assessTimelineQuality`). De gap-/sparse-/stale-
+  drempels schalen met de gemeten mediane meetinterval, zodat een normale Dexcom 5-min
+  cadans `good` is en niet langer onterecht het hypo-alarm dempt (urgent→likely→watch)
+  of de confidence verlaagt. Een écht gat (gemiste metingen) blijft `degraded`; de 1-min
+  Libre-feed gedraagt zich exact gelijk (geschaalde waarden onder de vaste floors).
+- **Overlay-snelheidsvakjes cadans-bewust + sensorbron in beeld.** Bij een 5-min feed
+  (Dexcom) tonen de vakjes stappen van 5 min i.p.v. lege per-minuut-vakjes (in "alles"
+  door tot 180 min), met meeschalende baseline-tolerantie tegen timestampdrift. De
+  view-pill toont de actieve sensorbron (`Dexcom`/`Libre`) uit de entry-identifier met
+  cadans-fallback. Libre 1-min blijft ongewijzigd.
 - **Forecast-kalibratie op persoonlijke patronen.** De numerieke forecast houdt rekening
   met herstel/deceleratie, verzadigde stijging na maaltijd-onset en empirische nadir uit
   vergelijkbare episodes. Daardoor loopt de forecast bij post-piek herstel minder vaak

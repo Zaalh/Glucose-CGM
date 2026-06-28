@@ -18,7 +18,11 @@ blijft een vingerprik/medisch advies belangrijk.
 > **Update 2026-06-28 — Dexcom-overstap en advieslaag gekalibreerd.** De live sync draait
 > nu veilig op Dexcom Share/Follow (`CGM_SOURCE=dexcom`) met bron-specifieke identifiers,
 > timestamp-dedup tegen recente Nightscout entries en source-health op Dexcom-cadans
-> (5 min). De forecast is fasebewust gemaakt: herstel/deceleratie dempt dalingen,
+> (5 min). De **data-quality gate (Laag 10)** is cadans-bewust gemaakt: de gap-/sparse-/
+> stale-drempels schalen met de gemeten mediane meetinterval, zodat een normale Dexcom
+> 5-min cadans `good` is en niet langer onterecht het hypo-alarm dempt
+> (urgent→likely→watch) of de confidence verlaagt; een écht gat blijft `degraded`, en de
+> 1-min Libre-feed gedraagt zich exact gelijk. De forecast is fasebewust gemaakt: herstel/deceleratie dempt dalingen,
 > stijgingen satureren en vergelijkbare episode-nadirs zetten een empirische bodem.
 > Daarna is `carbAdvice` aangescherpt: advies-ETA's worden uit de gekalibreerde forecast
 > geinterpoleerd, maar bij harde daling mag de vroege V2/features ETA voorgaan als de

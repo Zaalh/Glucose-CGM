@@ -218,7 +218,7 @@ DEXCOM_MAX_COUNT=288
 
 De sync hergebruikt de Dexcom Share-sessie tussen polls en logt alleen opnieuw in bij een verlopen/afgekeurde sessie (401 of een SessionId-foutcode), zodat een 60s-pollinterval geen ~5× onnodige logins doet op een feed die maar elke ~5 min een punt levert.
 
-De snelheid-vakjes in de overlay zijn cadans-bewust: bij een ~1 min-feed (Libre 3) tonen ze stappen van 1 minuut, bij een ~5 min-feed (Dexcom) automatisch stappen van 5 minuten. De cadans wordt data-gedreven uit de recente metingen bepaald (mediane meetinterval), dus dit past zich vanzelf aan als je van sensor wisselt — er wordt niets geïnterpoleerd, alleen wat de sensor echt levert.
+De snelheid-vakjes in de overlay zijn cadans-bewust: bij een ~1 min-feed (Libre 3) tonen ze stappen van 1 minuut, bij een ~5 min-feed (Dexcom) automatisch stappen van 5 minuten (in de "alles"-weergave door tot 180 min). De cadans wordt data-gedreven uit de recente metingen bepaald (mediane meetinterval), dus dit past zich vanzelf aan als je van sensor wisselt — er wordt niets geïnterpoleerd, alleen wat de sensor echt levert. De baseline-tolerantie schaalt mee zodat de 5-min-vakjes ondanks Dexcom-timestampdrift gevuld blijven. De live-pill toont bovendien de actieve sensorbron (`Dexcom`/`Libre`), afgeleid uit de entry-identifier met de cadans als fallback.
 
 Bij wisselen tussen Libre en Dexcom blijven historische entries naast elkaar in MongoDB
 staan. Nieuwe entries worden per bron gededuped via hun source-specifieke identifier
